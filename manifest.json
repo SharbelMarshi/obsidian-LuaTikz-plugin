@@ -1,0 +1,10 @@
+{
+    "id": "luatikz",
+    "name": "LuaTikZ",
+    "version": "1.0.0",
+    "minAppVersion": "1.5.0",
+    "description": "Fast LuaLaTeX TikZ rendering with live preview, RTL support, and simple diagram helpers for Obsidian.",
+    "author": "Sharbel Marshi",
+    "authorUrl": "",
+    "isDesktopOnly": true
+}
