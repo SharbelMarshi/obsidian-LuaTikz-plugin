@@ -1,7 +1,31 @@
+.tikzjax-hebrew-local-block {
+  margin: 1em 0;
+}
+
+.tikzjax-hebrew-local-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tikzjax-hebrew-local-toolbar-button {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.82em;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.tikzjax-hebrew-local-toolbar-button:hover {
+  background: var(--background-modifier-hover);
+}
+
 .tikzjax-hebrew-local-output {
   overflow-x: auto;
   text-align: center;
-  margin: 1em 0;
 }
 
 .tikzjax-hebrew-local-image {

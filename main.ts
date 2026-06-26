@@ -7,6 +7,11 @@ import {
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { latexAutocompleteExtension } from "./latexAutocomplete";
+import {
+	formatLatexErrorWithLineMapping,
+	getUserSourceLineOffset,
+	mapTidiedLineToNoteLine,
+} from "./latexErrorMapping";
 import { SIMPLE_TIKZ_HELPERS } from "./simpleShapes";
 import { TikzjaxSettingTab } from "./settings";
 import * as fs from 'fs';
@@ -21,8 +26,17 @@ interface TikzjaxPluginSettings {
 interface RenderImageResult {
 	ok: boolean;
 	dataUrl?: string;
+	svgText?: string;
 	error?: string;
 	rawLog?: string;
+	userLine?: number;
+	noteLine?: number;
+	lineContent?: string;
+}
+
+interface RenderErrorContext {
+	block?: TikzBlock;
+	editor?: Editor;
 }
 
 interface TikzBlock {
@@ -65,6 +79,8 @@ ${SIMPLE_TIKZ_HELPERS}
 const LATEX_WRAPPER_SUFFIX = `
 \\end{document}
 `;
+
+const USER_SOURCE_LINE_OFFSET = getUserSourceLineOffset(LATEX_WRAPPER_PREFIX);
 
 async function fileExists(filePath: string): Promise<boolean> {
 	return fs.existsSync(filePath);
@@ -159,28 +175,6 @@ function formatExecError(err: unknown): string {
 	}
 
 	return String(err);
-}
-
-function extractUsefulLatexError(raw: string): string {
-	const lines = raw.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-
-	const bangLine = lines.find(line => line.startsWith('! '));
-	if (bangLine) {
-		return bangLine.replace(/^!\s*/, '').trim();
-	}
-
-	const usefulLine = lines.find(line =>
-		line.includes('Undefined control sequence') ||
-		line.includes('Missing') ||
-		line.includes('Runaway argument') ||
-		line.includes('Fatal error')
-	);
-
-	if (usefulLine) {
-		return usefulLine.trim();
-	}
-
-	return 'Syntax error';
 }
 
 function getCurrentTikzBlock(editor: Editor): TikzBlock | null {
@@ -501,7 +495,10 @@ export default class TikzjaxHebrewLocalPlugin extends Plugin {
 			this.showInlineMessage(markdownView, 'Rendering TikZ diagram…');
 		}
 
-		const result = await this.renderTikzToSvgDataUrl(cleanedSource);
+		const result = await this.renderTikzToSvgDataUrl(cleanedSource, {
+			block,
+			editor: markdownView.editor,
+		});
 
 		if (token !== this.inlinePreviewRenderToken) {
 			return;
@@ -525,7 +522,41 @@ export default class TikzjaxHebrewLocalPlugin extends Plugin {
 		this.showInlineError(markdownView, result.error ?? 'Render error.', result.rawLog);
 	}
 
-	async renderTikzToSvgDataUrl(source: string): Promise<RenderImageResult> {
+	private buildLatexErrorResult(
+		rawError: string,
+		tidiedSource: string,
+		errorContext?: RenderErrorContext,
+	): RenderImageResult {
+		const noteLineMapper = errorContext?.block && errorContext.editor
+			? (userLine: number) => mapTidiedLineToNoteLine(
+				errorContext.block!.startLine,
+				errorContext.block!.endLine,
+				line => errorContext.editor!.getLine(line),
+				userLine,
+			)
+			: undefined;
+
+		const mapped = formatLatexErrorWithLineMapping(
+			rawError,
+			tidiedSource,
+			USER_SOURCE_LINE_OFFSET,
+			noteLineMapper,
+		);
+
+		return {
+			ok: false,
+			error: mapped.message,
+			rawLog: rawError,
+			userLine: mapped.userLine,
+			noteLine: mapped.noteLine,
+			lineContent: mapped.lineContent,
+		};
+	}
+
+	async renderTikzToSvgDataUrl(
+		source: string,
+		errorContext?: RenderErrorContext,
+	): Promise<RenderImageResult> {
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'obsidian-tikz-hebrew-'));
 		const texPath = path.join(tmpDir, 'diagram.tex');
 		const pdfPath = path.join(tmpDir, 'diagram.pdf');
@@ -563,14 +594,9 @@ export default class TikzjaxHebrewLocalPlugin extends Plugin {
 				logTail ? '\n--- diagram.log (tail) ---\n' + logTail : '',
 			].join('\n');
 
-			const usefulError = extractUsefulLatexError(rawError);
+			const errorResult = this.buildLatexErrorResult(rawError, source, errorContext);
 			this.cleanupTempDir(tmpDir);
-
-			return {
-				ok: false,
-				error: `Syntax error: ${usefulError}`,
-				rawLog: rawError,
-			};
+			return errorResult;
 		}
 
 		if (!fs.existsSync(pdfPath)) {
@@ -581,6 +607,9 @@ export default class TikzjaxHebrewLocalPlugin extends Plugin {
 
 			if (logTail) {
 				details.push('', '--- diagram.log (tail) ---', logTail);
+				const errorResult = this.buildLatexErrorResult(details.join('\n'), source, errorContext);
+				this.cleanupTempDir(tmpDir);
+				return errorResult;
 			}
 
 			this.cleanupTempDir(tmpDir);
@@ -649,7 +678,49 @@ ${formatExecError(err)}`,
 		return {
 			ok: true,
 			dataUrl: `data:image/svg+xml;base64,${svgBase64}`,
+			svgText,
 		};
+	}
+
+	private downloadSvg(svgText: string, filename = 'tikz-diagram.svg'): void {
+		const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		link.style.display = 'none';
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		URL.revokeObjectURL(url);
+	}
+
+	private createDiagramToolbar(parent: HTMLElement, svgText: string): void {
+		const toolbar = parent.createDiv({ cls: 'tikzjax-hebrew-local-toolbar' });
+
+		const exportButton = toolbar.createEl('button', {
+			text: 'Export SVG',
+			cls: 'tikzjax-hebrew-local-toolbar-button',
+		});
+
+		exportButton.addEventListener('click', () => {
+			this.downloadSvg(svgText);
+			new Notice('TikZ diagram exported as SVG.');
+		});
+
+		const copyButton = toolbar.createEl('button', {
+			text: 'Copy SVG',
+			cls: 'tikzjax-hebrew-local-toolbar-button',
+		});
+
+		copyButton.addEventListener('click', async () => {
+			try {
+				await navigator.clipboard.writeText(svgText);
+				new Notice('TikZ SVG copied to clipboard.');
+			} catch {
+				new Notice('Could not copy SVG.');
+			}
+		});
 	}
 
 	private cleanupTempDir(tmpDir: string): void {
@@ -680,13 +751,16 @@ ${formatExecError(err)}`,
 	async renderTikz(source: string, el: HTMLElement): Promise<void> {
 		const result = await this.renderTikzToSvgDataUrl(source);
 
-		if (!result.ok || !result.dataUrl) {
+		if (!result.ok || !result.dataUrl || !result.svgText) {
 			this.showError(el, result.error ?? 'Render error.', result.rawLog);
 			return;
 		}
 
 		el.empty();
-		const container = el.createDiv({ cls: 'tikzjax-hebrew-local-output' });
+		const block = el.createDiv({ cls: 'tikzjax-hebrew-local-block' });
+		this.createDiagramToolbar(block, result.svgText);
+
+		const container = block.createDiv({ cls: 'tikzjax-hebrew-local-output' });
 		const img = container.createEl('img');
 		img.setAttr('src', result.dataUrl);
 		img.setAttr('alt', 'TikZ diagram');

@@ -1,29 +1,57 @@
-# LuaTikz Plugin for Obsidian
+# LuaTikZ Plugin for Obsidian
 
-**LuaTikz** is a local LuaLaTeX-based TikZ renderer for Obsidian. Write TikZ and LaTeX code blocks in your notes and render diagrams on your machine—no external services required. The plugin handles the LaTeX preamble for you, supports right-to-left (RTL) text alongside English and math, and displays crisp SVG output in your vault.
+**LuaTikZ** renders TikZ diagrams locally in Obsidian using LuaLaTeX. Write `tikz` code blocks in your notes—no external services, with RTL (Hebrew) support, autocompletion, live preview, SVG export, and line-aware errors.
+
+## Quick start
+
+````markdown
+```tikz
+\begin{tikzpicture}
+\Text(0,0,Hello)
+\Text(0,-1,\he{שלום עולם})
+\Arrow(0,-2,2,-2)
+\end{tikzpicture}
+```
+````
+
+## Requirements
+
+- macOS desktop Obsidian
+- LuaLaTeX (MacTeX / TeX Live)
+- `pdftocairo` — `brew install poppler`
+
+## Build
+
+```bash
+npm install
+npm run build
+```
+
+Install `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/luatikz/`.
+
+## Documentation
+
+Full documentation lives in the **[doc/](doc/)** directory:
+
+| Guide | Topic |
+|-------|--------|
+| [doc/README.md](doc/README.md) | Overview & index |
+| [doc/getting-started.md](doc/getting-started.md) | Install & first diagram |
+| [doc/simple-shape-helpers.md](doc/simple-shape-helpers.md) | `\Circle`, `\ANDgate`, wires, etc. |
+| [doc/commands.md](doc/commands.md) | Palette & TikZ commands |
+| [doc/autocompletion.md](doc/autocompletion.md) | Editor snippets & suggestions |
+| [doc/rtl-and-math.md](doc/rtl-and-math.md) | Hebrew, English, math |
+| [doc/rendering-and-export.md](doc/rendering-and-export.md) | SVG, export, live preview |
+| [doc/error-mapping.md](doc/error-mapping.md) | Line-aware compile errors |
+| [doc/settings.md](doc/settings.md) | Plugin settings |
+| [doc/scaling.md](doc/scaling.md) | Scaling diagrams & logic gates |
 
 ## Features
 
-- **Local LuaLaTeX rendering** — Diagrams are compiled locally with LuaLaTeX. Your TikZ source stays on your computer.
-- **TikZ code blocks** — Use fenced `tikz` code blocks in Obsidian. Write only the diagram body; no `\documentclass`, `\usepackage`, or `\begin{document}` needed.
-- **RTL support** — Wrap RTL text (for example Hebrew) in `\he{...}` for correct direction and font handling.
-- **English and math support** — Mix plain English labels, `\text{...}` inside math mode, and standard `$...$` formulas in the same diagram.
-- **SVG output** — Rendered diagrams are embedded as SVG for sharp scaling in notes and exports.
-- **Simple syntax / auto wrapper** — The plugin automatically wraps your code in a full LuaLaTeX document with the required TikZ, font, and language packages.
-- **Simple shape helpers** — Built-in macros from `simpleShapes.ts` for quick diagrams: circles, lines, arrows, rectangles, axes, text nodes, triangles, logic gates (AND, OR, NOT, NAND, NOR, XOR, XNOR, BUFFER), and wire helpers.
-- **Autocompletion** — CodeMirror suggestions from `latexAutocomplete.ts` for TikZ commands (`\draw`, `\node`, `\begin{tikzpicture}`), RTL helpers (`\he{}`), and common math symbols.
-- **Live preview** — Optional inline live preview updates diagrams as you edit (toggle from the command palette or plugin settings).
-
-## Basic Usage
-
-Create a `tikz` code block in any Obsidian note. Include only the TikZ picture environment—the plugin adds the rest.
-
-```tikz
-\begin{tikzpicture}
-\node at (0,0) {Hello};
-\node at (0,-1) {\he{שלום עולם}};
-\node at (0,-2) {$V_G=\frac{Q}{C}$};
-\end{tikzpicture}
-```
-
-This example shows three common patterns in one diagram: plain English text, RTL text via `\he{...}`, and a displayed math formula.
+- Local LuaLaTeX rendering with automatic preamble wrapping
+- Simple shape helpers for fast diagrams
+- Autocompletion with cursor-aware snippets
+- Inline live preview
+- Export / copy SVG from rendered blocks
+- Line-aware LaTeX error mapping
+- Dark mode color inversion

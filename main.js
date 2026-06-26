@@ -58,25 +58,55 @@ var import_util = __toModule(require("util"));
 // latexAutocomplete.ts
 var import_autocomplete = __toModule(require("@codemirror/autocomplete"));
 var latexCommands = [
-  {
+  (0, import_autocomplete.snippetCompletion)(String.raw`\begin\{tikzpicture\}
+\${}
+\end\{tikzpicture\}`, {
     label: "\\begin{tikzpicture}",
     type: "keyword",
-    apply: `\\begin{tikzpicture}
-  
-\\end{tikzpicture}`,
     detail: "TikZ environment"
-  },
+  }),
   {
     label: "\\end{tikzpicture}",
     type: "keyword",
     apply: "\\end{tikzpicture}",
     detail: "End TikZ environment"
   },
+  (0, import_autocomplete.snippetCompletion)(String.raw`\begin\{axis\}
+\${}
+\end\{axis\}`, {
+    label: "\\begin{axis}",
+    type: "keyword",
+    detail: "Pgfplots axis environment"
+  }),
+  {
+    label: "\\end{axis}",
+    type: "keyword",
+    apply: "\\end{axis}",
+    detail: "End axis environment"
+  },
   {
     label: "\\draw",
     type: "function",
     apply: "\\draw ",
     detail: "TikZ draw command"
+  },
+  {
+    label: "\\fill",
+    type: "function",
+    apply: "\\fill ",
+    detail: "Fill a path"
+  },
+  {
+    label: "\\filldraw",
+    type: "function",
+    apply: "\\filldraw ",
+    detail: "Fill and stroke a path"
+  },
+  {
+    label: "\\path",
+    type: "function",
+    apply: "\\path ",
+    detail: "TikZ path without drawing"
   },
   {
     label: "\\node",
@@ -88,170 +118,526 @@ var latexCommands = [
     label: "\\coordinate",
     type: "function",
     apply: "\\coordinate ",
-    detail: "TikZ coordinate"
+    detail: "Named coordinate"
   },
   {
+    label: "\\clip",
+    type: "function",
+    apply: "\\clip ",
+    detail: "Clip to a path"
+  },
+  (0, import_autocomplete.snippetCompletion)(String.raw`\foreach \x in \{1,...,5\} \{
+  \${}
+\}`, {
+    label: "\\foreach",
+    type: "function",
+    detail: "Loop over values"
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\scope
+\${}
+\endscope`, {
+    label: "\\scope",
+    type: "function",
+    detail: "Local TikZ scope"
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\tikzset\{\${}\}`, {
+    label: "\\tikzset",
+    type: "function",
+    detail: "Set TikZ styles"
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\usetikzlibrary\{\${}\}`, {
+    label: "\\usetikzlibrary",
+    type: "function",
+    detail: "Load TikZ library"
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\he\{\${}\}`, {
     label: "\\he{}",
     type: "function",
-    apply: "\\he{}",
     detail: "Hebrew text wrapper"
-  },
-  {
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\text\{\${}\}`, {
+    label: "\\text{}",
+    type: "function",
+    detail: "Text in math mode"
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\frac\{\${1}\}\{\${2}\}`, {
     label: "\\frac{}{}",
     type: "function",
-    apply: "\\frac{}{}",
     detail: "Fraction"
-  },
-  {
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\cfrac\{\${1}\}\{\${2}\}`, {
     label: "\\cfrac{}{}",
     type: "function",
-    apply: "\\cfrac{}{}",
     detail: "Display fraction"
-  },
-  {
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\sqrt\{\${}\}`, {
     label: "\\sqrt{}",
     type: "function",
-    apply: "\\sqrt{}",
     detail: "Square root"
-  },
-  {
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\sum_\{\${1}\}\^\{\${2}\}`, {
     label: "\\sum_{}^{}",
     type: "function",
-    apply: "\\sum_{}^{}",
     detail: "Summation"
-  },
-  {
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\int_\{\${1}\}\^\{\${2}\}`, {
     label: "\\int_{}^{}",
     type: "function",
-    apply: "\\int_{}^{}",
     detail: "Integral"
-  },
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\lim_\{\${}\}`, {
+    label: "\\lim_{}",
+    type: "function",
+    detail: "Limit"
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\vec\{\${}\}`, {
+    label: "\\vec{}",
+    type: "function",
+    detail: "Vector arrow"
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\hat\{\${}\}`, {
+    label: "\\hat{}",
+    type: "function",
+    detail: "Hat accent"
+  }),
+  (0, import_autocomplete.snippetCompletion)(String.raw`\bar\{\${}\}`, {
+    label: "\\bar{}",
+    type: "function",
+    detail: "Bar accent"
+  }),
   {
     label: "\\alpha",
     type: "variable",
-    apply: "\\alpha"
+    apply: "\\alpha",
+    detail: "Greek letter"
   },
   {
     label: "\\beta",
     type: "variable",
-    apply: "\\beta"
+    apply: "\\beta",
+    detail: "Greek letter"
   },
   {
     label: "\\gamma",
     type: "variable",
-    apply: "\\gamma"
+    apply: "\\gamma",
+    detail: "Greek letter"
+  },
+  {
+    label: "\\delta",
+    type: "variable",
+    apply: "\\delta",
+    detail: "Greek letter"
   },
   {
     label: "\\Delta",
     type: "variable",
-    apply: "\\Delta"
+    apply: "\\Delta",
+    detail: "Greek letter"
   },
   {
     label: "\\theta",
     type: "variable",
-    apply: "\\theta"
+    apply: "\\theta",
+    detail: "Greek letter"
+  },
+  {
+    label: "\\lambda",
+    type: "variable",
+    apply: "\\lambda",
+    detail: "Greek letter"
+  },
+  {
+    label: "\\mu",
+    type: "variable",
+    apply: "\\mu",
+    detail: "Greek letter"
+  },
+  {
+    label: "\\pi",
+    type: "variable",
+    apply: "\\pi",
+    detail: "Greek letter"
+  },
+  {
+    label: "\\sigma",
+    type: "variable",
+    apply: "\\sigma",
+    detail: "Greek letter"
+  },
+  {
+    label: "\\omega",
+    type: "variable",
+    apply: "\\omega",
+    detail: "Greek letter"
+  },
+  {
+    label: "\\Omega",
+    type: "variable",
+    apply: "\\Omega",
+    detail: "Greek letter"
+  },
+  {
+    label: "\\infty",
+    type: "variable",
+    apply: "\\infty",
+    detail: "Infinity symbol"
+  },
+  {
+    label: "\\partial",
+    type: "variable",
+    apply: "\\partial",
+    detail: "Partial derivative"
+  },
+  {
+    label: "\\nabla",
+    type: "variable",
+    apply: "\\nabla",
+    detail: "Nabla operator"
+  },
+  {
+    label: "\\cdot",
+    type: "variable",
+    apply: "\\cdot",
+    detail: "Multiplication dot"
+  },
+  {
+    label: "\\times",
+    type: "variable",
+    apply: "\\times",
+    detail: "Multiplication cross"
+  },
+  {
+    label: "\\pm",
+    type: "variable",
+    apply: "\\pm",
+    detail: "Plus/minus"
+  },
+  {
+    label: "\\leq",
+    type: "variable",
+    apply: "\\leq",
+    detail: "Less than or equal"
+  },
+  {
+    label: "\\geq",
+    type: "variable",
+    apply: "\\geq",
+    detail: "Greater than or equal"
+  },
+  {
+    label: "\\neq",
+    type: "variable",
+    apply: "\\neq",
+    detail: "Not equal"
+  },
+  {
+    label: "\\approx",
+    type: "variable",
+    apply: "\\approx",
+    detail: "Approximately equal"
   }
+];
+var simpleShapeHelpers = [
+  { label: "\\Circle(,,)", apply: "\\Circle(0,0,1)", detail: "Circle outline" },
+  { label: "\\FilledCircle(,,)", apply: "\\FilledCircle(0,0,1)", detail: "Filled circle" },
+  { label: "\\Point(,)", apply: "\\Point(0,0)", detail: "Small point" },
+  { label: "\\Line(,,,)", apply: "\\Line(0,0,1,1)", detail: "Line segment" },
+  { label: "\\Arrow(,,,)", apply: "\\Arrow(0,0,1,1)", detail: "Arrow" },
+  { label: "\\DArrow(,,,)", apply: "\\DArrow(0,0,1,1)", detail: "Double arrow" },
+  { label: "\\DashedLine(,,,)", apply: "\\DashedLine(0,0,1,1)", detail: "Dashed line" },
+  { label: "\\DottedLine(,,,)", apply: "\\DottedLine(0,0,1,1)", detail: "Dotted line" },
+  { label: "\\HLine(,,)", apply: "\\HLine(0,1,0)", detail: "Horizontal line" },
+  { label: "\\VLine(,,)", apply: "\\VLine(0,1,0)", detail: "Vertical line" },
+  { label: "\\Rect(,,,)", apply: "\\Rect(0,0,1,1)", detail: "Rectangle outline" },
+  { label: "\\FilledRect(,,,)", apply: "\\FilledRect(0,0,1,1)", detail: "Filled rectangle" },
+  { label: "\\RoundedRect(,,,)", apply: "\\RoundedRect(0,0,1,1)", detail: "Rounded rectangle" },
+  { label: "\\FilledRoundedRect(,,,)", apply: "\\FilledRoundedRect(0,0,1,1)", detail: "Filled rounded rectangle" },
+  { label: "\\Ellipse(,,,)", apply: "\\Ellipse(0,0,1,0.5)", detail: "Ellipse outline" },
+  { label: "\\FilledEllipse(,,,)", apply: "\\FilledEllipse(0,0,1,0.5)", detail: "Filled ellipse" },
+  { label: "\\Cross(,,)", apply: "\\Cross(0,0,0.2)", detail: "Cross marker" },
+  { label: "\\Diamond(,,,)", apply: "\\Diamond(0,0,0.5,0.3)", detail: "Diamond outline" },
+  { label: "\\FilledDiamond(,,,)", apply: "\\FilledDiamond(0,0,0.5,0.3)", detail: "Filled diamond" },
+  { label: "\\Arc(,,,,)", apply: "\\Arc(0,0,1,0,90)", detail: "Circular arc" },
+  { label: "\\RightAngle(,,)", apply: "\\RightAngle(0,0,0.2)", detail: "Right-angle mark" },
+  { label: "\\Grid(,,,,)", apply: "\\Grid(0,0,3,3,0.5)", detail: "Grid" },
+  { label: "\\Triangle(,,,,,)", apply: "\\Triangle(0,0,1,0,0.5,1)", detail: "Triangle outline" },
+  { label: "\\FilledTriangle(,,,,,)", apply: "\\FilledTriangle(0,0,1,0,0.5,1)", detail: "Filled triangle" },
+  { label: "\\Axis(,,,)", apply: "\\Axis(-1,3,-1,3)", detail: "XY axes with labels" },
+  { label: "\\AxisNamed(,,,,,)", apply: "\\AxisNamed(-1,3,-1,3,x,y)", detail: "Named axes" },
+  { label: "\\Text(,,)", apply: "\\Text(0,0,text)", detail: "Text node" },
+  { label: "\\SmallText(,,)", apply: "\\SmallText(0,0,text)", detail: "Small text node" },
+  { label: "\\TinyText(,,)", apply: "\\TinyText(0,0,text)", detail: "Tiny text node" },
+  { label: "\\TextAbove(,,)", apply: "\\TextAbove(0,0,text)", detail: "Text above point" },
+  { label: "\\TextBelow(,,)", apply: "\\TextBelow(0,0,text)", detail: "Text below point" },
+  { label: "\\TextLeft(,,)", apply: "\\TextLeft(0,0,text)", detail: "Text left of point" },
+  { label: "\\TextRight(,,)", apply: "\\TextRight(0,0,text)", detail: "Text right of point" },
+  { label: "\\Resistor(,,,)", apply: "\\Resistor(0,0,1,0.3)", detail: "Resistor symbol" },
+  { label: "\\Capacitor(,,,)", apply: "\\Capacitor(0,0,0.4,0.3)", detail: "Capacitor symbol" },
+  { label: "\\Ground(,,)", apply: "\\Ground(0,0,0.5)", detail: "Ground symbol" },
+  { label: "\\VSource(,,,)", apply: "\\VSource(0,0,0.3,V)", detail: "Voltage source" },
+  { label: "\\ANDgate(,,)", apply: "\\ANDgate(0,0,and1)", detail: "AND gate" },
+  { label: "\\ORgate(,,)", apply: "\\ORgate(0,0,or1)", detail: "OR gate" },
+  { label: "\\NOTgate(,,)", apply: "\\NOTgate(0,0,not1)", detail: "NOT gate" },
+  { label: "\\NANDgate(,,)", apply: "\\NANDgate(0,0,nand1)", detail: "NAND gate" },
+  { label: "\\NORgate(,,)", apply: "\\NORgate(0,0,nor1)", detail: "NOR gate" },
+  { label: "\\XORgate(,,)", apply: "\\XORgate(0,0,xor1)", detail: "XOR gate" },
+  { label: "\\XNORgate(,,)", apply: "\\XNORgate(0,0,xnor1)", detail: "XNOR gate" },
+  { label: "\\BUFFERgate(,,)", apply: "\\BUFFERgate(0,0,buffer1)", detail: "Buffer gate" },
+  { label: "\\LogicWire(,)", apply: "\\LogicWire(a,b)", detail: "Orthogonal wire" },
+  { label: "\\LogicWireArrow(,)", apply: "\\LogicWireArrow(a,b)", detail: "Wire with arrow" },
+  { label: "\\LogicWireDirect(,)", apply: "\\LogicWireDirect(a,b)", detail: "Direct wire" },
+  { label: "\\LogicWireFrom(,,)", apply: "\\LogicWireFrom(0,0,a)", detail: "Wire from coordinate" },
+  { label: "\\LogicWireFromArrow(,,)", apply: "\\LogicWireFromArrow(0,0,a)", detail: "Arrow wire from coordinate" },
+  { label: "\\LogicWireTo(,,)", apply: "\\LogicWireTo(a,0,0)", detail: "Wire to coordinate" },
+  { label: "\\LogicWireToArrow(,,)", apply: "\\LogicWireToArrow(a,0,0)", detail: "Arrow wire to coordinate" }
 ];
 var tikzOptions = [
-  {
-    label: "thick",
-    type: "property",
-    apply: "thick"
-  },
-  {
-    label: "very thick",
-    type: "property",
-    apply: "very thick"
-  },
-  {
-    label: "dashed",
-    type: "property",
-    apply: "dashed"
-  },
-  {
-    label: "fill=cyan!10",
-    type: "property",
-    apply: "fill=cyan!10"
-  },
-  {
-    label: "draw=black",
-    type: "property",
-    apply: "draw=black"
-  },
-  {
-    label: "circle",
-    type: "property",
-    apply: "circle"
-  },
-  {
-    label: "rectangle",
-    type: "property",
-    apply: "rectangle"
-  },
-  {
-    label: "font=\\small",
-    type: "property",
-    apply: "font=\\small"
-  },
-  {
-    label: "align=center",
-    type: "property",
-    apply: "align=center"
-  },
-  {
-    label: "inner sep=2pt",
-    type: "property",
-    apply: "inner sep=2pt"
-  }
+  { label: "->", type: "property", apply: "->", detail: "Arrow tip" },
+  { label: "<-", type: "property", apply: "<-", detail: "Reverse arrow tip" },
+  { label: "<->", type: "property", apply: "<->", detail: "Double arrow" },
+  { label: "-Stealth", type: "property", apply: "-Stealth", detail: "Stealth arrow" },
+  { label: "Stealth-Stealth", type: "property", apply: "Stealth-Stealth", detail: "Stealth both ends" },
+  { label: "thick", type: "property", apply: "thick", detail: "Thick line" },
+  { label: "very thick", type: "property", apply: "very thick", detail: "Very thick line" },
+  { label: "thin", type: "property", apply: "thin", detail: "Thin line" },
+  { label: "dashed", type: "property", apply: "dashed", detail: "Dashed line" },
+  { label: "dotted", type: "property", apply: "dotted", detail: "Dotted line" },
+  { label: "line width=1pt", type: "property", apply: "line width=1pt", detail: "Line width" },
+  { label: "rounded corners", type: "property", apply: "rounded corners", detail: "Rounded corners" },
+  { label: "circle", type: "property", apply: "circle", detail: "Circle shape" },
+  { label: "rectangle", type: "property", apply: "rectangle", detail: "Rectangle shape" },
+  { label: "ellipse", type: "property", apply: "ellipse", detail: "Ellipse shape" },
+  { label: "draw=black", type: "property", apply: "draw=black", detail: "Stroke color" },
+  { label: "fill=cyan!10", type: "property", apply: "fill=cyan!10", detail: "Fill color" },
+  { label: "fill=blue!20", type: "property", apply: "fill=blue!20", detail: "Light blue fill" },
+  { label: "fill=red!20", type: "property", apply: "fill=red!20", detail: "Light red fill" },
+  { label: "fill=green!20", type: "property", apply: "fill=green!20", detail: "Light green fill" },
+  { label: "fill=none", type: "property", apply: "fill=none", detail: "No fill" },
+  { label: "opacity=0.5", type: "property", apply: "opacity=0.5", detail: "Opacity" },
+  { label: "font=\\small", type: "property", apply: "font=\\small", detail: "Small font" },
+  { label: "font=\\tiny", type: "property", apply: "font=\\tiny", detail: "Tiny font" },
+  { label: "align=center", type: "property", apply: "align=center", detail: "Centered text" },
+  { label: "align=left", type: "property", apply: "align=left", detail: "Left-aligned text" },
+  { label: "align=right", type: "property", apply: "align=right", detail: "Right-aligned text" },
+  { label: "anchor=north", type: "property", apply: "anchor=north", detail: "North anchor" },
+  { label: "anchor=south", type: "property", apply: "anchor=south", detail: "South anchor" },
+  { label: "anchor=east", type: "property", apply: "anchor=east", detail: "East anchor" },
+  { label: "anchor=west", type: "property", apply: "anchor=west", detail: "West anchor" },
+  { label: "inner sep=2pt", type: "property", apply: "inner sep=2pt", detail: "Inner padding" },
+  { label: "outer sep=0pt", type: "property", apply: "outer sep=0pt", detail: "Outer padding" },
+  { label: "minimum width=1cm", type: "property", apply: "minimum width=1cm", detail: "Minimum width" },
+  { label: "minimum height=1cm", type: "property", apply: "minimum height=1cm", detail: "Minimum height" },
+  { label: "scale=0.8", type: "property", apply: "scale=0.8", detail: "Scale factor" },
+  { label: "rotate=45", type: "property", apply: "rotate=45", detail: "Rotation" },
+  { label: "xshift=1cm", type: "property", apply: "xshift=1cm", detail: "Horizontal shift" },
+  { label: "yshift=1cm", type: "property", apply: "yshift=1cm", detail: "Vertical shift" },
+  { label: "below=of", type: "property", apply: "below=of ", detail: "Position below node" },
+  { label: "right=of", type: "property", apply: "right=of ", detail: "Position right of node" },
+  { label: "above=of", type: "property", apply: "above=of ", detail: "Position above node" },
+  { label: "left=of", type: "property", apply: "left=of ", detail: "Position left of node" }
 ];
+var tikzLibraries = [
+  { label: "arrows.meta", type: "text", apply: "arrows.meta", detail: "Arrow tips" },
+  { label: "positioning", type: "text", apply: "positioning", detail: "Relative positioning" },
+  { label: "calc", type: "text", apply: "calc", detail: "Coordinate calculations" },
+  { label: "shapes", type: "text", apply: "shapes", detail: "Extra shapes" },
+  { label: "decorations.pathmorphing", type: "text", apply: "decorations.pathmorphing", detail: "Path decorations" },
+  { label: "shapes.gates.logic.US", type: "text", apply: "shapes.gates.logic.US", detail: "Logic gates" },
+  { label: "matrix", type: "text", apply: "matrix", detail: "Matrix layouts" },
+  { label: "fit", type: "text", apply: "fit", detail: "Fit nodes around content" },
+  { label: "backgrounds", type: "text", apply: "backgrounds", detail: "Background layers" }
+];
+var allCommandCompletions = [...latexCommands, ...simpleShapeHelpers];
 function insideLatexOrTikzBlock(textBeforeCursor) {
-  const lastFence = textBeforeCursor.lastIndexOf("```");
-  if (lastFence === -1) {
+  const fencePattern = /```(?:tikz|latex|lualatex|tex)\b/g;
+  let lastOpen = -1;
+  let match;
+  while ((match = fencePattern.exec(textBeforeCursor)) !== null) {
+    lastOpen = match.index;
+  }
+  if (lastOpen === -1) {
     return false;
   }
-  const afterFence = textBeforeCursor.slice(lastFence);
-  return afterFence.startsWith("```tikz") || afterFence.startsWith("```latex") || afterFence.startsWith("```lualatex") || afterFence.startsWith("```tex");
+  const afterOpen = textBeforeCursor.slice(lastOpen);
+  const lines = afterOpen.split("\n");
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === "```") {
+      return false;
+    }
+  }
+  return true;
+}
+function filterCompletions(options, prefix) {
+  const lowerPrefix = prefix.toLowerCase();
+  return options.filter((option) => option.label.toLowerCase().startsWith(lowerPrefix));
 }
 function latexCompletionSource(context) {
   const textBeforeCursor = context.state.doc.sliceString(0, context.pos);
   if (!insideLatexOrTikzBlock(textBeforeCursor)) {
     return null;
   }
-  const commandMatch = context.matchBefore(/\\[A-Za-z]*/);
+  const commandMatch = context.matchBefore(/\\(?:[A-Za-z]+|\{)?/);
   if (commandMatch) {
+    const prefix = commandMatch.text;
     return {
       from: commandMatch.from,
-      options: latexCommands,
-      validFor: /^\\[A-Za-z]*$/
+      options: filterCompletions(allCommandCompletions, prefix),
+      validFor: /^\\(?:[A-Za-z]+|\{)?$/
     };
   }
-  const optionMatch = context.matchBefore(/[A-Za-z!\\=0-9.-]+/);
-  if (optionMatch && context.explicit) {
-    return {
-      from: optionMatch.from,
-      options: tikzOptions,
-      validFor: /^[A-Za-z!\\=0-9.-]*$/
-    };
+  const libraryMatch = context.matchBefore(/\\usetikzlibrary\{[^}]*\}?/);
+  if (libraryMatch) {
+    const openBrace = libraryMatch.text.indexOf("{");
+    if (openBrace !== -1) {
+      const prefix = libraryMatch.text.slice(openBrace + 1).replace(/}$/, "");
+      const from = libraryMatch.from + openBrace + 1;
+      return {
+        from,
+        options: filterCompletions(tikzLibraries, prefix),
+        validFor: /^[^}]*$/
+      };
+    }
+  }
+  const bracketOptionMatch = context.matchBefore(/(?:^|[\[\s,{])([A-Za-z!\\=0-9.<>\-]+)?/);
+  if (bracketOptionMatch) {
+    const prefix = bracketOptionMatch.text.replace(/^[\[\s,{]+/, "");
+    const charBefore = context.state.doc.sliceString(Math.max(0, context.pos - 1), context.pos);
+    if (prefix.length > 0 || charBefore === "[" || charBefore === "," || context.explicit) {
+      return {
+        from: context.pos - prefix.length,
+        options: filterCompletions(tikzOptions, prefix),
+        validFor: /^[A-Za-z!\\=0-9.<>\-]*$/
+      };
+    }
   }
   return null;
 }
 function latexAutocompleteExtension() {
   return (0, import_autocomplete.autocompletion)({
     override: [latexCompletionSource],
-    activateOnTyping: true
+    activateOnTyping: true,
+    maxRenderedOptions: 40
   });
+}
+
+// latexErrorMapping.ts
+var LATEX_LINE_PATTERN = /(?:^|\n)\s*l\.(\d+)/;
+function getUserSourceLineOffset(wrapperPrefix) {
+  if (!wrapperPrefix) {
+    return 0;
+  }
+  return wrapperPrefix.split("\n").length;
+}
+function parseLatexErrorLine(raw) {
+  const match = raw.match(LATEX_LINE_PATTERN);
+  if (!match) {
+    return null;
+  }
+  const line = parseInt(match[1], 10);
+  return Number.isFinite(line) ? line : null;
+}
+function extractUsefulLatexError(raw) {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const bangLine = lines.find((line) => line.startsWith("! "));
+  if (bangLine) {
+    return bangLine.replace(/^!\s*/, "").trim();
+  }
+  const usefulLine = lines.find((line) => line.includes("Undefined control sequence") || line.includes("Missing") || line.includes("Runaway argument") || line.includes("Fatal error"));
+  if (usefulLine) {
+    return usefulLine.trim();
+  }
+  return "Syntax error";
+}
+function mapTidiedLineToNoteLine(blockStartLine, blockEndLine, getLineText, tidiedLine) {
+  let nonEmptyIndex = 0;
+  for (let line = blockStartLine + 1; line < blockEndLine; line++) {
+    const text = getLineText(line).trim();
+    if (!text) {
+      continue;
+    }
+    nonEmptyIndex++;
+    if (nonEmptyIndex === tidiedLine) {
+      return line + 1;
+    }
+  }
+  return null;
+}
+function formatLatexErrorWithLineMapping(raw, tidiedSource, sourceLineOffset, noteLineMapper) {
+  var _a, _b;
+  const usefulError = extractUsefulLatexError(raw);
+  const latexLine = parseLatexErrorLine(raw);
+  if (latexLine === null || latexLine <= sourceLineOffset) {
+    return { message: usefulError };
+  }
+  const userLine = latexLine - sourceLineOffset;
+  const sourceLines = tidiedSource.split("\n");
+  const lineContent = (_a = sourceLines[userLine - 1]) == null ? void 0 : _a.trim();
+  const noteLine = (_b = noteLineMapper == null ? void 0 : noteLineMapper(userLine)) != null ? _b : void 0;
+  const snippet = lineContent ? lineContent.length > 80 ? `${lineContent.slice(0, 77)}...` : lineContent : usefulError;
+  if (noteLine !== void 0) {
+    return {
+      message: `Error near line ${noteLine} in note (TikZ block line ${userLine}): ${snippet}`,
+      userLine,
+      lineContent,
+      noteLine
+    };
+  }
+  return {
+    message: `Error near line ${userLine} in your TikZ block: ${snippet}`,
+    userLine,
+    lineContent
+  };
 }
 
 // simpleShapes.ts
 var SIMPLE_TIKZ_HELPERS = String.raw`
+% ---------- Logic gates inherit scope / tikzpicture scaling ----------
+\tikzset{
+  every and gate US/.append style={transform shape},
+  every or gate US/.append style={transform shape},
+  every not gate US/.append style={transform shape},
+  every nand gate US/.append style={transform shape},
+  every nor gate US/.append style={transform shape},
+  every xor gate US/.append style={transform shape},
+  every xnor gate US/.append style={transform shape},
+  every buffer gate US/.append style={transform shape},
+}
+
 % ---------- Simple drawing helpers ----------
 \def\Circle(#1,#2,#3){\draw (#1,#2) circle (#3);}
 \def\FilledCircle(#1,#2,#3){\fill (#1,#2) circle (#3);}
 \def\Point(#1,#2){\fill (#1,#2) circle (1.7pt);}
 \def\Line(#1,#2,#3,#4){\draw (#1,#2) -- (#3,#4);}
 \def\Arrow(#1,#2,#3,#4){\draw[->] (#1,#2) -- (#3,#4);}
+\def\DArrow(#1,#2,#3,#4){\draw[<->] (#1,#2) -- (#3,#4);}
+\def\DashedLine(#1,#2,#3,#4){\draw[dashed] (#1,#2) -- (#3,#4);}
+\def\DottedLine(#1,#2,#3,#4){\draw[dotted] (#1,#2) -- (#3,#4);}
+\def\HLine(#1,#2,#3){\draw (#1,#3) -- (#2,#3);}
+\def\VLine(#1,#2,#3){\draw (#3,#1) -- (#3,#2);}
 \def\Rect(#1,#2,#3,#4){\draw (#1,#2) rectangle (#3,#4);}
 \def\FilledRect(#1,#2,#3,#4){\fill (#1,#2) rectangle (#3,#4);}
+\def\RoundedRect(#1,#2,#3,#4){\draw[rounded corners] (#1,#2) rectangle (#3,#4);}
+\def\FilledRoundedRect(#1,#2,#3,#4){\fill[rounded corners] (#1,#2) rectangle (#3,#4);}
+\def\Ellipse(#1,#2,#3,#4){\draw (#1,#2) ellipse (#3 and #4);}
+\def\FilledEllipse(#1,#2,#3,#4){\fill (#1,#2) ellipse (#3 and #4);}
+\def\Cross(#1,#2,#3){
+\draw (#1-#3,#2) -- (#1+#3,#2);
+\draw (#1,#2-#3) -- (#1,#2+#3);
+}
+\def\Diamond(#1,#2,#3,#4){
+\draw (#1,#2+#4) -- (#1+#3,#2) -- (#1,#2-#4) -- (#1-#3,#2) -- cycle;
+}
+\def\FilledDiamond(#1,#2,#3,#4){
+\fill (#1,#2+#4) -- (#1+#3,#2) -- (#1,#2-#4) -- (#1-#3,#2) -- cycle;
+}
+\def\Arc(#1,#2,#3,#4,#5){\draw (#1,#2) arc (#4:#5:#3);}
+\def\RightAngle(#1,#2,#3){
+\draw (#1,#2+#3) -- (#1,#2) -- (#1+#3,#2);
+}
+\def\Grid(#1,#2,#3,#4,#5){
+\draw[step=#5] (#1,#2) grid (#3,#4);
+}
 \def\Axis(#1,#2,#3,#4){
 \draw[->] (#1,0) -- (#2,0) node[right] {$x$};
 \draw[->] (0,#3) -- (0,#4) node[above] {$y$};
@@ -262,21 +648,46 @@ var SIMPLE_TIKZ_HELPERS = String.raw`
 }
 
 % ---------- Simple text helpers ----------
-\def\Text(#1,#2,#3){\node at (#1,#2) {#3};}
-\def\SmallText(#1,#2,#3){\node[font=\small] at (#1,#2) {#3};}
-\def\TinyText(#1,#2,#3){\node[font=\tiny] at (#1,#2) {#3};}
+\def\Text(#1,#2,#3){\node[transform shape] at (#1,#2) {#3};}
+\def\SmallText(#1,#2,#3){\node[font=\small, transform shape] at (#1,#2) {#3};}
+\def\TinyText(#1,#2,#3){\node[font=\tiny, transform shape] at (#1,#2) {#3};}
+\def\TextAbove(#1,#2,#3){\node[above, transform shape] at (#1,#2) {#3};}
+\def\TextBelow(#1,#2,#3){\node[below, transform shape] at (#1,#2) {#3};}
+\def\TextLeft(#1,#2,#3){\node[left, transform shape] at (#1,#2) {#3};}
+\def\TextRight(#1,#2,#3){\node[right, transform shape] at (#1,#2) {#3};}
 
 % ---------- Simple logic gates ----------
 \def\ANDgate(#1,#2,#3){
-\node[and gate US, draw, logic gate inputs=nn, anchor=input 1] (#3) at (#1,#2) {};
+\node[and gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
 }
 
 \def\ORgate(#1,#2,#3){
-\node[or gate US, draw, logic gate inputs=nn, anchor=input 1] (#3) at (#1,#2) {};
+\node[or gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
 }
 
 \def\NOTgate(#1,#2,#3){
-\node[not gate US, draw, anchor=input] (#3) at (#1,#2) {};
+\node[not gate US, draw, anchor=input, transform shape] (#3) at (#1,#2) {};
+}
+
+% ---------- More logic gates ----------
+\def\BUFFERgate(#1,#2,#3){
+\node[buffer gate US, draw, anchor=input, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\NANDgate(#1,#2,#3){
+\node[nand gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\NORgate(#1,#2,#3){
+\node[nor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\XORgate(#1,#2,#3){
+\node[xor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\XNORgate(#1,#2,#3){
+\node[xnor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
 }
 
 % ---------- Logic-gate wire helpers ----------
@@ -307,6 +718,7 @@ var SIMPLE_TIKZ_HELPERS = String.raw`
 \def\LogicWireToArrow(#1,#2,#3){
 \draw[->] (#1) -- ++(0.35,0) |- (#2,#3);
 }
+
 \def\Triangle(#1,#2,#3,#4,#5,#6){
 \draw (#1,#2) -- (#3,#4) -- (#5,#6) -- cycle;
 }
@@ -314,25 +726,31 @@ var SIMPLE_TIKZ_HELPERS = String.raw`
 \def\FilledTriangle(#1,#2,#3,#4,#5,#6){
 \fill (#1,#2) -- (#3,#4) -- (#5,#6) -- cycle;
 }
-% ---------- More logic gates ----------
-\def\BUFFERgate(#1,#2,#3){
-\node[buffer gate US, draw, anchor=input] (#3) at (#1,#2) {};
+
+% ---------- Simple circuit symbols ----------
+\def\Resistor(#1,#2,#3,#4){
+\draw (#1,#2) -- ++(0.15,0);
+\draw (#1+0.15,#2-#4/2) rectangle ++(#3-0.3,#4);
+\draw (#1+#3-0.15,#2) -- ++(0.15,0);
 }
 
-\def\NANDgate(#1,#2,#3){
-\node[nand gate US, draw, logic gate inputs=nn, anchor=input 1] (#3) at (#1,#2) {};
+\def\Capacitor(#1,#2,#3,#4){
+\draw (#1,#2) -- ++(0.15,0);
+\draw (#1+0.15,#2-#4) -- (#1+0.15,#2+#4);
+\draw (#1+0.15+#3,#2-#4) -- (#1+0.15+#3,#2+#4);
+\draw (#1+0.15+#3,#2) -- ++(0.15,0);
 }
 
-\def\NORgate(#1,#2,#3){
-\node[nor gate US, draw, logic gate inputs=nn, anchor=input 1] (#3) at (#1,#2) {};
+\def\Ground(#1,#2,#3){
+\draw (#1,#2) -- (#1,#2-#3);
+\draw (#1-0.25,#2-#3) -- (#1+0.25,#2-#3);
+\draw (#1-0.15,#2-#3-0.12) -- (#1+0.15,#2-#3-0.12);
+\draw (#1-0.08,#2-#3-0.24) -- (#1+0.08,#2-#3-0.24);
 }
 
-\def\XORgate(#1,#2,#3){
-\node[xor gate US, draw, logic gate inputs=nn, anchor=input 1] (#3) at (#1,#2) {};
-}
-
-\def\XNORgate(#1,#2,#3){
-\node[xnor gate US, draw, logic gate inputs=nn, anchor=input 1] (#3) at (#1,#2) {};
+\def\VSource(#1,#2,#3,#4){
+\draw (#1,#2) circle (#3);
+\node[transform shape] at (#1,#2) {$#4$};
 }
 `;
 
@@ -392,6 +810,7 @@ ${SIMPLE_TIKZ_HELPERS}
 var LATEX_WRAPPER_SUFFIX = `
 \\end{document}
 `;
+var USER_SOURCE_LINE_OFFSET = getUserSourceLineOffset(LATEX_WRAPPER_PREFIX);
 function fileExists(filePath) {
   return __async(this, null, function* () {
     return fs.existsSync(filePath);
@@ -475,18 +894,6 @@ function formatExecError(err) {
     return parts.join("\n");
   }
   return String(err);
-}
-function extractUsefulLatexError(raw) {
-  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const bangLine = lines.find((line) => line.startsWith("! "));
-  if (bangLine) {
-    return bangLine.replace(/^!\s*/, "").trim();
-  }
-  const usefulLine = lines.find((line) => line.includes("Undefined control sequence") || line.includes("Missing") || line.includes("Runaway argument") || line.includes("Fatal error"));
-  if (usefulLine) {
-    return usefulLine.trim();
-  }
-  return "Syntax error";
 }
 function getCurrentTikzBlock(editor) {
   const cursor = editor.getCursor();
@@ -742,7 +1149,10 @@ var TikzjaxHebrewLocalPlugin = class extends import_obsidian2.Plugin {
       if (!this.inlinePreviewLastGoodDataUrl) {
         this.showInlineMessage(markdownView, "Rendering TikZ diagram\u2026");
       }
-      const result = yield this.renderTikzToSvgDataUrl(cleanedSource);
+      const result = yield this.renderTikzToSvgDataUrl(cleanedSource, {
+        block,
+        editor: markdownView.editor
+      });
       if (token !== this.inlinePreviewRenderToken) {
         return;
       }
@@ -762,7 +1172,19 @@ var TikzjaxHebrewLocalPlugin = class extends import_obsidian2.Plugin {
       this.showInlineError(markdownView, (_b = result.error) != null ? _b : "Render error.", result.rawLog);
     });
   }
-  renderTikzToSvgDataUrl(source) {
+  buildLatexErrorResult(rawError, tidiedSource, errorContext) {
+    const noteLineMapper = (errorContext == null ? void 0 : errorContext.block) && errorContext.editor ? (userLine) => mapTidiedLineToNoteLine(errorContext.block.startLine, errorContext.block.endLine, (line) => errorContext.editor.getLine(line), userLine) : void 0;
+    const mapped = formatLatexErrorWithLineMapping(rawError, tidiedSource, USER_SOURCE_LINE_OFFSET, noteLineMapper);
+    return {
+      ok: false,
+      error: mapped.message,
+      rawLog: rawError,
+      userLine: mapped.userLine,
+      noteLine: mapped.noteLine,
+      lineContent: mapped.lineContent
+    };
+  }
+  renderTikzToSvgDataUrl(source, errorContext) {
     return __async(this, null, function* () {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "obsidian-tikz-hebrew-"));
       const texPath = path.join(tmpDir, "diagram.tex");
@@ -796,13 +1218,9 @@ var TikzjaxHebrewLocalPlugin = class extends import_obsidian2.Plugin {
           formatExecError(err),
           logTail ? "\n--- diagram.log (tail) ---\n" + logTail : ""
         ].join("\n");
-        const usefulError = extractUsefulLatexError(rawError);
+        const errorResult = this.buildLatexErrorResult(rawError, source, errorContext);
         this.cleanupTempDir(tmpDir);
-        return {
-          ok: false,
-          error: `Syntax error: ${usefulError}`,
-          rawLog: rawError
-        };
+        return errorResult;
       }
       if (!fs.existsSync(pdfPath)) {
         const logTail = readLogTail(logPath);
@@ -811,6 +1229,9 @@ var TikzjaxHebrewLocalPlugin = class extends import_obsidian2.Plugin {
         ];
         if (logTail) {
           details.push("", "--- diagram.log (tail) ---", logTail);
+          const errorResult = this.buildLatexErrorResult(details.join("\n"), source, errorContext);
+          this.cleanupTempDir(tmpDir);
+          return errorResult;
         }
         this.cleanupTempDir(tmpDir);
         return {
@@ -868,9 +1289,45 @@ ${formatExecError(err)}`
       this.cleanupTempDir(tmpDir);
       return {
         ok: true,
-        dataUrl: `data:image/svg+xml;base64,${svgBase64}`
+        dataUrl: `data:image/svg+xml;base64,${svgBase64}`,
+        svgText
       };
     });
+  }
+  downloadSvg(svgText, filename = "tikz-diagram.svg") {
+    const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+  createDiagramToolbar(parent, svgText) {
+    const toolbar = parent.createDiv({ cls: "tikzjax-hebrew-local-toolbar" });
+    const exportButton = toolbar.createEl("button", {
+      text: "Export SVG",
+      cls: "tikzjax-hebrew-local-toolbar-button"
+    });
+    exportButton.addEventListener("click", () => {
+      this.downloadSvg(svgText);
+      new import_obsidian2.Notice("TikZ diagram exported as SVG.");
+    });
+    const copyButton = toolbar.createEl("button", {
+      text: "Copy SVG",
+      cls: "tikzjax-hebrew-local-toolbar-button"
+    });
+    copyButton.addEventListener("click", () => __async(this, null, function* () {
+      try {
+        yield navigator.clipboard.writeText(svgText);
+        new import_obsidian2.Notice("TikZ SVG copied to clipboard.");
+      } catch (e) {
+        new import_obsidian2.Notice("Could not copy SVG.");
+      }
+    }));
   }
   cleanupTempDir(tmpDir) {
     try {
@@ -888,12 +1345,14 @@ ${formatExecError(err)}`
     return __async(this, null, function* () {
       var _a;
       const result = yield this.renderTikzToSvgDataUrl(source);
-      if (!result.ok || !result.dataUrl) {
+      if (!result.ok || !result.dataUrl || !result.svgText) {
         this.showError(el, (_a = result.error) != null ? _a : "Render error.", result.rawLog);
         return;
       }
       el.empty();
-      const container = el.createDiv({ cls: "tikzjax-hebrew-local-output" });
+      const block = el.createDiv({ cls: "tikzjax-hebrew-local-block" });
+      this.createDiagramToolbar(block, result.svgText);
+      const container = block.createDiv({ cls: "tikzjax-hebrew-local-output" });
       const img = container.createEl("img");
       img.setAttr("src", result.dataUrl);
       img.setAttr("alt", "TikZ diagram");
