@@ -6,3 +6,4 @@ build/
 *.log
 .cache/
 *.save
+data.json
