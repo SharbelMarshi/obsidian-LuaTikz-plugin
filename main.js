@@ -49,11 +49,552 @@ var __async = (__this, __arguments, generator) => {
 
 // main.ts
 __export(exports, {
-  default: () => TikzjaxHebrewLocalPlugin
+  default: () => LuaTikzPlugin
 });
-var import_obsidian2 = __toModule(require("obsidian"));
-var import_child_process = __toModule(require("child_process"));
-var import_util = __toModule(require("util"));
+var import_obsidian3 = __toModule(require("obsidian"));
+
+// diagramView.ts
+var import_obsidian = __toModule(require("obsidian"));
+function downloadSvg(svgText, filename = "tikz-diagram.svg") {
+  const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+function appendTikzError(parent, message, details, onRetry, extraCls) {
+  const cls = extraCls ? `tikzjax-hebrew-local-error ${extraCls}` : "tikzjax-hebrew-local-error";
+  const errorEl = parent.createDiv({ cls });
+  errorEl.createDiv({
+    cls: "tikzjax-hebrew-local-error-title",
+    text: message
+  });
+  if (!details && !onRetry) {
+    return;
+  }
+  const buttonRow = errorEl.createDiv({
+    cls: "tikzjax-hebrew-local-error-button-row"
+  });
+  if (onRetry) {
+    const retryButton = buttonRow.createEl("button", {
+      text: "Retry",
+      cls: "tikzjax-hebrew-local-error-button"
+    });
+    retryButton.addEventListener("click", onRetry);
+  }
+  if (!details) {
+    return;
+  }
+  const copyButton = buttonRow.createEl("button", {
+    text: "Copy error",
+    cls: "tikzjax-hebrew-local-error-button"
+  });
+  copyButton.addEventListener("click", () => __async(this, null, function* () {
+    try {
+      yield navigator.clipboard.writeText(details);
+      new import_obsidian.Notice("Error copied.");
+    } catch (e) {
+      new import_obsidian.Notice("Could not copy error.");
+    }
+  }));
+  const toggleButton = buttonRow.createEl("button", {
+    text: "Show log",
+    cls: "tikzjax-hebrew-local-error-button"
+  });
+  const detailsEl = errorEl.createEl("pre", {
+    cls: "tikzjax-hebrew-local-error-details"
+  });
+  detailsEl.setText(details);
+  detailsEl.style.display = "none";
+  toggleButton.addEventListener("click", () => {
+    const hidden = detailsEl.style.display === "none";
+    detailsEl.style.display = hidden ? "block" : "none";
+    toggleButton.setText(hidden ? "Hide log" : "Show log");
+  });
+}
+function showTikzError(el, message, details, onRetry) {
+  el.empty();
+  appendTikzError(el, message, details, onRetry);
+}
+function renderTikzDiagram(el, result) {
+  if (!result.ok || !result.dataUrl || !result.svgText) {
+    return;
+  }
+  el.empty();
+  const block = el.createDiv({ cls: "tikzjax-hebrew-local-block" });
+  const toolbar = block.createDiv({ cls: "tikzjax-hebrew-local-toolbar" });
+  const exportButton = toolbar.createEl("button", {
+    text: "Export SVG",
+    cls: "tikzjax-hebrew-local-toolbar-button"
+  });
+  exportButton.addEventListener("click", () => {
+    downloadSvg(result.svgText);
+    new import_obsidian.Notice("SVG exported.");
+  });
+  const copyButton = toolbar.createEl("button", {
+    text: "Copy SVG",
+    cls: "tikzjax-hebrew-local-toolbar-button"
+  });
+  copyButton.addEventListener("click", () => __async(this, null, function* () {
+    try {
+      yield navigator.clipboard.writeText(result.svgText);
+      new import_obsidian.Notice("SVG copied.");
+    } catch (e) {
+      new import_obsidian.Notice("Could not copy SVG.");
+    }
+  }));
+  const container = block.createDiv({ cls: "tikzjax-hebrew-local-output" });
+  const img = container.createEl("img");
+  img.setAttr("src", result.dataUrl);
+  img.setAttr("alt", "TikZ diagram");
+  img.addClass("tikzjax-hebrew-local-image");
+}
+
+// latexErrorMapping.ts
+var LATEX_LINE_PATTERN = /(?:^|\n)\s*l\.(\d+)/;
+function getUserSourceLineOffset(wrapperPrefix) {
+  if (!wrapperPrefix) {
+    return 0;
+  }
+  return wrapperPrefix.split("\n").length;
+}
+function parseLatexErrorLine(raw) {
+  const match = raw.match(LATEX_LINE_PATTERN);
+  if (!match) {
+    return null;
+  }
+  const line = parseInt(match[1], 10);
+  return Number.isFinite(line) ? line : null;
+}
+function extractUsefulLatexError(raw) {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const bangLine = lines.find((line) => line.startsWith("! "));
+  if (bangLine) {
+    return bangLine.replace(/^!\s*/, "").trim();
+  }
+  const usefulLine = lines.find((line) => line.includes("Undefined control sequence") || line.includes("Missing") || line.includes("Runaway argument") || line.includes("Fatal error"));
+  if (usefulLine) {
+    return usefulLine.trim();
+  }
+  return "Syntax error";
+}
+function mapTidiedLineToNoteLine(blockStartLine, blockEndLine, getLineText, tidiedLine) {
+  let nonEmptyIndex = 0;
+  for (let line = blockStartLine + 1; line < blockEndLine; line++) {
+    const text = getLineText(line).trim();
+    if (!text) {
+      continue;
+    }
+    nonEmptyIndex++;
+    if (nonEmptyIndex === tidiedLine) {
+      return line + 1;
+    }
+  }
+  return null;
+}
+function formatLatexErrorWithLineMapping(raw, tidiedSource, sourceLineOffset, noteLineMapper) {
+  var _a, _b;
+  const usefulError = extractUsefulLatexError(raw);
+  const latexLine = parseLatexErrorLine(raw);
+  if (latexLine === null || latexLine <= sourceLineOffset) {
+    return { message: usefulError };
+  }
+  const userLine = latexLine - sourceLineOffset;
+  const sourceLines = tidiedSource.split("\n");
+  const lineContent = (_a = sourceLines[userLine - 1]) == null ? void 0 : _a.trim();
+  const noteLine = (_b = noteLineMapper == null ? void 0 : noteLineMapper(userLine)) != null ? _b : void 0;
+  const snippet = lineContent ? lineContent.length > 80 ? `${lineContent.slice(0, 77)}...` : lineContent : usefulError;
+  if (noteLine !== void 0) {
+    return {
+      message: `Line ${noteLine}: ${snippet}`,
+      userLine,
+      lineContent,
+      noteLine
+    };
+  }
+  return {
+    message: `Line ${userLine}: ${snippet}`,
+    userLine,
+    lineContent
+  };
+}
+
+// simpleShapes.ts
+var SIMPLE_TIKZ_HELPERS = String.raw`
+% logic gate scaling
+\tikzset{
+  every and gate US/.append style={transform shape},
+  every or gate US/.append style={transform shape},
+  every not gate US/.append style={transform shape},
+  every nand gate US/.append style={transform shape},
+  every nor gate US/.append style={transform shape},
+  every xor gate US/.append style={transform shape},
+  every xnor gate US/.append style={transform shape},
+  every buffer gate US/.append style={transform shape},
+}
+
+% shapes
+\def\Circle(#1,#2,#3){\draw (#1,#2) circle (#3);}
+\def\FilledCircle(#1,#2,#3){\fill (#1,#2) circle (#3);}
+\def\Point(#1,#2){\fill (#1,#2) circle (1.7pt);}
+\def\Line(#1,#2,#3,#4){\draw (#1,#2) -- (#3,#4);}
+\def\Arrow(#1,#2,#3,#4){\draw[->] (#1,#2) -- (#3,#4);}
+\def\DArrow(#1,#2,#3,#4){\draw[<->] (#1,#2) -- (#3,#4);}
+\def\DashedLine(#1,#2,#3,#4){\draw[dashed] (#1,#2) -- (#3,#4);}
+\def\DottedLine(#1,#2,#3,#4){\draw[dotted] (#1,#2) -- (#3,#4);}
+\def\HLine(#1,#2,#3){\draw (#1,#3) -- (#2,#3);}
+\def\VLine(#1,#2,#3){\draw (#3,#1) -- (#3,#2);}
+\def\Rect(#1,#2,#3,#4){\draw (#1,#2) rectangle (#3,#4);}
+\def\FilledRect(#1,#2,#3,#4){\fill (#1,#2) rectangle (#3,#4);}
+\def\RoundedRect(#1,#2,#3,#4){\draw[rounded corners] (#1,#2) rectangle (#3,#4);}
+\def\FilledRoundedRect(#1,#2,#3,#4){\fill[rounded corners] (#1,#2) rectangle (#3,#4);}
+\def\Ellipse(#1,#2,#3,#4){\draw (#1,#2) ellipse (#3 and #4);}
+\def\FilledEllipse(#1,#2,#3,#4){\fill (#1,#2) ellipse (#3 and #4);}
+\def\Cross(#1,#2,#3){
+\draw (#1-#3,#2) -- (#1+#3,#2);
+\draw (#1,#2-#3) -- (#1,#2+#3);
+}
+\def\Diamond(#1,#2,#3,#4){
+\draw (#1,#2+#4) -- (#1+#3,#2) -- (#1,#2-#4) -- (#1-#3,#2) -- cycle;
+}
+\def\FilledDiamond(#1,#2,#3,#4){
+\fill (#1,#2+#4) -- (#1+#3,#2) -- (#1,#2-#4) -- (#1-#3,#2) -- cycle;
+}
+\def\Arc(#1,#2,#3,#4,#5){\draw (#1,#2) arc (#4:#5:#3);}
+\def\RightAngle(#1,#2,#3){
+\draw (#1,#2+#3) -- (#1,#2) -- (#1+#3,#2);
+}
+\def\Grid(#1,#2,#3,#4,#5){
+\draw[step=#5] (#1,#2) grid (#3,#4);
+}
+\def\Axis(#1,#2,#3,#4){
+\draw[->] (#1,0) -- (#2,0) node[right] {$x$};
+\draw[->] (0,#3) -- (0,#4) node[above] {$y$};
+}
+\def\AxisNamed(#1,#2,#3,#4,#5,#6){
+\draw[->] (#1,0) -- (#2,0) node[right] {#5};
+\draw[->] (0,#3) -- (0,#4) node[above] {#6};
+}
+
+% text
+\def\Text(#1,#2,#3){\node[transform shape] at (#1,#2) {#3};}
+\def\SmallText(#1,#2,#3){\node[font=\small, transform shape] at (#1,#2) {#3};}
+\def\TinyText(#1,#2,#3){\node[font=\tiny, transform shape] at (#1,#2) {#3};}
+\def\TextAbove(#1,#2,#3){\node[above, transform shape] at (#1,#2) {#3};}
+\def\TextBelow(#1,#2,#3){\node[below, transform shape] at (#1,#2) {#3};}
+\def\TextLeft(#1,#2,#3){\node[left, transform shape] at (#1,#2) {#3};}
+\def\TextRight(#1,#2,#3){\node[right, transform shape] at (#1,#2) {#3};}
+
+% gates
+\def\ANDgate(#1,#2,#3){
+\node[and gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\ORgate(#1,#2,#3){
+\node[or gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\NOTgate(#1,#2,#3){
+\node[not gate US, draw, anchor=input, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\BUFFERgate(#1,#2,#3){
+\node[buffer gate US, draw, anchor=input, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\NANDgate(#1,#2,#3){
+\node[nand gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\NORgate(#1,#2,#3){
+\node[nor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\XORgate(#1,#2,#3){
+\node[xor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
+}
+
+\def\XNORgate(#1,#2,#3){
+\node[xnor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
+}
+
+% wires
+\def\LogicWire(#1,#2){
+\draw (#1) -- ++(0.35,0) |- (#2);
+}
+
+\def\LogicWireArrow(#1,#2){
+\draw[->] (#1) -- ++(0.35,0) |- (#2);
+}
+
+\def\LogicWireDirect(#1,#2){
+\draw (#1) -- (#2);
+}
+
+\def\LogicWireFrom(#1,#2,#3){
+\draw (#1,#2) -- ++(0.35,0) |- (#3);
+}
+
+\def\LogicWireFromArrow(#1,#2,#3){
+\draw[->] (#1,#2) -- ++(0.35,0) |- (#3);
+}
+
+\def\LogicWireTo(#1,#2,#3){
+\draw (#1) -- ++(0.35,0) |- (#2,#3);
+}
+
+\def\LogicWireToArrow(#1,#2,#3){
+\draw[->] (#1) -- ++(0.35,0) |- (#2,#3);
+}
+
+\def\Triangle(#1,#2,#3,#4,#5,#6){
+\draw (#1,#2) -- (#3,#4) -- (#5,#6) -- cycle;
+}
+
+\def\FilledTriangle(#1,#2,#3,#4,#5,#6){
+\fill (#1,#2) -- (#3,#4) -- (#5,#6) -- cycle;
+}
+
+% circuit symbols
+\def\Resistor(#1,#2,#3,#4){
+\draw (#1,#2) -- ++(0.15,0);
+\draw (#1+0.15,#2-#4/2) rectangle ++(#3-0.3,#4);
+\draw (#1+#3-0.15,#2) -- ++(0.15,0);
+}
+
+\def\Capacitor(#1,#2,#3,#4){
+\draw (#1,#2) -- ++(0.15,0);
+\draw (#1+0.15,#2-#4) -- (#1+0.15,#2+#4);
+\draw (#1+0.15+#3,#2-#4) -- (#1+0.15+#3,#2+#4);
+\draw (#1+0.15+#3,#2) -- ++(0.15,0);
+}
+
+\def\Ground(#1,#2,#3){
+\draw (#1,#2) -- (#1,#2-#3);
+\draw (#1-0.25,#2-#3) -- (#1+0.25,#2-#3);
+\draw (#1-0.15,#2-#3-0.12) -- (#1+0.15,#2-#3-0.12);
+\draw (#1-0.08,#2-#3-0.24) -- (#1+0.08,#2-#3-0.24);
+}
+
+\def\VSource(#1,#2,#3,#4){
+\draw (#1,#2) circle (#3);
+\node[transform shape] at (#1,#2) {$#4$};
+}
+`;
+
+// tikzSource.ts
+var DOCUMENTCLASS_LINE = "\\documentclass[tikz,border=5pt]{standalone}\n";
+var LATEX_WRAPPER_PREFIX = `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
+\\usepackage{polyglossia}
+
+\\setmainlanguage{english}
+\\setotherlanguage{hebrew}
+
+\\newfontfamily\\hebrewfont[Script=Hebrew]{David CLM}
+\\newfontfamily\\hebrewfontsf[Script=Hebrew]{David CLM}
+\\newfontfamily\\hebrewfonttt[Script=Hebrew]{David CLM}
+
+\\usepackage{tikz}
+\\usetikzlibrary{arrows.meta,positioning,calc,shapes,decorations.pathmorphing,shapes.gates.logic.US}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+\\usepackage{circuitikz}
+\\usepackage{pgfplots}
+\\pgfplotsset{compat=1.18}
+
+\\newcommand{\\he}[1]{\\texthebrew{#1}}
+${SIMPLE_TIKZ_HELPERS}
+\\begin{document}
+`;
+var LATEX_WRAPPER_SUFFIX = `
+\\end{document}
+`;
+var USER_SOURCE_LINE_OFFSET = getUserSourceLineOffset(LATEX_WRAPPER_PREFIX);
+function tidyTikzSource(tikzSource) {
+  return tikzSource.replaceAll("&nbsp;", "").split("\n").map((line) => line.trim()).filter(Boolean).join("\n");
+}
+function wrapLatexSource(source) {
+  let cleanedSource = source;
+  cleanedSource = cleanedSource.replace(/\\documentclass(?:\[[^\]]*\])?\{[^}]+\}/g, "");
+  cleanedSource = cleanedSource.replace(/\\usepackage(?:\[[^\]]*\])?\{[^}]+\}/g, "");
+  cleanedSource = cleanedSource.replace(/\\pgfplotsset\{[^}]*\}/g, "");
+  cleanedSource = cleanedSource.replace(/\\begin\{document\}/g, "");
+  cleanedSource = cleanedSource.replace(/\\end\{document\}/g, "");
+  cleanedSource = cleanedSource.replace(/\\setmainlanguage\{[^}]+\}/g, "");
+  cleanedSource = cleanedSource.replace(/\\setotherlanguage\{[^}]+\}/g, "");
+  cleanedSource = cleanedSource.replace(/\\setmainfont(?:\[[^\]]*\])?\{[^}]+\}/g, "");
+  cleanedSource = cleanedSource.replace(/\\setsansfont(?:\[[^\]]*\])?\{[^}]+\}/g, "");
+  cleanedSource = cleanedSource.replace(/\\newfontfamily\\\w+(?:\[[^\]]*\])?\{[^}]+\}/g, "");
+  return LATEX_WRAPPER_PREFIX + cleanedSource.trim() + LATEX_WRAPPER_SUFFIX;
+}
+
+// inlinePreview.ts
+function getCurrentTikzBlock(editor) {
+  const cursor = editor.getCursor();
+  let startLine = -1;
+  for (let line = cursor.line; line >= 0; line--) {
+    const text = editor.getLine(line).trim();
+    if (text.startsWith("```tikz")) {
+      startLine = line;
+      break;
+    }
+    if (text === "```") {
+      return null;
+    }
+  }
+  if (startLine === -1) {
+    return null;
+  }
+  let endLine = -1;
+  for (let line = startLine + 1; line < editor.lineCount(); line++) {
+    if (editor.getLine(line).trim() === "```") {
+      endLine = line;
+      break;
+    }
+  }
+  if (endLine === -1 || cursor.line <= startLine || cursor.line >= endLine) {
+    return null;
+  }
+  return {
+    source: editor.getRange({ line: startLine + 1, ch: 0 }, { line: endLine, ch: 0 }),
+    startLine,
+    endLine
+  };
+}
+var InlinePreviewManager = class {
+  constructor(getActiveMarkdownView, renderer) {
+    this.getActiveMarkdownView = getActiveMarkdownView;
+    this.renderer = renderer;
+    this.enabled = false;
+    this.container = null;
+    this.timer = null;
+    this.lastGoodDataUrl = null;
+    this.lastSource = null;
+    this.renderToken = 0;
+  }
+  enable(initialDelayMs = 0) {
+    this.enabled = true;
+    this.scheduleUpdate(initialDelayMs);
+  }
+  disable() {
+    this.enabled = false;
+    this.lastGoodDataUrl = null;
+    this.lastSource = null;
+    this.clearTimer();
+    if (this.container) {
+      this.container.remove();
+      this.container = null;
+    }
+  }
+  scheduleUpdate(delay = 800) {
+    if (!this.enabled) {
+      return;
+    }
+    this.clearTimer();
+    this.timer = window.setTimeout(() => {
+      void this.updateFromActiveEditor();
+    }, delay);
+  }
+  clearTimer() {
+    if (this.timer) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+  hide() {
+    if (this.container) {
+      this.container.remove();
+      this.container = null;
+    }
+  }
+  containerEl(view) {
+    if (this.container && document.body.contains(this.container)) {
+      return this.container;
+    }
+    this.container = view.containerEl.createDiv({
+      cls: "tikzjax-hebrew-local-inline-preview"
+    });
+    return this.container;
+  }
+  showMessage(view, message) {
+    const el = this.containerEl(view);
+    el.empty();
+    el.createDiv({
+      cls: "tikzjax-hebrew-local-inline-preview-message",
+      text: message
+    });
+  }
+  showImage(view, dataUrl) {
+    const el = this.containerEl(view);
+    el.empty();
+    const output = el.createDiv({ cls: "tikzjax-hebrew-local-output" });
+    const img = output.createEl("img");
+    img.setAttr("src", dataUrl);
+    img.setAttr("alt", "TikZ diagram");
+    img.addClass("tikzjax-hebrew-local-image");
+  }
+  showError(view, message, details, onRetry) {
+    appendTikzError(this.containerEl(view), message, details, onRetry, "tikzjax-hebrew-local-inline-preview-error");
+  }
+  updateFromActiveEditor() {
+    return __async(this, null, function* () {
+      var _a;
+      if (!this.enabled) {
+        return;
+      }
+      const view = this.getActiveMarkdownView();
+      if (!view) {
+        this.hide();
+        return;
+      }
+      const block = getCurrentTikzBlock(view.editor);
+      if (!block) {
+        this.hide();
+        return;
+      }
+      const source = tidyTikzSource(block.source);
+      if (!source.trim()) {
+        this.showMessage(view, "Nothing to render.");
+        return;
+      }
+      if (source === this.lastSource && this.lastGoodDataUrl) {
+        return;
+      }
+      const token = ++this.renderToken;
+      if (!this.lastGoodDataUrl) {
+        this.showMessage(view, "Rendering\u2026");
+      }
+      const result = yield this.renderer.renderToSvg(source, {
+        block,
+        editor: view.editor
+      });
+      if (token !== this.renderToken) {
+        return;
+      }
+      if (result.ok && result.dataUrl) {
+        this.lastSource = source;
+        this.lastGoodDataUrl = result.dataUrl;
+        this.showImage(view, result.dataUrl);
+        return;
+      }
+      const retry = result.timedOut ? () => {
+        this.lastSource = null;
+        void this.updateFromActiveEditor();
+      } : void 0;
+      if (this.lastGoodDataUrl) {
+        this.showImage(view, this.lastGoodDataUrl);
+      } else {
+        this.containerEl(view).empty();
+      }
+      this.showError(view, (_a = result.error) != null ? _a : "Render failed.", result.rawLog, retry);
+    });
+  }
+};
 
 // latexAutocomplete.ts
 var import_autocomplete = __toModule(require("@codemirror/autocomplete"));
@@ -521,312 +1062,51 @@ function latexAutocompleteExtension() {
   });
 }
 
-// latexErrorMapping.ts
-var LATEX_LINE_PATTERN = /(?:^|\n)\s*l\.(\d+)/;
-function getUserSourceLineOffset(wrapperPrefix) {
-  if (!wrapperPrefix) {
-    return 0;
-  }
-  return wrapperPrefix.split("\n").length;
-}
-function parseLatexErrorLine(raw) {
-  const match = raw.match(LATEX_LINE_PATTERN);
-  if (!match) {
-    return null;
-  }
-  const line = parseInt(match[1], 10);
-  return Number.isFinite(line) ? line : null;
-}
-function extractUsefulLatexError(raw) {
-  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const bangLine = lines.find((line) => line.startsWith("! "));
-  if (bangLine) {
-    return bangLine.replace(/^!\s*/, "").trim();
-  }
-  const usefulLine = lines.find((line) => line.includes("Undefined control sequence") || line.includes("Missing") || line.includes("Runaway argument") || line.includes("Fatal error"));
-  if (usefulLine) {
-    return usefulLine.trim();
-  }
-  return "Syntax error";
-}
-function mapTidiedLineToNoteLine(blockStartLine, blockEndLine, getLineText, tidiedLine) {
-  let nonEmptyIndex = 0;
-  for (let line = blockStartLine + 1; line < blockEndLine; line++) {
-    const text = getLineText(line).trim();
-    if (!text) {
-      continue;
-    }
-    nonEmptyIndex++;
-    if (nonEmptyIndex === tidiedLine) {
-      return line + 1;
-    }
-  }
-  return null;
-}
-function formatLatexErrorWithLineMapping(raw, tidiedSource, sourceLineOffset, noteLineMapper) {
-  var _a, _b;
-  const usefulError = extractUsefulLatexError(raw);
-  const latexLine = parseLatexErrorLine(raw);
-  if (latexLine === null || latexLine <= sourceLineOffset) {
-    return { message: usefulError };
-  }
-  const userLine = latexLine - sourceLineOffset;
-  const sourceLines = tidiedSource.split("\n");
-  const lineContent = (_a = sourceLines[userLine - 1]) == null ? void 0 : _a.trim();
-  const noteLine = (_b = noteLineMapper == null ? void 0 : noteLineMapper(userLine)) != null ? _b : void 0;
-  const snippet = lineContent ? lineContent.length > 80 ? `${lineContent.slice(0, 77)}...` : lineContent : usefulError;
-  if (noteLine !== void 0) {
-    return {
-      message: `Error near line ${noteLine} in note (TikZ block line ${userLine}): ${snippet}`,
-      userLine,
-      lineContent,
-      noteLine
-    };
-  }
-  return {
-    message: `Error near line ${userLine} in your TikZ block: ${snippet}`,
-    userLine,
-    lineContent
-  };
-}
-
-// simpleShapes.ts
-var SIMPLE_TIKZ_HELPERS = String.raw`
-% ---------- Logic gates inherit scope / tikzpicture scaling ----------
-\tikzset{
-  every and gate US/.append style={transform shape},
-  every or gate US/.append style={transform shape},
-  every not gate US/.append style={transform shape},
-  every nand gate US/.append style={transform shape},
-  every nor gate US/.append style={transform shape},
-  every xor gate US/.append style={transform shape},
-  every xnor gate US/.append style={transform shape},
-  every buffer gate US/.append style={transform shape},
-}
-
-% ---------- Simple drawing helpers ----------
-\def\Circle(#1,#2,#3){\draw (#1,#2) circle (#3);}
-\def\FilledCircle(#1,#2,#3){\fill (#1,#2) circle (#3);}
-\def\Point(#1,#2){\fill (#1,#2) circle (1.7pt);}
-\def\Line(#1,#2,#3,#4){\draw (#1,#2) -- (#3,#4);}
-\def\Arrow(#1,#2,#3,#4){\draw[->] (#1,#2) -- (#3,#4);}
-\def\DArrow(#1,#2,#3,#4){\draw[<->] (#1,#2) -- (#3,#4);}
-\def\DashedLine(#1,#2,#3,#4){\draw[dashed] (#1,#2) -- (#3,#4);}
-\def\DottedLine(#1,#2,#3,#4){\draw[dotted] (#1,#2) -- (#3,#4);}
-\def\HLine(#1,#2,#3){\draw (#1,#3) -- (#2,#3);}
-\def\VLine(#1,#2,#3){\draw (#3,#1) -- (#3,#2);}
-\def\Rect(#1,#2,#3,#4){\draw (#1,#2) rectangle (#3,#4);}
-\def\FilledRect(#1,#2,#3,#4){\fill (#1,#2) rectangle (#3,#4);}
-\def\RoundedRect(#1,#2,#3,#4){\draw[rounded corners] (#1,#2) rectangle (#3,#4);}
-\def\FilledRoundedRect(#1,#2,#3,#4){\fill[rounded corners] (#1,#2) rectangle (#3,#4);}
-\def\Ellipse(#1,#2,#3,#4){\draw (#1,#2) ellipse (#3 and #4);}
-\def\FilledEllipse(#1,#2,#3,#4){\fill (#1,#2) ellipse (#3 and #4);}
-\def\Cross(#1,#2,#3){
-\draw (#1-#3,#2) -- (#1+#3,#2);
-\draw (#1,#2-#3) -- (#1,#2+#3);
-}
-\def\Diamond(#1,#2,#3,#4){
-\draw (#1,#2+#4) -- (#1+#3,#2) -- (#1,#2-#4) -- (#1-#3,#2) -- cycle;
-}
-\def\FilledDiamond(#1,#2,#3,#4){
-\fill (#1,#2+#4) -- (#1+#3,#2) -- (#1,#2-#4) -- (#1-#3,#2) -- cycle;
-}
-\def\Arc(#1,#2,#3,#4,#5){\draw (#1,#2) arc (#4:#5:#3);}
-\def\RightAngle(#1,#2,#3){
-\draw (#1,#2+#3) -- (#1,#2) -- (#1+#3,#2);
-}
-\def\Grid(#1,#2,#3,#4,#5){
-\draw[step=#5] (#1,#2) grid (#3,#4);
-}
-\def\Axis(#1,#2,#3,#4){
-\draw[->] (#1,0) -- (#2,0) node[right] {$x$};
-\draw[->] (0,#3) -- (0,#4) node[above] {$y$};
-}
-\def\AxisNamed(#1,#2,#3,#4,#5,#6){
-\draw[->] (#1,0) -- (#2,0) node[right] {#5};
-\draw[->] (0,#3) -- (0,#4) node[above] {#6};
-}
-
-% ---------- Simple text helpers ----------
-\def\Text(#1,#2,#3){\node[transform shape] at (#1,#2) {#3};}
-\def\SmallText(#1,#2,#3){\node[font=\small, transform shape] at (#1,#2) {#3};}
-\def\TinyText(#1,#2,#3){\node[font=\tiny, transform shape] at (#1,#2) {#3};}
-\def\TextAbove(#1,#2,#3){\node[above, transform shape] at (#1,#2) {#3};}
-\def\TextBelow(#1,#2,#3){\node[below, transform shape] at (#1,#2) {#3};}
-\def\TextLeft(#1,#2,#3){\node[left, transform shape] at (#1,#2) {#3};}
-\def\TextRight(#1,#2,#3){\node[right, transform shape] at (#1,#2) {#3};}
-
-% ---------- Simple logic gates ----------
-\def\ANDgate(#1,#2,#3){
-\node[and gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
-}
-
-\def\ORgate(#1,#2,#3){
-\node[or gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
-}
-
-\def\NOTgate(#1,#2,#3){
-\node[not gate US, draw, anchor=input, transform shape] (#3) at (#1,#2) {};
-}
-
-% ---------- More logic gates ----------
-\def\BUFFERgate(#1,#2,#3){
-\node[buffer gate US, draw, anchor=input, transform shape] (#3) at (#1,#2) {};
-}
-
-\def\NANDgate(#1,#2,#3){
-\node[nand gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
-}
-
-\def\NORgate(#1,#2,#3){
-\node[nor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
-}
-
-\def\XORgate(#1,#2,#3){
-\node[xor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
-}
-
-\def\XNORgate(#1,#2,#3){
-\node[xnor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
-}
-
-% ---------- Logic-gate wire helpers ----------
-\def\LogicWire(#1,#2){
-\draw (#1) -- ++(0.35,0) |- (#2);
-}
-
-\def\LogicWireArrow(#1,#2){
-\draw[->] (#1) -- ++(0.35,0) |- (#2);
-}
-
-\def\LogicWireDirect(#1,#2){
-\draw (#1) -- (#2);
-}
-
-\def\LogicWireFrom(#1,#2,#3){
-\draw (#1,#2) -- ++(0.35,0) |- (#3);
-}
-
-\def\LogicWireFromArrow(#1,#2,#3){
-\draw[->] (#1,#2) -- ++(0.35,0) |- (#3);
-}
-
-\def\LogicWireTo(#1,#2,#3){
-\draw (#1) -- ++(0.35,0) |- (#2,#3);
-}
-
-\def\LogicWireToArrow(#1,#2,#3){
-\draw[->] (#1) -- ++(0.35,0) |- (#2,#3);
-}
-
-\def\Triangle(#1,#2,#3,#4,#5,#6){
-\draw (#1,#2) -- (#3,#4) -- (#5,#6) -- cycle;
-}
-
-\def\FilledTriangle(#1,#2,#3,#4,#5,#6){
-\fill (#1,#2) -- (#3,#4) -- (#5,#6) -- cycle;
-}
-
-% ---------- Simple circuit symbols ----------
-\def\Resistor(#1,#2,#3,#4){
-\draw (#1,#2) -- ++(0.15,0);
-\draw (#1+0.15,#2-#4/2) rectangle ++(#3-0.3,#4);
-\draw (#1+#3-0.15,#2) -- ++(0.15,0);
-}
-
-\def\Capacitor(#1,#2,#3,#4){
-\draw (#1,#2) -- ++(0.15,0);
-\draw (#1+0.15,#2-#4) -- (#1+0.15,#2+#4);
-\draw (#1+0.15+#3,#2-#4) -- (#1+0.15+#3,#2+#4);
-\draw (#1+0.15+#3,#2) -- ++(0.15,0);
-}
-
-\def\Ground(#1,#2,#3){
-\draw (#1,#2) -- (#1,#2-#3);
-\draw (#1-0.25,#2-#3) -- (#1+0.25,#2-#3);
-\draw (#1-0.15,#2-#3-0.12) -- (#1+0.15,#2-#3-0.12);
-\draw (#1-0.08,#2-#3-0.24) -- (#1+0.08,#2-#3-0.24);
-}
-
-\def\VSource(#1,#2,#3,#4){
-\draw (#1,#2) circle (#3);
-\node[transform shape] at (#1,#2) {$#4$};
-}
-`;
-
-// settings.ts
-var import_obsidian = __toModule(require("obsidian"));
-var TikzjaxSettingTab = class extends import_obsidian.PluginSettingTab {
-  constructor(app, plugin) {
-    super(app, plugin);
-    this.plugin = plugin;
-  }
-  display() {
-    const { containerEl } = this;
-    containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Invert dark colors in dark mode").setDesc("Invert dark colors in diagrams (e.g. axes, arrows) when in dark mode, so that they are visible.").addToggle((toggle) => toggle.setValue(this.plugin.settings.invertColorsInDarkMode).onChange((value) => __async(this, null, function* () {
-      this.plugin.settings.invertColorsInDarkMode = value;
-      yield this.plugin.saveSettings();
-    })));
-    new import_obsidian.Setting(containerEl).setName("Enable inline live preview by default").setDesc("Automatically show the floating live TikZ preview when the cursor is inside a TikZ block.").addToggle((toggle) => toggle.setValue(this.plugin.settings.inlineLivePreviewEnabledByDefault).onChange((value) => __async(this, null, function* () {
-      this.plugin.settings.inlineLivePreviewEnabledByDefault = value;
-      yield this.plugin.saveSettings();
-    })));
-  }
-};
-
-// main.ts
+// commandResolver.ts
+var import_child_process = __toModule(require("child_process"));
 var fs = __toModule(require("fs"));
-var path = __toModule(require("path"));
-var os = __toModule(require("os"));
-var DEFAULT_SETTINGS = {
-  invertColorsInDarkMode: true,
-  inlineLivePreviewEnabledByDefault: true
+var RenderTimeoutError = class extends Error {
+  constructor(timeoutMs) {
+    super(`Timed out after ${Math.round(timeoutMs / 1e3)}s`);
+    this.name = "RenderTimeoutError";
+  }
 };
-var execFileAsync = (0, import_util.promisify)(import_child_process.execFile);
-var DOCUMENTCLASS_LINE = "\\documentclass[tikz,border=5pt]{standalone}\n";
-var LATEX_WRAPPER_PREFIX = `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
-\\usepackage{polyglossia}
-
-\\setmainlanguage{english}
-\\setotherlanguage{hebrew}
-
-\\newfontfamily\\hebrewfont[Script=Hebrew]{David CLM}
-\\newfontfamily\\hebrewfontsf[Script=Hebrew]{David CLM}
-\\newfontfamily\\hebrewfonttt[Script=Hebrew]{David CLM}
-
-\\usepackage{tikz}
-\\usetikzlibrary{arrows.meta,positioning,calc,shapes,decorations.pathmorphing,shapes.gates.logic.US}
-\\usepackage{amsmath}
-\\usepackage{amssymb}
-\\usepackage{circuitikz}
-\\usepackage{pgfplots}
-\\pgfplotsset{compat=1.18}
-
-\\newcommand{\\he}[1]{\\texthebrew{#1}}
-${SIMPLE_TIKZ_HELPERS}
-\\begin{document}
-`;
-var LATEX_WRAPPER_SUFFIX = `
-\\end{document}
-`;
-var USER_SOURCE_LINE_OFFSET = getUserSourceLineOffset(LATEX_WRAPPER_PREFIX);
-function fileExists(filePath) {
-  return __async(this, null, function* () {
-    return fs.existsSync(filePath);
+function execFileWithTimeout(file, args, options, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let timedOut = false;
+    const child = (0, import_child_process.execFile)(file, args, options, (err, stdout, stderr) => {
+      var _a, _b;
+      if (timedOut) {
+        return;
+      }
+      clearTimeout(timer);
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve({
+        stdout: (_a = stdout == null ? void 0 : stdout.toString()) != null ? _a : "",
+        stderr: (_b = stderr == null ? void 0 : stderr.toString()) != null ? _b : ""
+      });
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+      reject(new RenderTimeoutError(timeoutMs));
+    }, timeoutMs);
   });
 }
-function resolveCommand(commandName, candidates) {
+function resolveCommand(candidates) {
   return __async(this, null, function* () {
     for (const candidate of candidates) {
       if (candidate.includes("/")) {
-        if (yield fileExists(candidate)) {
+        if (fs.existsSync(candidate)) {
           return candidate;
         }
         continue;
       }
       try {
-        const { stdout } = yield execFileAsync("/usr/bin/which", [candidate]);
+        const { stdout } = yield execFileWithTimeout("/usr/bin/which", [candidate], {}, 5e3);
         const resolved = stdout.trim();
         if (resolved) {
           return resolved;
@@ -839,7 +1119,7 @@ function resolveCommand(commandName, candidates) {
 }
 function resolveLuaLatex() {
   return __async(this, null, function* () {
-    return resolveCommand("lualatex", [
+    return resolveCommand([
       "/Library/TeX/texbin/lualatex",
       "/usr/local/texlive/2025/bin/universal-darwin/lualatex",
       "/usr/local/bin/lualatex",
@@ -849,7 +1129,7 @@ function resolveLuaLatex() {
 }
 function resolvePdfToCairo() {
   return __async(this, null, function* () {
-    return resolveCommand("pdftocairo", [
+    return resolveCommand([
       "/opt/homebrew/bin/pdftocairo",
       "/usr/local/bin/pdftocairo",
       "/usr/bin/pdftocairo",
@@ -857,128 +1137,239 @@ function resolvePdfToCairo() {
     ]);
   });
 }
-function wrapLatexSource(source) {
-  let cleanedSource = source;
-  cleanedSource = cleanedSource.replace(/\\documentclass(?:\[[^\]]*\])?\{[^}]+\}/g, "");
-  cleanedSource = cleanedSource.replace(/\\usepackage(?:\[[^\]]*\])?\{[^}]+\}/g, "");
-  cleanedSource = cleanedSource.replace(/\\pgfplotsset\{[^}]*\}/g, "");
-  cleanedSource = cleanedSource.replace(/\\begin\{document\}/g, "");
-  cleanedSource = cleanedSource.replace(/\\end\{document\}/g, "");
-  cleanedSource = cleanedSource.replace(/\\setmainlanguage\{[^}]+\}/g, "");
-  cleanedSource = cleanedSource.replace(/\\setotherlanguage\{[^}]+\}/g, "");
-  cleanedSource = cleanedSource.replace(/\\setmainfont(?:\[[^\]]*\])?\{[^}]+\}/g, "");
-  cleanedSource = cleanedSource.replace(/\\setsansfont(?:\[[^\]]*\])?\{[^}]+\}/g, "");
-  cleanedSource = cleanedSource.replace(/\\newfontfamily\\\w+(?:\[[^\]]*\])?\{[^}]+\}/g, "");
-  return LATEX_WRAPPER_PREFIX + cleanedSource.trim() + LATEX_WRAPPER_SUFFIX;
-}
 function readLogTail(logPath, maxChars = 8e3) {
   if (!fs.existsSync(logPath)) {
     return "";
   }
   const log = fs.readFileSync(logPath, "utf8");
-  if (log.length <= maxChars) {
-    return log;
-  }
-  return "...(truncated)...\n" + log.slice(-maxChars);
+  return log.length <= maxChars ? log : `...(truncated)...
+${log.slice(-maxChars)}`;
 }
 function formatExecError(err) {
+  if (err instanceof RenderTimeoutError) {
+    return err.message;
+  }
   if (err instanceof Error) {
     const execErr = err;
-    const parts = [execErr.message];
-    if (execErr.stdout) {
-      parts.push(execErr.stdout);
-    }
-    if (execErr.stderr) {
-      parts.push(execErr.stderr);
-    }
-    return parts.join("\n");
+    return [execErr.message, execErr.stdout, execErr.stderr].filter(Boolean).join("\n");
   }
   return String(err);
 }
-function getCurrentTikzBlock(editor) {
-  const cursor = editor.getCursor();
-  const lineCount = editor.lineCount();
-  let startLine = -1;
-  for (let line = cursor.line; line >= 0; line--) {
-    const text = editor.getLine(line).trim();
-    if (text.startsWith("```tikz")) {
-      startLine = line;
-      break;
-    }
-    if (text === "```") {
-      return null;
-    }
-  }
-  if (startLine === -1) {
-    return null;
-  }
-  let endLine = -1;
-  for (let line = startLine + 1; line < lineCount; line++) {
-    const text = editor.getLine(line).trim();
-    if (text === "```") {
-      endLine = line;
-      break;
-    }
-  }
-  if (endLine === -1) {
-    return null;
-  }
-  if (cursor.line <= startLine || cursor.line >= endLine) {
-    return null;
-  }
-  const source = editor.getRange({ line: startLine + 1, ch: 0 }, { line: endLine, ch: 0 });
-  return {
-    source,
-    startLine,
-    endLine
-  };
+
+// renderer.ts
+var import_crypto = __toModule(require("crypto"));
+var fs2 = __toModule(require("fs"));
+var os = __toModule(require("os"));
+var path = __toModule(require("path"));
+var RENDER_TIMEOUT_MS = 6e4;
+var CACHE_MAX = 32;
+var CACHE_TTL_MS = 30 * 60 * 1e3;
+function cacheKey(source, invertDark) {
+  return (0, import_crypto.createHash)("sha256").update(source).update(invertDark ? ":dark" : ":light").digest("hex");
 }
-var TikzjaxHebrewLocalPlugin = class extends import_obsidian2.Plugin {
+function svgDataUrl(svgText) {
+  return `data:image/svg+xml;base64,${Buffer.from(svgText, "utf8").toString("base64")}`;
+}
+function invertSvgForDarkMode(svg) {
+  return svg.replaceAll("rgb(0%,0%,0%)", "rgb(100%,100%,100%)").replace(/rgb[(]0%,[ \t]*0%,[ \t]*0%[)]/g, "rgb(100%,100%,100%)").replace(/rgb[(]0,[ \t]*0,[ \t]*0[)]/g, "rgb(255,255,255)").replace(/#000000(?![0-9a-f])/gi, "#ffffff").replace(/#000(?![0-9a-f])/gi, "#fff").replace(/stroke:[ \t]*black/gi, "stroke:white").replace(/fill:[ \t]*black/gi, "fill:white").replace(/stroke="black"/gi, 'stroke="white"').replace(/fill="black"/gi, 'fill="white"');
+}
+var TikzRenderer = class {
+  constructor(invertInDarkMode) {
+    this.invertInDarkMode = invertInDarkMode;
+    this.cache = new Map();
+    this.inFlight = new Map();
+  }
+  renderToSvg(source, errorContext) {
+    return __async(this, null, function* () {
+      const invertDark = this.invertInDarkMode() && document.body.classList.contains("theme-dark");
+      const key = cacheKey(source, invertDark);
+      const hit = this.cache.get(key);
+      if (hit && Date.now() - hit.createdAt <= CACHE_TTL_MS) {
+        this.cache.delete(key);
+        this.cache.set(key, hit);
+        return { ok: true, svgText: hit.svgText, dataUrl: svgDataUrl(hit.svgText) };
+      }
+      if (hit) {
+        this.cache.delete(key);
+      }
+      const pending = this.inFlight.get(key);
+      if (pending) {
+        return pending;
+      }
+      const renderPromise = this.compile(source, errorContext, invertDark, key).finally(() => this.inFlight.delete(key));
+      this.inFlight.set(key, renderPromise);
+      return renderPromise;
+    });
+  }
+  clearCache() {
+    this.cache.clear();
+    this.inFlight.clear();
+  }
+  latexError(rawError, source, errorContext, timedOut = false) {
+    const noteLineMapper = (errorContext == null ? void 0 : errorContext.block) && errorContext.editor ? (userLine) => mapTidiedLineToNoteLine(errorContext.block.startLine, errorContext.block.endLine, (line) => errorContext.editor.getLine(line), userLine) : void 0;
+    const mapped = formatLatexErrorWithLineMapping(rawError, source, USER_SOURCE_LINE_OFFSET, noteLineMapper);
+    return {
+      ok: false,
+      error: timedOut ? "Timed out." : mapped.message,
+      rawLog: rawError,
+      userLine: mapped.userLine,
+      noteLine: mapped.noteLine,
+      lineContent: mapped.lineContent,
+      timedOut
+    };
+  }
+  remember(key, svgText) {
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
+    this.cache.set(key, { svgText, createdAt: Date.now() });
+    while (this.cache.size > CACHE_MAX) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === void 0) {
+        break;
+      }
+      this.cache.delete(oldest);
+    }
+  }
+  compile(source, errorContext, invertDark, key) {
+    return __async(this, null, function* () {
+      const tmpDir = fs2.mkdtempSync(path.join(os.tmpdir(), "obsidian-tikz-"));
+      const texPath = path.join(tmpDir, "diagram.tex");
+      const pdfPath = path.join(tmpDir, "diagram.pdf");
+      const logPath = path.join(tmpDir, "diagram.log");
+      const svgPath = path.join(tmpDir, "diagram.svg");
+      try {
+        fs2.writeFileSync(texPath, wrapLatexSource(source), "utf8");
+        const lualatex = yield resolveLuaLatex();
+        if (!lualatex) {
+          return {
+            ok: false,
+            error: "LuaLaTeX not found.",
+            rawLog: "Expected at /Library/TeX/texbin/lualatex\nCheck: which lualatex"
+          };
+        }
+        try {
+          yield execFileWithTimeout(lualatex, [
+            "-interaction=nonstopmode",
+            "-halt-on-error",
+            `-output-directory=${tmpDir}`,
+            texPath
+          ], { cwd: tmpDir, maxBuffer: 10 * 1024 * 1024 }, RENDER_TIMEOUT_MS);
+        } catch (err) {
+          const logTail = readLogTail(logPath);
+          const raw = [formatExecError(err), logTail && `
+--- log ---
+${logTail}`].filter(Boolean).join("\n");
+          return this.latexError(raw, source, errorContext, err instanceof RenderTimeoutError);
+        }
+        if (!fs2.existsSync(pdfPath)) {
+          const logTail = readLogTail(logPath);
+          if (logTail) {
+            return this.latexError(`No PDF produced.
+--- log ---
+${logTail}`, source, errorContext);
+          }
+          return { ok: false, error: "No PDF produced.", rawLog: "LuaLaTeX exited without diagram.pdf." };
+        }
+        const pdftocairo = yield resolvePdfToCairo();
+        if (!pdftocairo) {
+          return {
+            ok: false,
+            error: "pdftocairo not found.",
+            rawLog: "Install: brew install poppler"
+          };
+        }
+        try {
+          yield execFileWithTimeout(pdftocairo, ["-svg", pdfPath, svgPath], {
+            cwd: tmpDir,
+            maxBuffer: 30 * 1024 * 1024
+          }, RENDER_TIMEOUT_MS);
+        } catch (err) {
+          return this.latexError(formatExecError(err), source, errorContext, err instanceof RenderTimeoutError);
+        }
+        if (!fs2.existsSync(svgPath)) {
+          return { ok: false, error: "No SVG produced.", rawLog: `PDF: ${pdfPath}` };
+        }
+        let svgText = fs2.readFileSync(svgPath, "utf8");
+        if (invertDark) {
+          svgText = invertSvgForDarkMode(svgText);
+        }
+        this.remember(key, svgText);
+        return { ok: true, svgText, dataUrl: svgDataUrl(svgText) };
+      } finally {
+        try {
+          fs2.rmSync(tmpDir, { recursive: true, force: true });
+        } catch (e) {
+        }
+      }
+    });
+  }
+};
+
+// settings.ts
+var import_obsidian2 = __toModule(require("obsidian"));
+var DEFAULT_SETTINGS = {
+  invertColorsInDarkMode: true,
+  inlineLivePreviewEnabledByDefault: true
+};
+var TikzjaxSettingTab = class extends import_obsidian2.PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    new import_obsidian2.Setting(containerEl).setName("Invert colors in dark mode").setDesc("Flip black strokes/fills to white when Obsidian is in dark mode.").addToggle((toggle) => toggle.setValue(this.plugin.settings.invertColorsInDarkMode).onChange((value) => __async(this, null, function* () {
+      this.plugin.settings.invertColorsInDarkMode = value;
+      yield this.plugin.saveSettings();
+    })));
+    new import_obsidian2.Setting(containerEl).setName("Live preview by default").setDesc("Show the floating preview when the cursor is inside a tikz block.").addToggle((toggle) => toggle.setValue(this.plugin.settings.inlineLivePreviewEnabledByDefault).onChange((value) => __async(this, null, function* () {
+      this.plugin.settings.inlineLivePreviewEnabledByDefault = value;
+      yield this.plugin.saveSettings();
+    })));
+  }
+};
+
+// main.ts
+var LuaTikzPlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
-    this.inlinePreviewEnabled = false;
-    this.inlinePreviewContainer = null;
-    this.inlinePreviewTimer = null;
-    this.inlinePreviewLastGoodDataUrl = null;
-    this.inlinePreviewLastSource = null;
-    this.inlinePreviewRenderToken = 0;
   }
   onload() {
     return __async(this, null, function* () {
       yield this.loadSettings();
+      this.renderer = new TikzRenderer(() => this.settings.invertColorsInDarkMode);
+      this.inlinePreview = new InlinePreviewManager(() => this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView), this.renderer);
       this.registerEditorExtension(latexAutocompleteExtension());
       this.addCommand({
         id: "toggle-tikz-inline-live-preview",
-        name: "LuaTikZ: Toggle inline live preview",
-        callback: () => {
-          this.toggleInlineLivePreview();
-        }
+        name: "Toggle inline live preview",
+        callback: () => this.toggleInlineLivePreview()
       });
       this.registerEvent(this.app.workspace.on("editor-change", () => {
-        this.scheduleInlinePreviewUpdate();
+        this.inlinePreview.scheduleUpdate();
       }));
       this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
-        this.scheduleInlinePreviewUpdate();
+        this.inlinePreview.scheduleUpdate();
       }));
       this.registerDomEvent(document, "selectionchange", () => {
-        this.scheduleInlinePreviewUpdate();
+        this.inlinePreview.scheduleUpdate();
       });
       this.addSettingTab(new TikzjaxSettingTab(this.app, this));
       this.addSyntaxHighlighting();
       this.registerTikzCodeBlock();
       if (this.settings.inlineLivePreviewEnabledByDefault) {
-        this.inlinePreviewEnabled = true;
-        this.scheduleInlinePreviewUpdate(500);
+        this.inlinePreview.enable(500);
       }
     });
   }
   onunload() {
     this.removeSyntaxHighlighting();
-    this.disableInlineLivePreview();
-    if (this.inlinePreviewTimer) {
-      window.clearTimeout(this.inlinePreviewTimer);
-    }
+    this.inlinePreview.disable();
+    this.inlinePreview.clearTimer();
+    this.renderer.clearCache();
   }
   loadSettings() {
     return __async(this, null, function* () {
@@ -988,427 +1379,52 @@ var TikzjaxHebrewLocalPlugin = class extends import_obsidian2.Plugin {
   saveSettings() {
     return __async(this, null, function* () {
       yield this.saveData(this.settings);
+      this.renderer.clearCache();
     });
   }
   registerTikzCodeBlock() {
     this.registerMarkdownCodeBlockProcessor("tikz", (source, el) => __async(this, null, function* () {
       el.empty();
-      const loadingEl = el.createDiv({ cls: "tikzjax-hebrew-local-output" });
-      loadingEl.setText("Rendering TikZ diagram\u2026");
-      try {
-        const cleanedSource = this.tidyTikzSource(source);
-        if (!cleanedSource.trim()) {
-          this.showError(el, "Nothing to render.");
-          return;
+      el.createDiv({ cls: "tikzjax-hebrew-local-output", text: "Rendering\u2026" });
+      const render = () => __async(this, null, function* () {
+        var _a;
+        try {
+          const cleaned = tidyTikzSource(source);
+          if (!cleaned.trim()) {
+            showTikzError(el, "Nothing to render.");
+            return;
+          }
+          const result = yield this.renderer.renderToSvg(cleaned);
+          if (!result.ok || !result.dataUrl || !result.svgText) {
+            const retry = result.timedOut ? () => {
+              el.empty();
+              el.createDiv({ cls: "tikzjax-hebrew-local-output", text: "Rendering\u2026" });
+              void render();
+            } : void 0;
+            showTikzError(el, (_a = result.error) != null ? _a : "Render failed.", result.rawLog, retry);
+            return;
+          }
+          renderTikzDiagram(el, result);
+        } catch (err) {
+          showTikzError(el, "Render failed.", formatExecError(err));
         }
-        yield this.renderTikz(cleanedSource, el);
-      } catch (err) {
-        this.showError(el, "Render error.", formatExecError(err));
-      }
+      });
+      yield render();
     }));
   }
   toggleInlineLivePreview() {
-    if (this.inlinePreviewEnabled) {
-      this.disableInlineLivePreview();
-      new import_obsidian2.Notice("LuaTikZ inline live preview disabled.");
+    if (this.inlinePreview.enabled) {
+      this.inlinePreview.disable();
+      new import_obsidian3.Notice("Live preview off.");
       return;
     }
-    this.inlinePreviewEnabled = true;
-    new import_obsidian2.Notice("LuaTikZ inline live preview enabled.");
-    this.scheduleInlinePreviewUpdate(0);
-  }
-  disableInlineLivePreview() {
-    this.inlinePreviewEnabled = false;
-    this.inlinePreviewLastGoodDataUrl = null;
-    this.inlinePreviewLastSource = null;
-    if (this.inlinePreviewTimer) {
-      window.clearTimeout(this.inlinePreviewTimer);
-      this.inlinePreviewTimer = null;
-    }
-    if (this.inlinePreviewContainer) {
-      this.inlinePreviewContainer.remove();
-      this.inlinePreviewContainer = null;
-    }
-  }
-  scheduleInlinePreviewUpdate(delay = 800) {
-    if (!this.inlinePreviewEnabled) {
-      return;
-    }
-    if (this.inlinePreviewTimer) {
-      window.clearTimeout(this.inlinePreviewTimer);
-    }
-    this.inlinePreviewTimer = window.setTimeout(() => {
-      this.updateInlinePreviewFromActiveEditor();
-    }, delay);
-  }
-  getActiveMarkdownView() {
-    return this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
-  }
-  getOrCreateInlinePreviewContainer(markdownView) {
-    if (this.inlinePreviewContainer && document.body.contains(this.inlinePreviewContainer)) {
-      return this.inlinePreviewContainer;
-    }
-    const container = markdownView.containerEl.createDiv({
-      cls: "tikzjax-hebrew-local-inline-preview"
-    });
-    this.inlinePreviewContainer = container;
-    return container;
-  }
-  hideInlinePreview() {
-    if (this.inlinePreviewContainer) {
-      this.inlinePreviewContainer.remove();
-      this.inlinePreviewContainer = null;
-    }
-  }
-  showInlineMessage(markdownView, message) {
-    const container = this.getOrCreateInlinePreviewContainer(markdownView);
-    container.empty();
-    container.createDiv({
-      cls: "tikzjax-hebrew-local-inline-preview-message",
-      text: message
-    });
-  }
-  showInlineImage(markdownView, dataUrl) {
-    const container = this.getOrCreateInlinePreviewContainer(markdownView);
-    container.empty();
-    const output = container.createDiv({
-      cls: "tikzjax-hebrew-local-output"
-    });
-    const img = output.createEl("img");
-    img.setAttr("src", dataUrl);
-    img.setAttr("alt", "TikZ diagram");
-    img.addClass("tikzjax-hebrew-local-image");
-  }
-  showInlineError(markdownView, message, details) {
-    const container = this.getOrCreateInlinePreviewContainer(markdownView);
-    const errorEl = container.createDiv({
-      cls: "tikzjax-hebrew-local-error tikzjax-hebrew-local-inline-preview-error"
-    });
-    const titleEl = errorEl.createDiv({
-      cls: "tikzjax-hebrew-local-error-title"
-    });
-    titleEl.setText(message);
-    if (!details) {
-      return;
-    }
-    const buttonRow = errorEl.createDiv({
-      cls: "tikzjax-hebrew-local-error-button-row"
-    });
-    const copyButton = buttonRow.createEl("button", {
-      text: "Copy error",
-      cls: "tikzjax-hebrew-local-error-button"
-    });
-    copyButton.addEventListener("click", () => __async(this, null, function* () {
-      try {
-        yield navigator.clipboard.writeText(details);
-        new import_obsidian2.Notice("LuaTikZ error copied.");
-      } catch (e) {
-        new import_obsidian2.Notice("Could not copy error.");
-      }
-    }));
-    const button = buttonRow.createEl("button", {
-      text: "Show full error",
-      cls: "tikzjax-hebrew-local-error-button"
-    });
-    const detailsEl = errorEl.createEl("pre", {
-      cls: "tikzjax-hebrew-local-error-details"
-    });
-    detailsEl.setText(details);
-    detailsEl.style.display = "none";
-    button.addEventListener("click", () => {
-      const isHidden = detailsEl.style.display === "none";
-      detailsEl.style.display = isHidden ? "block" : "none";
-      button.setText(isHidden ? "Hide full error" : "Show full error");
-    });
-  }
-  updateInlinePreviewFromActiveEditor() {
-    return __async(this, null, function* () {
-      var _a, _b;
-      if (!this.inlinePreviewEnabled) {
-        return;
-      }
-      const markdownView = this.getActiveMarkdownView();
-      if (!markdownView) {
-        this.hideInlinePreview();
-        return;
-      }
-      const block = getCurrentTikzBlock(markdownView.editor);
-      if (!block) {
-        this.hideInlinePreview();
-        return;
-      }
-      const cleanedSource = this.tidyTikzSource(block.source);
-      if (!cleanedSource.trim()) {
-        this.showInlineMessage(markdownView, "Nothing to render.");
-        return;
-      }
-      if (cleanedSource === this.inlinePreviewLastSource && this.inlinePreviewLastGoodDataUrl) {
-        return;
-      }
-      const token = ++this.inlinePreviewRenderToken;
-      if (!this.inlinePreviewLastGoodDataUrl) {
-        this.showInlineMessage(markdownView, "Rendering TikZ diagram\u2026");
-      }
-      const result = yield this.renderTikzToSvgDataUrl(cleanedSource, {
-        block,
-        editor: markdownView.editor
-      });
-      if (token !== this.inlinePreviewRenderToken) {
-        return;
-      }
-      if (result.ok && result.dataUrl) {
-        this.inlinePreviewLastSource = cleanedSource;
-        this.inlinePreviewLastGoodDataUrl = result.dataUrl;
-        this.showInlineImage(markdownView, result.dataUrl);
-        return;
-      }
-      if (this.inlinePreviewLastGoodDataUrl) {
-        this.showInlineImage(markdownView, this.inlinePreviewLastGoodDataUrl);
-        this.showInlineError(markdownView, (_a = result.error) != null ? _a : "Render error.", result.rawLog);
-        return;
-      }
-      const container = this.getOrCreateInlinePreviewContainer(markdownView);
-      container.empty();
-      this.showInlineError(markdownView, (_b = result.error) != null ? _b : "Render error.", result.rawLog);
-    });
-  }
-  buildLatexErrorResult(rawError, tidiedSource, errorContext) {
-    const noteLineMapper = (errorContext == null ? void 0 : errorContext.block) && errorContext.editor ? (userLine) => mapTidiedLineToNoteLine(errorContext.block.startLine, errorContext.block.endLine, (line) => errorContext.editor.getLine(line), userLine) : void 0;
-    const mapped = formatLatexErrorWithLineMapping(rawError, tidiedSource, USER_SOURCE_LINE_OFFSET, noteLineMapper);
-    return {
-      ok: false,
-      error: mapped.message,
-      rawLog: rawError,
-      userLine: mapped.userLine,
-      noteLine: mapped.noteLine,
-      lineContent: mapped.lineContent
-    };
-  }
-  renderTikzToSvgDataUrl(source, errorContext) {
-    return __async(this, null, function* () {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "obsidian-tikz-hebrew-"));
-      const texPath = path.join(tmpDir, "diagram.tex");
-      const pdfPath = path.join(tmpDir, "diagram.pdf");
-      const logPath = path.join(tmpDir, "diagram.log");
-      const svgPath = path.join(tmpDir, "diagram.svg");
-      const wrappedSource = wrapLatexSource(source);
-      fs.writeFileSync(texPath, wrappedSource, "utf8");
-      const lualatexPath = yield resolveLuaLatex();
-      if (!lualatexPath) {
-        this.cleanupTempDir(tmpDir);
-        return {
-          ok: false,
-          error: "LuaLaTeX was not found.",
-          rawLog: "On macOS, LuaLaTeX is usually located at:\n/Library/TeX/texbin/lualatex\n\nCheck in Terminal with:\nwhich lualatex"
-        };
-      }
-      try {
-        yield execFileAsync(lualatexPath, [
-          "-interaction=nonstopmode",
-          "-halt-on-error",
-          `-output-directory=${tmpDir}`,
-          texPath
-        ], {
-          cwd: tmpDir,
-          maxBuffer: 10 * 1024 * 1024
-        });
-      } catch (err) {
-        const logTail = readLogTail(logPath);
-        const rawError = [
-          formatExecError(err),
-          logTail ? "\n--- diagram.log (tail) ---\n" + logTail : ""
-        ].join("\n");
-        const errorResult = this.buildLatexErrorResult(rawError, source, errorContext);
-        this.cleanupTempDir(tmpDir);
-        return errorResult;
-      }
-      if (!fs.existsSync(pdfPath)) {
-        const logTail = readLogTail(logPath);
-        const details = [
-          "LuaLaTeX finished but diagram.pdf was not produced."
-        ];
-        if (logTail) {
-          details.push("", "--- diagram.log (tail) ---", logTail);
-          const errorResult = this.buildLatexErrorResult(details.join("\n"), source, errorContext);
-          this.cleanupTempDir(tmpDir);
-          return errorResult;
-        }
-        this.cleanupTempDir(tmpDir);
-        return {
-          ok: false,
-          error: "LuaLaTeX finished, but no PDF was produced.",
-          rawLog: details.join("\n")
-        };
-      }
-      const pdftocairoPath = yield resolvePdfToCairo();
-      if (!pdftocairoPath) {
-        this.cleanupTempDir(tmpDir);
-        return {
-          ok: false,
-          error: "PDF rendered, but SVG conversion is not available.",
-          rawLog: `pdftocairo was not found.
-
-Install it with:
-brew install poppler
-
-PDF path: ${pdfPath}`
-        };
-      }
-      try {
-        yield execFileAsync(pdftocairoPath, [
-          "-svg",
-          pdfPath,
-          svgPath
-        ], {
-          cwd: tmpDir,
-          maxBuffer: 30 * 1024 * 1024
-        });
-      } catch (err) {
-        this.cleanupTempDir(tmpDir);
-        return {
-          ok: false,
-          error: "PDF rendered, but SVG conversion failed.",
-          rawLog: `PDF path: ${pdfPath}
-
-${formatExecError(err)}`
-        };
-      }
-      if (!fs.existsSync(svgPath)) {
-        this.cleanupTempDir(tmpDir);
-        return {
-          ok: false,
-          error: "PDF rendered, but no SVG was produced.",
-          rawLog: `PDF path: ${pdfPath}`
-        };
-      }
-      let svgText = fs.readFileSync(svgPath, "utf8");
-      if (this.shouldConvertBlackToWhite()) {
-        svgText = this.convertBlackSvgToWhite(svgText);
-      }
-      const svgBase64 = Buffer.from(svgText, "utf8").toString("base64");
-      this.cleanupTempDir(tmpDir);
-      return {
-        ok: true,
-        dataUrl: `data:image/svg+xml;base64,${svgBase64}`,
-        svgText
-      };
-    });
-  }
-  downloadSvg(svgText, filename = "tikz-diagram.svg") {
-    const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  }
-  createDiagramToolbar(parent, svgText) {
-    const toolbar = parent.createDiv({ cls: "tikzjax-hebrew-local-toolbar" });
-    const exportButton = toolbar.createEl("button", {
-      text: "Export SVG",
-      cls: "tikzjax-hebrew-local-toolbar-button"
-    });
-    exportButton.addEventListener("click", () => {
-      this.downloadSvg(svgText);
-      new import_obsidian2.Notice("TikZ diagram exported as SVG.");
-    });
-    const copyButton = toolbar.createEl("button", {
-      text: "Copy SVG",
-      cls: "tikzjax-hebrew-local-toolbar-button"
-    });
-    copyButton.addEventListener("click", () => __async(this, null, function* () {
-      try {
-        yield navigator.clipboard.writeText(svgText);
-        new import_obsidian2.Notice("TikZ SVG copied to clipboard.");
-      } catch (e) {
-        new import_obsidian2.Notice("Could not copy SVG.");
-      }
-    }));
-  }
-  cleanupTempDir(tmpDir) {
-    try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    } catch (e) {
-    }
-  }
-  shouldConvertBlackToWhite() {
-    return this.settings.invertColorsInDarkMode && document.body.classList.contains("theme-dark");
-  }
-  convertBlackSvgToWhite(svg) {
-    return svg.replaceAll("rgb(0%,0%,0%)", "rgb(100%,100%,100%)").replace(new RegExp("rgb[(]0%,[ \\t]*0%,[ \\t]*0%[)]", "g"), "rgb(100%,100%,100%)").replace(new RegExp("rgb[(]0,[ \\t]*0,[ \\t]*0[)]", "g"), "rgb(255,255,255)").replace(new RegExp("#000000(?![0-9a-f])", "gi"), "#ffffff").replace(new RegExp("#000(?![0-9a-f])", "gi"), "#fff").replace(new RegExp("stroke:[ \\t]*black", "gi"), "stroke:white").replace(new RegExp("fill:[ \\t]*black", "gi"), "fill:white").replace(new RegExp('stroke="black"', "gi"), 'stroke="white"').replace(new RegExp('fill="black"', "gi"), 'fill="white"');
-  }
-  renderTikz(source, el) {
-    return __async(this, null, function* () {
-      var _a;
-      const result = yield this.renderTikzToSvgDataUrl(source);
-      if (!result.ok || !result.dataUrl || !result.svgText) {
-        this.showError(el, (_a = result.error) != null ? _a : "Render error.", result.rawLog);
-        return;
-      }
-      el.empty();
-      const block = el.createDiv({ cls: "tikzjax-hebrew-local-block" });
-      this.createDiagramToolbar(block, result.svgText);
-      const container = block.createDiv({ cls: "tikzjax-hebrew-local-output" });
-      const img = container.createEl("img");
-      img.setAttr("src", result.dataUrl);
-      img.setAttr("alt", "TikZ diagram");
-      img.addClass("tikzjax-hebrew-local-image");
-    });
-  }
-  showError(el, message, details) {
-    el.empty();
-    const errorEl = el.createDiv({ cls: "tikzjax-hebrew-local-error" });
-    const titleEl = errorEl.createDiv({ cls: "tikzjax-hebrew-local-error-title" });
-    titleEl.setText(message);
-    if (!details) {
-      return;
-    }
-    const buttonRow = errorEl.createDiv({
-      cls: "tikzjax-hebrew-local-error-button-row"
-    });
-    const copyButton = buttonRow.createEl("button", {
-      text: "Copy error",
-      cls: "tikzjax-hebrew-local-error-button"
-    });
-    copyButton.addEventListener("click", () => __async(this, null, function* () {
-      try {
-        yield navigator.clipboard.writeText(details);
-        new import_obsidian2.Notice("LuaTikZ error copied.");
-      } catch (e) {
-        new import_obsidian2.Notice("Could not copy error.");
-      }
-    }));
-    const button = buttonRow.createEl("button", {
-      text: "Show full error",
-      cls: "tikzjax-hebrew-local-error-button"
-    });
-    const detailsEl = errorEl.createEl("pre", {
-      cls: "tikzjax-hebrew-local-error-details"
-    });
-    detailsEl.setText(details);
-    detailsEl.style.display = "none";
-    button.addEventListener("click", () => {
-      const isHidden = detailsEl.style.display === "none";
-      detailsEl.style.display = isHidden ? "block" : "none";
-      button.setText(isHidden ? "Hide full error" : "Show full error");
-    });
+    this.inlinePreview.enable(0);
+    new import_obsidian3.Notice("Live preview on.");
   }
   addSyntaxHighlighting() {
     window.CodeMirror.modeInfo.push({ name: "Tikz", mime: "text/x-latex", mode: "stex" });
   }
   removeSyntaxHighlighting() {
     window.CodeMirror.modeInfo = window.CodeMirror.modeInfo.filter((el) => el.name != "Tikz");
-  }
-  tidyTikzSource(tikzSource) {
-    const remove = "&nbsp;";
-    tikzSource = tikzSource.replaceAll(remove, "");
-    let lines = tikzSource.split("\n");
-    lines = lines.map((line) => line.trim());
-    lines = lines.filter((line) => line);
-    return lines.join("\n");
   }
 };

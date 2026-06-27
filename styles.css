@@ -1,12 +1,33 @@
 .tikzjax-hebrew-local-block {
   margin: 1em 0;
+  position: relative;
 }
 
 .tikzjax-hebrew-local-toolbar {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-bottom: 6px;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.tikzjax-hebrew-local-block:hover .tikzjax-hebrew-local-toolbar,
+.block-language-tikz:hover .tikzjax-hebrew-local-toolbar {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+@media print {
+  .tikzjax-hebrew-local-toolbar {
+    display: none !important;
+  }
 }
 
 .tikzjax-hebrew-local-toolbar-button {

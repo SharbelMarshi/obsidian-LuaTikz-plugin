@@ -1,5 +1,5 @@
 export const SIMPLE_TIKZ_HELPERS = String.raw`
-% ---------- Logic gates inherit scope / tikzpicture scaling ----------
+% logic gate scaling
 \tikzset{
   every and gate US/.append style={transform shape},
   every or gate US/.append style={transform shape},
@@ -11,7 +11,7 @@ export const SIMPLE_TIKZ_HELPERS = String.raw`
   every buffer gate US/.append style={transform shape},
 }
 
-% ---------- Simple drawing helpers ----------
+% shapes
 \def\Circle(#1,#2,#3){\draw (#1,#2) circle (#3);}
 \def\FilledCircle(#1,#2,#3){\fill (#1,#2) circle (#3);}
 \def\Point(#1,#2){\fill (#1,#2) circle (1.7pt);}
@@ -54,7 +54,7 @@ export const SIMPLE_TIKZ_HELPERS = String.raw`
 \draw[->] (0,#3) -- (0,#4) node[above] {#6};
 }
 
-% ---------- Simple text helpers ----------
+% text
 \def\Text(#1,#2,#3){\node[transform shape] at (#1,#2) {#3};}
 \def\SmallText(#1,#2,#3){\node[font=\small, transform shape] at (#1,#2) {#3};}
 \def\TinyText(#1,#2,#3){\node[font=\tiny, transform shape] at (#1,#2) {#3};}
@@ -63,7 +63,7 @@ export const SIMPLE_TIKZ_HELPERS = String.raw`
 \def\TextLeft(#1,#2,#3){\node[left, transform shape] at (#1,#2) {#3};}
 \def\TextRight(#1,#2,#3){\node[right, transform shape] at (#1,#2) {#3};}
 
-% ---------- Simple logic gates ----------
+% gates
 \def\ANDgate(#1,#2,#3){
 \node[and gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
 }
@@ -76,7 +76,6 @@ export const SIMPLE_TIKZ_HELPERS = String.raw`
 \node[not gate US, draw, anchor=input, transform shape] (#3) at (#1,#2) {};
 }
 
-% ---------- More logic gates ----------
 \def\BUFFERgate(#1,#2,#3){
 \node[buffer gate US, draw, anchor=input, transform shape] (#3) at (#1,#2) {};
 }
@@ -97,7 +96,7 @@ export const SIMPLE_TIKZ_HELPERS = String.raw`
 \node[xnor gate US, draw, logic gate inputs=nn, anchor=input 1, transform shape] (#3) at (#1,#2) {};
 }
 
-% ---------- Logic-gate wire helpers ----------
+% wires
 \def\LogicWire(#1,#2){
 \draw (#1) -- ++(0.35,0) |- (#2);
 }
@@ -134,7 +133,7 @@ export const SIMPLE_TIKZ_HELPERS = String.raw`
 \fill (#1,#2) -- (#3,#4) -- (#5,#6) -- cycle;
 }
 
-% ---------- Simple circuit symbols ----------
+% circuit symbols
 \def\Resistor(#1,#2,#3,#4){
 \draw (#1,#2) -- ++(0.15,0);
 \draw (#1+0.15,#2-#4/2) rectangle ++(#3-0.3,#4);

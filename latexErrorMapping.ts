@@ -93,7 +93,7 @@ export function formatLatexErrorWithLineMapping(
 
 	if (noteLine !== undefined) {
 		return {
-			message: `Error near line ${noteLine} in note (TikZ block line ${userLine}): ${snippet}`,
+			message: `Line ${noteLine}: ${snippet}`,
 			userLine,
 			lineContent,
 			noteLine,
@@ -101,7 +101,7 @@ export function formatLatexErrorWithLineMapping(
 	}
 
 	return {
-		message: `Error near line ${userLine} in your TikZ block: ${snippet}`,
+		message: `Line ${userLine}: ${snippet}`,
 		userLine,
 		lineContent,
 	};
