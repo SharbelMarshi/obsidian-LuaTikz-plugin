@@ -4,7 +4,7 @@ Fast rendering `tikz` code blocks with **local LuaLaTeX** with full library supp
 
 ## What it supports
 
-**Full LuaLaTeX.** If a package or TikZ library is installed in your TeX distribution, you can use it — load extra TikZ libraries with `\usetikzlibrary{...}`, use pgfplots axes, circuitikz, math mode, and normal LaTeX commands. The default preamble already includes common libraries (`arrows.meta`, `positioning`, `calc`, `shapes`, logic gates, etc.).
+**Full LuaLaTeX.** If a package or TikZ library is installed in your TeX distribution, you can use it by loading extra TikZ libraries with `\usetikzlibrary{...}`, use pgfplots axes, circuitikz, math mode, and normal LaTeX commands. The default preamble already includes common libraries (`arrows.meta`, `positioning`, `calc`, `shapes`, logic gates, etc.).
 
 **Live preview.** While editing inside a `tikz` block, a floating preview updates as you type. Toggle it from the command palette: *Toggle inline live preview*.
 
