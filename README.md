@@ -77,3 +77,7 @@ Reading view renders the block inline. In the editor, place the cursor inside th
 
 - **Invert colors in dark mode** — flip black strokes/fills when Obsidian uses a dark theme
 - **Live preview by default** — show the floating preview automatically in `tikz` blocks
+
+## License
+
+MIT — see [LICENSE](LICENSE).
