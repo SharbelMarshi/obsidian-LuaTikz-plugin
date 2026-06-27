@@ -1,8 +1,6 @@
 # LuaTikZ
 
-Obsidian plugin that compiles `tikz` code blocks with **local LuaLaTeX** and embeds the result as SVG. Nothing is sent to a server — diagrams are built on your Mac from whatever TeX packages you have installed.
-
-Write only the diagram body. The plugin wraps it in a full LaTeX document with TikZ, pgfplots, circuitikz, amsmath, and Hebrew/RTL support already set up.
+Fast rendering `tikz` code blocks with **local LuaLaTeX** with full library supprot of lualatex
 
 ## What it supports
 
@@ -22,22 +20,11 @@ Write only the diagram body. The plugin wraps it in a full LaTeX document with T
 
 ## Requirements
 
-- macOS desktop Obsidian
-- LuaLaTeX — MacTeX or TeX Live (`which lualatex`)
-- `pdftocairo` for PDF → SVG — `brew install poppler`
+-  desktop Obsidian
+-  LuaLaTeX MacTeX or TeX Live (`which lualatex`)
+- `pdftocairo` for PDF → SVG- `brew install poppler`
 
 Hebrew text works best if David CLM (or another Hebrew font) is available to LuaLaTeX.
-
-## Install
-
-```bash
-npm install
-npm run build
-```
-
-Copy `main.js`, `manifest.json`, and `styles.css` into your vault:
-
-`.obsidian/plugins/luatikz/`
 
 Enable **LuaTikZ** under Settings → Community plugins.
 
