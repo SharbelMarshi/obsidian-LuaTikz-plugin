@@ -55,14 +55,14 @@ var import_obsidian3 = __toModule(require("obsidian"));
 
 // diagramView.ts
 var import_obsidian = __toModule(require("obsidian"));
-function downloadSvg(svgText, filename = "tikz-diagram.svg") {
+function downloadSvg(svgText, activeDocument2, filename = "tikz-diagram.svg") {
   const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
+  const link = activeDocument2.createElement("a");
   link.href = url;
   link.download = filename;
-  link.style.display = "none";
-  document.body.appendChild(link);
+  link.classList.add("tikzjax-hebrew-local-download-link");
+  activeDocument2.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
@@ -94,14 +94,13 @@ function appendTikzError(parent, message, details, onRetry, extraCls) {
     text: "Copy error",
     cls: "tikzjax-hebrew-local-error-button"
   });
-  copyButton.addEventListener("click", () => __async(this, null, function* () {
-    try {
-      yield navigator.clipboard.writeText(details);
+  copyButton.addEventListener("click", () => {
+    void navigator.clipboard.writeText(details).then(() => {
       new import_obsidian.Notice("Error copied.");
-    } catch (e) {
+    }).catch(() => {
       new import_obsidian.Notice("Could not copy error.");
-    }
-  }));
+    });
+  });
   const toggleButton = buttonRow.createEl("button", {
     text: "Show log",
     cls: "tikzjax-hebrew-local-error-button"
@@ -110,10 +109,10 @@ function appendTikzError(parent, message, details, onRetry, extraCls) {
     cls: "tikzjax-hebrew-local-error-details"
   });
   detailsEl.setText(details);
-  detailsEl.style.display = "none";
+  detailsEl.addClass("tikzjax-hebrew-local-error-details-hidden");
   toggleButton.addEventListener("click", () => {
-    const hidden = detailsEl.style.display === "none";
-    detailsEl.style.display = hidden ? "block" : "none";
+    const hidden = detailsEl.hasClass("tikzjax-hebrew-local-error-details-hidden");
+    detailsEl.toggleClass("tikzjax-hebrew-local-error-details-hidden", !hidden);
     toggleButton.setText(hidden ? "Hide log" : "Show log");
   });
 }
@@ -122,7 +121,8 @@ function showTikzError(el, message, details, onRetry) {
   appendTikzError(el, message, details, onRetry);
 }
 function renderTikzDiagram(el, result) {
-  if (!result.ok || !result.dataUrl || !result.svgText) {
+  const { dataUrl, svgText } = result;
+  if (!result.ok || !dataUrl || !svgText) {
     return;
   }
   el.empty();
@@ -133,24 +133,23 @@ function renderTikzDiagram(el, result) {
     cls: "tikzjax-hebrew-local-toolbar-button"
   });
   exportButton.addEventListener("click", () => {
-    downloadSvg(result.svgText);
+    downloadSvg(svgText, el.ownerDocument);
     new import_obsidian.Notice("SVG exported.");
   });
   const copyButton = toolbar.createEl("button", {
     text: "Copy SVG",
     cls: "tikzjax-hebrew-local-toolbar-button"
   });
-  copyButton.addEventListener("click", () => __async(this, null, function* () {
-    try {
-      yield navigator.clipboard.writeText(result.svgText);
+  copyButton.addEventListener("click", () => {
+    void navigator.clipboard.writeText(svgText).then(() => {
       new import_obsidian.Notice("SVG copied.");
-    } catch (e) {
+    }).catch(() => {
       new import_obsidian.Notice("Could not copy SVG.");
-    }
-  }));
+    });
+  });
   const container = block.createDiv({ cls: "tikzjax-hebrew-local-output" });
   const img = container.createEl("img");
-  img.setAttr("src", result.dataUrl);
+  img.setAttr("src", dataUrl);
   img.setAttr("alt", "TikZ diagram");
   img.addClass("tikzjax-hebrew-local-image");
 }
@@ -513,7 +512,8 @@ var InlinePreviewManager = class {
     }
   }
   containerEl(view) {
-    if (this.container && document.body.contains(this.container)) {
+    const activeDocument2 = view.containerEl.ownerDocument;
+    if (this.container && activeDocument2.body.contains(this.container)) {
       return this.container;
     }
     this.container = view.containerEl.createDiv({
@@ -1040,15 +1040,15 @@ function latexCompletionSource(context) {
       };
     }
   }
-  const bracketOptionMatch = context.matchBefore(/(?:^|[\[\s,{])([A-Za-z!\\=0-9.<>\-]+)?/);
+  const bracketOptionMatch = context.matchBefore(/(?:^|[[\s,{])([A-Za-z!\\=0-9.<>-]+)?/);
   if (bracketOptionMatch) {
-    const prefix = bracketOptionMatch.text.replace(/^[\[\s,{]+/, "");
+    const prefix = bracketOptionMatch.text.replace(/^[[\s,{]+/, "");
     const charBefore = context.state.doc.sliceString(Math.max(0, context.pos - 1), context.pos);
     if (prefix.length > 0 || charBefore === "[" || charBefore === "," || context.explicit) {
       return {
         from: context.pos - prefix.length,
         options: filterCompletions(tikzOptions, prefix),
-        validFor: /^[A-Za-z!\\=0-9.<>\-]*$/
+        validFor: /^[A-Za-z!\\=0-9.<>-]*$/
       };
     }
   }
@@ -1079,9 +1079,9 @@ function execFileWithTimeout(file, args, options, timeoutMs) {
       if (timedOut) {
         return;
       }
-      clearTimeout(timer);
+      window.clearTimeout(timer);
       if (err) {
-        reject(err);
+        reject(err instanceof Error ? err : new Error(String(err)));
         return;
       }
       resolve({
@@ -1089,7 +1089,7 @@ function execFileWithTimeout(file, args, options, timeoutMs) {
         stderr: (_b = stderr == null ? void 0 : stderr.toString()) != null ? _b : ""
       });
     });
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
       reject(new RenderTimeoutError(timeoutMs));
@@ -1174,14 +1174,15 @@ function invertSvgForDarkMode(svg) {
   return svg.replaceAll("rgb(0%,0%,0%)", "rgb(100%,100%,100%)").replace(/rgb[(]0%,[ \t]*0%,[ \t]*0%[)]/g, "rgb(100%,100%,100%)").replace(/rgb[(]0,[ \t]*0,[ \t]*0[)]/g, "rgb(255,255,255)").replace(/#000000(?![0-9a-f])/gi, "#ffffff").replace(/#000(?![0-9a-f])/gi, "#fff").replace(/stroke:[ \t]*black/gi, "stroke:white").replace(/fill:[ \t]*black/gi, "fill:white").replace(/stroke="black"/gi, 'stroke="white"').replace(/fill="black"/gi, 'fill="white"');
 }
 var TikzRenderer = class {
-  constructor(invertInDarkMode) {
+  constructor(invertInDarkMode, isDarkTheme) {
     this.invertInDarkMode = invertInDarkMode;
+    this.isDarkTheme = isDarkTheme;
     this.cache = new Map();
     this.inFlight = new Map();
   }
   renderToSvg(source, errorContext) {
     return __async(this, null, function* () {
-      const invertDark = this.invertInDarkMode() && document.body.classList.contains("theme-dark");
+      const invertDark = this.invertInDarkMode() && this.isDarkTheme();
       const key = cacheKey(source, invertDark);
       const hit = this.cache.get(key);
       if (hit && Date.now() - hit.createdAt <= CACHE_TTL_MS) {
@@ -1193,7 +1194,7 @@ var TikzRenderer = class {
         this.cache.delete(key);
       }
       const pending = this.inFlight.get(key);
-      if (pending) {
+      if (pending !== void 0) {
         return pending;
       }
       const renderPromise = this.compile(source, errorContext, invertDark, key).finally(() => this.inFlight.delete(key));
@@ -1206,7 +1207,9 @@ var TikzRenderer = class {
     this.inFlight.clear();
   }
   latexError(rawError, source, errorContext, timedOut = false) {
-    const noteLineMapper = (errorContext == null ? void 0 : errorContext.block) && errorContext.editor ? (userLine) => mapTidiedLineToNoteLine(errorContext.block.startLine, errorContext.block.endLine, (line) => errorContext.editor.getLine(line), userLine) : void 0;
+    const block = errorContext == null ? void 0 : errorContext.block;
+    const editor = errorContext == null ? void 0 : errorContext.editor;
+    const noteLineMapper = block && editor ? (userLine) => mapTidiedLineToNoteLine(block.startLine, block.endLine, (line) => editor.getLine(line), userLine) : void 0;
     const mapped = formatLatexErrorWithLineMapping(rawError, source, USER_SOURCE_LINE_OFFSET, noteLineMapper);
     return {
       ok: false,
@@ -1224,11 +1227,11 @@ var TikzRenderer = class {
     }
     this.cache.set(key, { svgText, createdAt: Date.now() });
     while (this.cache.size > CACHE_MAX) {
-      const oldest = this.cache.keys().next().value;
-      if (oldest === void 0) {
+      const nextKey = this.cache.keys().next();
+      if (nextKey.done || nextKey.value === void 0) {
         break;
       }
-      this.cache.delete(oldest);
+      this.cache.delete(nextKey.value);
     }
   }
   compile(source, errorContext, invertDark, key) {
@@ -1332,6 +1335,27 @@ var TikzjaxSettingTab = class extends import_obsidian2.PluginSettingTab {
 };
 
 // main.ts
+function getCodeMirror() {
+  const cm = window.CodeMirror;
+  if (!cm || !Array.isArray(cm.modeInfo)) {
+    return null;
+  }
+  return cm;
+}
+function parseSettings(data) {
+  if (typeof data !== "object" || data === null) {
+    return {};
+  }
+  const saved = data;
+  const parsed = {};
+  if (typeof saved.invertColorsInDarkMode === "boolean") {
+    parsed.invertColorsInDarkMode = saved.invertColorsInDarkMode;
+  }
+  if (typeof saved.inlineLivePreviewEnabledByDefault === "boolean") {
+    parsed.inlineLivePreviewEnabledByDefault = saved.inlineLivePreviewEnabledByDefault;
+  }
+  return parsed;
+}
 var LuaTikzPlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
@@ -1340,7 +1364,7 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
   onload() {
     return __async(this, null, function* () {
       yield this.loadSettings();
-      this.renderer = new TikzRenderer(() => this.settings.invertColorsInDarkMode);
+      this.renderer = new TikzRenderer(() => this.settings.invertColorsInDarkMode, () => activeDocument.body.classList.contains("theme-dark"));
       this.inlinePreview = new InlinePreviewManager(() => this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView), this.renderer);
       this.registerEditorExtension(latexAutocompleteExtension());
       this.addCommand({
@@ -1354,7 +1378,7 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
       this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
         this.inlinePreview.scheduleUpdate();
       }));
-      this.registerDomEvent(document, "selectionchange", () => {
+      this.registerDomEvent(activeDocument, "selectionchange", () => {
         this.inlinePreview.scheduleUpdate();
       });
       this.addSettingTab(new TikzjaxSettingTab(this.app, this));
@@ -1373,7 +1397,7 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
   }
   loadSettings() {
     return __async(this, null, function* () {
-      this.settings = Object.assign({}, DEFAULT_SETTINGS, yield this.loadData());
+      this.settings = Object.assign({}, DEFAULT_SETTINGS, parseSettings(yield this.loadData()));
     });
   }
   saveSettings() {
@@ -1422,9 +1446,17 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
     new import_obsidian3.Notice("Live preview on.");
   }
   addSyntaxHighlighting() {
-    window.CodeMirror.modeInfo.push({ name: "Tikz", mime: "text/x-latex", mode: "stex" });
+    const cm = getCodeMirror();
+    if (!cm) {
+      return;
+    }
+    cm.modeInfo.push({ name: "Tikz", mime: "text/x-latex", mode: "stex" });
   }
   removeSyntaxHighlighting() {
-    window.CodeMirror.modeInfo = window.CodeMirror.modeInfo.filter((el) => el.name != "Tikz");
+    const cm = getCodeMirror();
+    if (!cm) {
+      return;
+    }
+    cm.modeInfo = cm.modeInfo.filter((el) => el.name !== "Tikz");
   }
 };

@@ -25,9 +25,18 @@
 }
 
 @media print {
-  .tikzjax-hebrew-local-toolbar {
-    display: none !important;
+  .markdown-preview-view .tikzjax-hebrew-local-toolbar,
+  .block-language-tikz .tikzjax-hebrew-local-toolbar {
+    display: none;
   }
+}
+
+.tikzjax-hebrew-local-download-link {
+  display: none;
+}
+
+.tikzjax-hebrew-local-error-details-hidden {
+  display: none;
 }
 
 .tikzjax-hebrew-local-toolbar-button {

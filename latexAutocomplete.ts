@@ -464,9 +464,9 @@ function latexCompletionSource(context: CompletionContext) {
     }
   }
 
-  const bracketOptionMatch = context.matchBefore(/(?:^|[\[\s,{])([A-Za-z!\\=0-9.<>\-]+)?/);
+  const bracketOptionMatch = context.matchBefore(/(?:^|[[\s,{])([A-Za-z!\\=0-9.<>-]+)?/);
   if (bracketOptionMatch) {
-    const prefix = bracketOptionMatch.text.replace(/^[\[\s,{]+/, "");
+    const prefix = bracketOptionMatch.text.replace(/^[[\s,{]+/, "");
     const charBefore = context.state.doc.sliceString(
       Math.max(0, context.pos - 1),
       context.pos,
@@ -476,7 +476,7 @@ function latexCompletionSource(context: CompletionContext) {
       return {
         from: context.pos - prefix.length,
         options: filterCompletions(tikzOptions, prefix),
-        validFor: /^[A-Za-z!\\=0-9.<>\-]*$/,
+        validFor: /^[A-Za-z!\\=0-9.<>-]*$/,
       };
     }
   }

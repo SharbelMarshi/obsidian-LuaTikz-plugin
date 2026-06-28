@@ -1,6 +1,6 @@
 {
 	"name": "tikzjax-hebrew-local",
-	"version": "0.0.1",
+	"version": "1.0.1",
 	"description": "Render TikZ diagrams in Obsidian using local LuaLaTeX with Hebrew support",
 	"main": "main.js",
 	"scripts": {
@@ -12,13 +12,13 @@
 	"license": "MIT",
 	"devDependencies": {
 		"@types/node": "^16.11.6",
-		"builtin-modules": "^3.2.0",
 		"esbuild": "0.13.12",
 		"obsidian": "latest",
 		"tslib": "2.3.1",
 		"typescript": "^6.0.3"
 	},
 	"dependencies": {
-		"@codemirror/autocomplete": "^6.20.3"
+		"@codemirror/autocomplete": "^6.20.3",
+		"@codemirror/state": "6.5.0"
 	}
 }

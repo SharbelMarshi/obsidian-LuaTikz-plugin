@@ -54,14 +54,16 @@ export class TikzRenderer {
 	private cache = new Map<string, CacheEntry>();
 	private inFlight = new Map<string, Promise<RenderImageResult>>();
 
-	constructor(private readonly invertInDarkMode: () => boolean) {}
+	constructor(
+		private readonly invertInDarkMode: () => boolean,
+		private readonly isDarkTheme: () => boolean,
+	) {}
 
 	async renderToSvg(
 		source: string,
 		errorContext?: RenderErrorContext,
 	): Promise<RenderImageResult> {
-		const invertDark = this.invertInDarkMode() &&
-			document.body.classList.contains('theme-dark');
+		const invertDark = this.invertInDarkMode() && this.isDarkTheme();
 		const key = cacheKey(source, invertDark);
 
 		const hit = this.cache.get(key);
@@ -75,7 +77,7 @@ export class TikzRenderer {
 		}
 
 		const pending = this.inFlight.get(key);
-		if (pending) {
+		if (pending !== undefined) {
 			return pending;
 		}
 
@@ -97,11 +99,13 @@ export class TikzRenderer {
 		errorContext?: RenderErrorContext,
 		timedOut = false,
 	): RenderImageResult {
-		const noteLineMapper = errorContext?.block && errorContext.editor
+		const block = errorContext?.block;
+		const editor = errorContext?.editor;
+		const noteLineMapper = block && editor
 			? (userLine: number) => mapTidiedLineToNoteLine(
-				errorContext.block!.startLine,
-				errorContext.block!.endLine,
-				line => errorContext.editor!.getLine(line),
+				block.startLine,
+				block.endLine,
+				line => editor.getLine(line),
 				userLine,
 			)
 			: undefined;
@@ -130,11 +134,11 @@ export class TikzRenderer {
 		}
 		this.cache.set(key, { svgText, createdAt: Date.now() });
 		while (this.cache.size > CACHE_MAX) {
-			const oldest = this.cache.keys().next().value;
-			if (oldest === undefined) {
+			const nextKey = this.cache.keys().next();
+			if (nextKey.done || nextKey.value === undefined) {
 				break;
 			}
-			this.cache.delete(oldest);
+			this.cache.delete(nextKey.value);
 		}
 	}
 

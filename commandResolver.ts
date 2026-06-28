@@ -21,9 +21,9 @@ export function execFileWithTimeout(
 			if (timedOut) {
 				return;
 			}
-			clearTimeout(timer);
+			window.clearTimeout(timer);
 			if (err) {
-				reject(err);
+				reject(err instanceof Error ? err : new Error(String(err)));
 				return;
 			}
 			resolve({
@@ -32,7 +32,7 @@ export function execFileWithTimeout(
 			});
 		});
 
-		const timer = setTimeout(() => {
+		const timer = window.setTimeout(() => {
 			timedOut = true;
 			child.kill('SIGKILL');
 			reject(new RenderTimeoutError(timeoutMs));

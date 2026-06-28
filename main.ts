@@ -11,6 +11,35 @@ import {
 } from './settings';
 import { tidyTikzSource } from './tikzSource';
 
+interface CodeMirrorModeInfo {
+	name: string;
+	mime: string;
+	mode: string;
+}
+
+function getCodeMirror(): { modeInfo: CodeMirrorModeInfo[] } | null {
+	const cm = (window as Window & { CodeMirror?: { modeInfo: unknown } }).CodeMirror;
+	if (!cm || !Array.isArray(cm.modeInfo)) {
+		return null;
+	}
+	return cm as { modeInfo: CodeMirrorModeInfo[] };
+}
+
+function parseSettings(data: unknown): Partial<TikzjaxPluginSettings> {
+	if (typeof data !== 'object' || data === null) {
+		return {};
+	}
+	const saved = data as Record<string, unknown>;
+	const parsed: Partial<TikzjaxPluginSettings> = {};
+	if (typeof saved.invertColorsInDarkMode === 'boolean') {
+		parsed.invertColorsInDarkMode = saved.invertColorsInDarkMode;
+	}
+	if (typeof saved.inlineLivePreviewEnabledByDefault === 'boolean') {
+		parsed.inlineLivePreviewEnabledByDefault = saved.inlineLivePreviewEnabledByDefault;
+	}
+	return parsed;
+}
+
 export default class LuaTikzPlugin extends Plugin {
 	settings: TikzjaxPluginSettings = DEFAULT_SETTINGS;
 	private renderer!: TikzRenderer;
@@ -19,7 +48,10 @@ export default class LuaTikzPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.renderer = new TikzRenderer(() => this.settings.invertColorsInDarkMode);
+		this.renderer = new TikzRenderer(
+			() => this.settings.invertColorsInDarkMode,
+			() => activeDocument.body.classList.contains('theme-dark'),
+		);
 		this.inlinePreview = new InlinePreviewManager(
 			() => this.app.workspace.getActiveViewOfType(MarkdownView),
 			this.renderer,
@@ -41,7 +73,7 @@ export default class LuaTikzPlugin extends Plugin {
 			this.inlinePreview.scheduleUpdate();
 		}));
 
-		this.registerDomEvent(document, 'selectionchange', () => {
+		this.registerDomEvent(activeDocument, 'selectionchange', () => {
 			this.inlinePreview.scheduleUpdate();
 		});
 
@@ -62,7 +94,7 @@ export default class LuaTikzPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, parseSettings(await this.loadData()));
 	}
 
 	async saveSettings() {
@@ -117,12 +149,18 @@ export default class LuaTikzPlugin extends Plugin {
 	}
 
 	addSyntaxHighlighting() {
-		// @ts-ignore
-		window.CodeMirror.modeInfo.push({ name: 'Tikz', mime: 'text/x-latex', mode: 'stex' });
+		const cm = getCodeMirror();
+		if (!cm) {
+			return;
+		}
+		cm.modeInfo.push({ name: 'Tikz', mime: 'text/x-latex', mode: 'stex' });
 	}
 
 	removeSyntaxHighlighting() {
-		// @ts-ignore
-		window.CodeMirror.modeInfo = window.CodeMirror.modeInfo.filter(el => el.name != 'Tikz');
+		const cm = getCodeMirror();
+		if (!cm) {
+			return;
+		}
+		cm.modeInfo = cm.modeInfo.filter(el => el.name !== 'Tikz');
 	}
 }

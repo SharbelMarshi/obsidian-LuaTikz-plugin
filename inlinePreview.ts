@@ -99,7 +99,8 @@ export class InlinePreviewManager {
 	}
 
 	private containerEl(view: MarkdownView): HTMLElement {
-		if (this.container && document.body.contains(this.container)) {
+		const activeDocument = view.containerEl.ownerDocument;
+		if (this.container && activeDocument.body.contains(this.container)) {
 			return this.container;
 		}
 		this.container = view.containerEl.createDiv({

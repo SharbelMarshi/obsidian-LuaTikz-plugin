@@ -1,14 +1,18 @@
 import { Notice } from 'obsidian';
 import type { RenderImageResult } from './types';
 
-function downloadSvg(svgText: string, filename = 'tikz-diagram.svg'): void {
+function downloadSvg(
+	svgText: string,
+	activeDocument: Document,
+	filename = 'tikz-diagram.svg',
+): void {
 	const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
 	const url = URL.createObjectURL(blob);
-	const link = document.createElement('a');
+	const link = activeDocument.createElement('a');
 	link.href = url;
 	link.download = filename;
-	link.style.display = 'none';
-	document.body.appendChild(link);
+	link.classList.add('tikzjax-hebrew-local-download-link');
+	activeDocument.body.appendChild(link);
 	link.click();
 	link.remove();
 	URL.revokeObjectURL(url);
@@ -56,13 +60,12 @@ export function appendTikzError(
 		cls: 'tikzjax-hebrew-local-error-button',
 	});
 
-	copyButton.addEventListener('click', async () => {
-		try {
-			await navigator.clipboard.writeText(details);
+	copyButton.addEventListener('click', () => {
+		void navigator.clipboard.writeText(details).then(() => {
 			new Notice('Error copied.');
-		} catch {
+		}).catch(() => {
 			new Notice('Could not copy error.');
-		}
+		});
 	});
 
 	const toggleButton = buttonRow.createEl('button', {
@@ -75,11 +78,11 @@ export function appendTikzError(
 	});
 
 	detailsEl.setText(details);
-	detailsEl.style.display = 'none';
+	detailsEl.addClass('tikzjax-hebrew-local-error-details-hidden');
 
 	toggleButton.addEventListener('click', () => {
-		const hidden = detailsEl.style.display === 'none';
-		detailsEl.style.display = hidden ? 'block' : 'none';
+		const hidden = detailsEl.hasClass('tikzjax-hebrew-local-error-details-hidden');
+		detailsEl.toggleClass('tikzjax-hebrew-local-error-details-hidden', !hidden);
 		toggleButton.setText(hidden ? 'Hide log' : 'Show log');
 	});
 }
@@ -95,7 +98,8 @@ export function showTikzError(
 }
 
 export function renderTikzDiagram(el: HTMLElement, result: RenderImageResult): void {
-	if (!result.ok || !result.dataUrl || !result.svgText) {
+	const { dataUrl, svgText } = result;
+	if (!result.ok || !dataUrl || !svgText) {
 		return;
 	}
 
@@ -109,7 +113,7 @@ export function renderTikzDiagram(el: HTMLElement, result: RenderImageResult): v
 		cls: 'tikzjax-hebrew-local-toolbar-button',
 	});
 	exportButton.addEventListener('click', () => {
-		downloadSvg(result.svgText!);
+		downloadSvg(svgText, el.ownerDocument);
 		new Notice('SVG exported.');
 	});
 
@@ -117,18 +121,17 @@ export function renderTikzDiagram(el: HTMLElement, result: RenderImageResult): v
 		text: 'Copy SVG',
 		cls: 'tikzjax-hebrew-local-toolbar-button',
 	});
-	copyButton.addEventListener('click', async () => {
-		try {
-			await navigator.clipboard.writeText(result.svgText!);
+	copyButton.addEventListener('click', () => {
+		void navigator.clipboard.writeText(svgText).then(() => {
 			new Notice('SVG copied.');
-		} catch {
+		}).catch(() => {
 			new Notice('Could not copy SVG.');
-		}
+		});
 	});
 
 	const container = block.createDiv({ cls: 'tikzjax-hebrew-local-output' });
 	const img = container.createEl('img');
-	img.setAttr('src', result.dataUrl);
+	img.setAttr('src', dataUrl);
 	img.setAttr('alt', 'TikZ diagram');
 	img.addClass('tikzjax-hebrew-local-image');
 }
