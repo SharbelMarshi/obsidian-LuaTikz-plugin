@@ -1,5 +1,8 @@
 import { Notice } from 'obsidian';
+import type { LuaTikzSettings } from './settingsModel';
 import type { RenderImageResult } from './types';
+import { writeClipboardText } from './utils/clipboard';
+import { applyRtlToContainer } from './utils/rtl';
 
 function downloadSvg(
 	svgText: string,
@@ -24,16 +27,22 @@ export function appendTikzError(
 	details?: string,
 	onRetry?: () => void,
 	extraCls?: string,
+	source?: string,
+	settings?: LuaTikzSettings,
 ): void {
 	const cls = extraCls
-		? `tikzjax-hebrew-local-error ${extraCls}`
-		: 'tikzjax-hebrew-local-error';
+		? `tikzjax-hebrew-local-error luatikz-error-card ${extraCls}`
+		: 'tikzjax-hebrew-local-error luatikz-error-card';
 
 	const errorEl = parent.createDiv({ cls });
 	errorEl.createDiv({
 		cls: 'tikzjax-hebrew-local-error-title',
 		text: message,
 	});
+
+	if (source) {
+		applyRtlToContainer(errorEl, source);
+	}
 
 	if (!details && !onRetry) {
 		return;
@@ -46,7 +55,7 @@ export function appendTikzError(
 	if (onRetry) {
 		const retryButton = buttonRow.createEl('button', {
 			text: 'Retry',
-			cls: 'tikzjax-hebrew-local-error-button',
+			cls: 'tikzjax-hebrew-local-error-button luatikz-soft-button',
 		});
 		retryButton.addEventListener('click', onRetry);
 	}
@@ -57,20 +66,23 @@ export function appendTikzError(
 
 	const copyButton = buttonRow.createEl('button', {
 		text: 'Copy error',
-		cls: 'tikzjax-hebrew-local-error-button',
+		cls: 'tikzjax-hebrew-local-error-button luatikz-soft-button',
 	});
 
 	copyButton.addEventListener('click', () => {
-		void navigator.clipboard.writeText(details).then(() => {
-			new Notice('Error copied.');
-		}).catch(() => {
-			new Notice('Could not copy error.');
+		if (!settings) {
+			return;
+		}
+		void writeClipboardText(details, settings).then((ok) => {
+			if (ok) {
+				new Notice('Error copied.');
+			}
 		});
 	});
 
 	const toggleButton = buttonRow.createEl('button', {
 		text: 'Show log',
-		cls: 'tikzjax-hebrew-local-error-button',
+		cls: 'tikzjax-hebrew-local-error-button luatikz-soft-button',
 	});
 
 	const detailsEl = errorEl.createEl('pre', {
@@ -92,44 +104,71 @@ export function showTikzError(
 	message: string,
 	details?: string,
 	onRetry?: () => void,
+	source?: string,
+	settings?: LuaTikzSettings,
 ): void {
 	el.empty();
-	appendTikzError(el, message, details, onRetry);
+	appendTikzError(el, message, details, onRetry, undefined, source, settings);
 }
 
-export function renderTikzDiagram(el: HTMLElement, result: RenderImageResult): void {
+export function renderTikzDiagram(
+	el: HTMLElement,
+	result: RenderImageResult,
+	source: string,
+	settings: LuaTikzSettings,
+): void {
 	const { dataUrl, svgText } = result;
-	if (!result.ok || !dataUrl || !svgText) {
+	if (!result.ok || !dataUrl) {
 		return;
 	}
 
 	el.empty();
-	const block = el.createDiv({ cls: 'tikzjax-hebrew-local-block' });
+	const block = el.createDiv({ cls: 'tikzjax-hebrew-local-block luatikz-output-card' });
+	applyRtlToContainer(block, source);
 
 	const toolbar = block.createDiv({ cls: 'tikzjax-hebrew-local-toolbar' });
 
 	const exportButton = toolbar.createEl('button', {
 		text: 'Export SVG',
-		cls: 'tikzjax-hebrew-local-toolbar-button',
+		cls: 'tikzjax-hebrew-local-toolbar-button luatikz-soft-button',
 	});
 	exportButton.addEventListener('click', () => {
-		downloadSvg(svgText, el.ownerDocument);
-		new Notice('SVG exported.');
+		if (svgText) {
+			downloadSvg(svgText, el.ownerDocument);
+			new Notice('SVG exported.');
+		}
 	});
 
-	const copyButton = toolbar.createEl('button', {
-		text: 'Copy SVG',
-		cls: 'tikzjax-hebrew-local-toolbar-button',
-	});
-	copyButton.addEventListener('click', () => {
-		void navigator.clipboard.writeText(svgText).then(() => {
-			new Notice('SVG copied.');
-		}).catch(() => {
-			new Notice('Could not copy SVG.');
+	if (svgText) {
+		const copyButton = toolbar.createEl('button', {
+			text: 'Copy SVG',
+			cls: 'tikzjax-hebrew-local-toolbar-button luatikz-soft-button',
 		});
-	});
+		copyButton.addEventListener('click', () => {
+			void writeClipboardText(svgText, settings).then((ok) => {
+				if (ok) {
+					new Notice('SVG copied.');
+				}
+			});
+		});
+	}
 
 	const container = block.createDiv({ cls: 'tikzjax-hebrew-local-output' });
+	applyRtlToContainer(container, source);
+
+	if (svgText && settings.renderEngine === 'tikzjax') {
+		const svgHost = container.createDiv({ cls: 'luatikz-tikzjax-host' });
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(svgText, 'image/svg+xml');
+		const svgEl = doc.documentElement;
+		if (svgEl instanceof SVGSVGElement) {
+			svgHost.appendChild(svgEl);
+		} else {
+			svgHost.setText('Invalid SVG from TikZJax renderer.');
+		}
+		return;
+	}
+
 	const img = container.createEl('img');
 	img.setAttr('src', dataUrl);
 	img.setAttr('alt', 'TikZ diagram');

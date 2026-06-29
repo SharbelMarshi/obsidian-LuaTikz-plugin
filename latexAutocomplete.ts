@@ -404,7 +404,7 @@ const tikzLibraries: Completion[] = [
 const allCommandCompletions = [...latexCommands, ...simpleShapeHelpers];
 
 function insideLatexOrTikzBlock(textBeforeCursor: string): boolean {
-  const fencePattern = /```(?:tikz|latex|lualatex|tex)\b/g;
+  const fencePattern = /```(?:tikz|luatikz|latex|lualatex|tex)\b/g;
   let lastOpen = -1;
   let match: RegExpExecArray | null;
 

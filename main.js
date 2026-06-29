@@ -51,10 +51,75 @@ var __async = (__this, __arguments, generator) => {
 __export(exports, {
   default: () => LuaTikzPlugin
 });
-var import_obsidian3 = __toModule(require("obsidian"));
+var import_obsidian6 = __toModule(require("obsidian"));
 
 // diagramView.ts
+var import_obsidian2 = __toModule(require("obsidian"));
+
+// utils/clipboard.ts
 var import_obsidian = __toModule(require("obsidian"));
+function writeClipboardText(text, settings) {
+  return __async(this, null, function* () {
+    if (!settings.enableClipboardCopy) {
+      new import_obsidian.Notice("Clipboard copy is disabled. Enable it in LuaTikz settings.");
+      return false;
+    }
+    try {
+      yield navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      new import_obsidian.Notice("Could not copy to clipboard.");
+      return false;
+    }
+  });
+}
+
+// utils/guards.ts
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+function asString(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+function asBoolean(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+function asNumber(value, fallback) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+function containsRtlText(text) {
+  return /[\u0590-\u05FF\u0600-\u06FF]/.test(text);
+}
+var SHELL_METACHAR_RE = /[;&|`$(){}[\]<>'"\\!\n\r\0]/;
+function validateLualatexPath(pathValue) {
+  const trimmed = pathValue.trim();
+  if (!trimmed) {
+    return "LuaLaTeX path must not be empty.";
+  }
+  if (trimmed.includes("\0")) {
+    return "LuaLaTeX path contains invalid characters.";
+  }
+  if (SHELL_METACHAR_RE.test(trimmed)) {
+    return "LuaLaTeX path must be a direct executable path without shell metacharacters.";
+  }
+  return null;
+}
+function sanitizeCacheFilename(name) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 128);
+}
+function setTikzJaxTexDir(texDir) {
+  globalThis.__LUATIKZ_TEX_DIR = texDir;
+}
+
+// utils/rtl.ts
+function applyRtlToContainer(containerEl, source) {
+  const isRtl = containsRtlText(source);
+  containerEl.toggleClass("luatikz-rtl", isRtl);
+  containerEl.toggleClass("luatikz-ltr", !isRtl);
+  containerEl.setAttr("dir", isRtl ? "rtl" : "ltr");
+}
+
+// diagramView.ts
 function downloadSvg(svgText, activeDocument2, filename = "tikz-diagram.svg") {
   const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -67,13 +132,16 @@ function downloadSvg(svgText, activeDocument2, filename = "tikz-diagram.svg") {
   link.remove();
   URL.revokeObjectURL(url);
 }
-function appendTikzError(parent, message, details, onRetry, extraCls) {
-  const cls = extraCls ? `tikzjax-hebrew-local-error ${extraCls}` : "tikzjax-hebrew-local-error";
+function appendTikzError(parent, message, details, onRetry, extraCls, source, settings) {
+  const cls = extraCls ? `tikzjax-hebrew-local-error luatikz-error-card ${extraCls}` : "tikzjax-hebrew-local-error luatikz-error-card";
   const errorEl = parent.createDiv({ cls });
   errorEl.createDiv({
     cls: "tikzjax-hebrew-local-error-title",
     text: message
   });
+  if (source) {
+    applyRtlToContainer(errorEl, source);
+  }
   if (!details && !onRetry) {
     return;
   }
@@ -83,7 +151,7 @@ function appendTikzError(parent, message, details, onRetry, extraCls) {
   if (onRetry) {
     const retryButton = buttonRow.createEl("button", {
       text: "Retry",
-      cls: "tikzjax-hebrew-local-error-button"
+      cls: "tikzjax-hebrew-local-error-button luatikz-soft-button"
     });
     retryButton.addEventListener("click", onRetry);
   }
@@ -92,18 +160,21 @@ function appendTikzError(parent, message, details, onRetry, extraCls) {
   }
   const copyButton = buttonRow.createEl("button", {
     text: "Copy error",
-    cls: "tikzjax-hebrew-local-error-button"
+    cls: "tikzjax-hebrew-local-error-button luatikz-soft-button"
   });
   copyButton.addEventListener("click", () => {
-    void navigator.clipboard.writeText(details).then(() => {
-      new import_obsidian.Notice("Error copied.");
-    }).catch(() => {
-      new import_obsidian.Notice("Could not copy error.");
+    if (!settings) {
+      return;
+    }
+    void writeClipboardText(details, settings).then((ok) => {
+      if (ok) {
+        new import_obsidian2.Notice("Error copied.");
+      }
     });
   });
   const toggleButton = buttonRow.createEl("button", {
     text: "Show log",
-    cls: "tikzjax-hebrew-local-error-button"
+    cls: "tikzjax-hebrew-local-error-button luatikz-soft-button"
   });
   const detailsEl = errorEl.createEl("pre", {
     cls: "tikzjax-hebrew-local-error-details"
@@ -116,43 +187,106 @@ function appendTikzError(parent, message, details, onRetry, extraCls) {
     toggleButton.setText(hidden ? "Hide log" : "Show log");
   });
 }
-function showTikzError(el, message, details, onRetry) {
+function showTikzError(el, message, details, onRetry, source, settings) {
   el.empty();
-  appendTikzError(el, message, details, onRetry);
+  appendTikzError(el, message, details, onRetry, void 0, source, settings);
 }
-function renderTikzDiagram(el, result) {
+function renderTikzDiagram(el, result, source, settings) {
   const { dataUrl, svgText } = result;
-  if (!result.ok || !dataUrl || !svgText) {
+  if (!result.ok || !dataUrl) {
     return;
   }
   el.empty();
-  const block = el.createDiv({ cls: "tikzjax-hebrew-local-block" });
+  const block = el.createDiv({ cls: "tikzjax-hebrew-local-block luatikz-output-card" });
+  applyRtlToContainer(block, source);
   const toolbar = block.createDiv({ cls: "tikzjax-hebrew-local-toolbar" });
   const exportButton = toolbar.createEl("button", {
     text: "Export SVG",
-    cls: "tikzjax-hebrew-local-toolbar-button"
+    cls: "tikzjax-hebrew-local-toolbar-button luatikz-soft-button"
   });
   exportButton.addEventListener("click", () => {
-    downloadSvg(svgText, el.ownerDocument);
-    new import_obsidian.Notice("SVG exported.");
+    if (svgText) {
+      downloadSvg(svgText, el.ownerDocument);
+      new import_obsidian2.Notice("SVG exported.");
+    }
   });
-  const copyButton = toolbar.createEl("button", {
-    text: "Copy SVG",
-    cls: "tikzjax-hebrew-local-toolbar-button"
-  });
-  copyButton.addEventListener("click", () => {
-    void navigator.clipboard.writeText(svgText).then(() => {
-      new import_obsidian.Notice("SVG copied.");
-    }).catch(() => {
-      new import_obsidian.Notice("Could not copy SVG.");
+  if (svgText) {
+    const copyButton = toolbar.createEl("button", {
+      text: "Copy SVG",
+      cls: "tikzjax-hebrew-local-toolbar-button luatikz-soft-button"
     });
-  });
+    copyButton.addEventListener("click", () => {
+      void writeClipboardText(svgText, settings).then((ok) => {
+        if (ok) {
+          new import_obsidian2.Notice("SVG copied.");
+        }
+      });
+    });
+  }
   const container = block.createDiv({ cls: "tikzjax-hebrew-local-output" });
+  applyRtlToContainer(container, source);
+  if (svgText && settings.renderEngine === "tikzjax") {
+    const svgHost = container.createDiv({ cls: "luatikz-tikzjax-host" });
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgText, "image/svg+xml");
+    const svgEl = doc.documentElement;
+    if (svgEl instanceof SVGSVGElement) {
+      svgHost.appendChild(svgEl);
+    } else {
+      svgHost.setText("Invalid SVG from TikZJax renderer.");
+    }
+    return;
+  }
   const img = container.createEl("img");
   img.setAttr("src", dataUrl);
   img.setAttr("alt", "TikZ diagram");
   img.addClass("tikzjax-hebrew-local-image");
 }
+
+// installNoticeModal.ts
+var import_obsidian3 = __toModule(require("obsidian"));
+var InstallNoticeModal = class extends import_obsidian3.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+  onOpen() {
+    const { contentEl, titleEl } = this;
+    titleEl.setText("LuaTikz");
+    contentEl.empty();
+    contentEl.addClass("luatikz-install-notice");
+    contentEl.createEl("p", {
+      cls: "luatikz-install-message",
+      text: "LuaTikz uses the LuaLaTeX engine by default. Please install a TeX distribution for full rendering support, or use the limited TikZJax renderer. You can adjust your preferences in settings."
+    });
+    const buttonRow = contentEl.createDiv({ cls: "luatikz-install-buttons" });
+    buttonRow.createEl("button", {
+      cls: "mod-cta luatikz-soft-button",
+      text: "Open settings"
+    }).addEventListener("click", () => {
+      void this.openSettings();
+    });
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+  openSettings() {
+    return __async(this, null, function* () {
+      var _a, _b;
+      yield this.dismissNotice();
+      this.close();
+      const appWithSetting = this.app;
+      (_a = appWithSetting.setting) == null ? void 0 : _a.open();
+      (_b = appWithSetting.setting) == null ? void 0 : _b.openTabById(this.plugin.manifest.id);
+    });
+  }
+  dismissNotice() {
+    return __async(this, null, function* () {
+      this.plugin.settings.showInstallNotice = false;
+      yield this.plugin.saveSettings();
+    });
+  }
+};
 
 // latexErrorMapping.ts
 var LATEX_LINE_PATTERN = /(?:^|\n)\s*l\.(\d+)/;
@@ -388,15 +522,24 @@ var SIMPLE_TIKZ_HELPERS = String.raw`
 
 // tikzSource.ts
 var DOCUMENTCLASS_LINE = "\\documentclass[tikz,border=5pt]{standalone}\n";
-var LATEX_WRAPPER_PREFIX = `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
+var DEFAULT_HEBREW_FONT = "Arial Hebrew";
+var DEFAULT_ENGLISH_FONT = "Times New Roman";
+function escapeLatexFontName(fontName) {
+  return fontName.replace(/\\/g, "\\\\").replace(/[{}]/g, "");
+}
+function buildLatexWrapperPrefix(extraPreamble = "") {
+  const hebrewFont = escapeLatexFontName(DEFAULT_HEBREW_FONT);
+  const englishFont = escapeLatexFontName(DEFAULT_ENGLISH_FONT);
+  return `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
 \\usepackage{polyglossia}
 
 \\setmainlanguage{english}
 \\setotherlanguage{hebrew}
 
-\\newfontfamily\\hebrewfont[Script=Hebrew]{David CLM}
-\\newfontfamily\\hebrewfontsf[Script=Hebrew]{David CLM}
-\\newfontfamily\\hebrewfonttt[Script=Hebrew]{David CLM}
+\\setmainfont{${englishFont}}
+\\newfontfamily\\hebrewfont[Script=Hebrew]{${hebrewFont}}
+\\newfontfamily\\hebrewfontsf[Script=Hebrew]{${hebrewFont}}
+\\newfontfamily\\hebrewfonttt[Script=Hebrew]{${hebrewFont}}
 
 \\usepackage{tikz}
 \\usetikzlibrary{arrows.meta,positioning,calc,shapes,decorations.pathmorphing,shapes.gates.logic.US}
@@ -408,16 +551,21 @@ var LATEX_WRAPPER_PREFIX = `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
 
 \\newcommand{\\he}[1]{\\texthebrew{#1}}
 ${SIMPLE_TIKZ_HELPERS}
-\\begin{document}
+${extraPreamble.trim() ? `${extraPreamble.trim()}
+` : ""}\\begin{document}
 `;
+}
 var LATEX_WRAPPER_SUFFIX = `
 \\end{document}
 `;
-var USER_SOURCE_LINE_OFFSET = getUserSourceLineOffset(LATEX_WRAPPER_PREFIX);
+function getUserSourceLineOffsetForExtraPreamble(extraPreamble = "") {
+  return getUserSourceLineOffset(buildLatexWrapperPrefix(extraPreamble));
+}
+var USER_SOURCE_LINE_OFFSET = getUserSourceLineOffset(buildLatexWrapperPrefix());
 function tidyTikzSource(tikzSource) {
   return tikzSource.replaceAll("&nbsp;", "").split("\n").map((line) => line.trim()).filter(Boolean).join("\n");
 }
-function wrapLatexSource(source) {
+function stripUserDocumentPreamble(source) {
   let cleanedSource = source;
   cleanedSource = cleanedSource.replace(/\\documentclass(?:\[[^\]]*\])?\{[^}]+\}/g, "");
   cleanedSource = cleanedSource.replace(/\\usepackage(?:\[[^\]]*\])?\{[^}]+\}/g, "");
@@ -429,16 +577,25 @@ function wrapLatexSource(source) {
   cleanedSource = cleanedSource.replace(/\\setmainfont(?:\[[^\]]*\])?\{[^}]+\}/g, "");
   cleanedSource = cleanedSource.replace(/\\setsansfont(?:\[[^\]]*\])?\{[^}]+\}/g, "");
   cleanedSource = cleanedSource.replace(/\\newfontfamily\\\w+(?:\[[^\]]*\])?\{[^}]+\}/g, "");
-  return LATEX_WRAPPER_PREFIX + cleanedSource.trim() + LATEX_WRAPPER_SUFFIX;
+  return cleanedSource.trim();
+}
+function wrapLatexSource(source, extraPreamble = "") {
+  return buildLatexWrapperPrefix(extraPreamble) + stripUserDocumentPreamble(source) + LATEX_WRAPPER_SUFFIX;
 }
 
 // inlinePreview.ts
+var RENDER_DEBOUNCE_MS = 200;
+var MIN_PREVIEW_WIDTH = 160;
+var MIN_PREVIEW_HEIGHT = 120;
+var DEFAULT_PREVIEW_WIDTH = 520;
+var DEFAULT_PREVIEW_HEIGHT = 360;
+var RESIZE_DIRECTIONS = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 function getCurrentTikzBlock(editor) {
   const cursor = editor.getCursor();
   let startLine = -1;
   for (let line = cursor.line; line >= 0; line--) {
     const text = editor.getLine(line).trim();
-    if (text.startsWith("```tikz")) {
+    if (text.startsWith("```tikz") || text.startsWith("```luatikz")) {
       startLine = line;
       break;
     }
@@ -466,15 +623,19 @@ function getCurrentTikzBlock(editor) {
   };
 }
 var InlinePreviewManager = class {
-  constructor(getActiveMarkdownView, renderer) {
+  constructor(getActiveMarkdownView, renderer, getSettings) {
     this.getActiveMarkdownView = getActiveMarkdownView;
     this.renderer = renderer;
+    this.getSettings = getSettings;
     this.enabled = false;
     this.container = null;
     this.timer = null;
     this.lastGoodDataUrl = null;
     this.lastSource = null;
     this.renderToken = 0;
+    this.previewWidth = DEFAULT_PREVIEW_WIDTH;
+    this.previewHeight = DEFAULT_PREVIEW_HEIGHT;
+    this.resizeListenersAttached = false;
   }
   enable(initialDelayMs = 0) {
     this.enabled = true;
@@ -485,19 +646,45 @@ var InlinePreviewManager = class {
     this.lastGoodDataUrl = null;
     this.lastSource = null;
     this.clearTimer();
-    if (this.container) {
-      this.container.remove();
-      this.container = null;
-    }
+    this.hide();
   }
-  scheduleUpdate(delay = 800) {
+  scheduleUpdate(renderDelay = RENDER_DEBOUNCE_MS) {
     if (!this.enabled) {
+      return;
+    }
+    this.syncVisibility();
+    if (!this.isInTikzBlock()) {
+      this.clearTimer();
       return;
     }
     this.clearTimer();
     this.timer = window.setTimeout(() => {
       void this.updateFromActiveEditor();
-    }, delay);
+    }, renderDelay);
+  }
+  syncVisibility() {
+    if (!this.enabled) {
+      return;
+    }
+    const view = this.getActiveMarkdownView();
+    const block = view ? getCurrentTikzBlock(view.editor) : null;
+    if (!view || !block) {
+      this.hide();
+      this.lastSource = null;
+      return;
+    }
+    const source = tidyTikzSource(block.source);
+    if (!source.trim()) {
+      this.showMessage(view, "Nothing to render.");
+      return;
+    }
+    if (source === this.lastSource && this.lastGoodDataUrl) {
+      this.showImage(view, this.lastGoodDataUrl);
+      return;
+    }
+    if (!this.lastGoodDataUrl && !this.container) {
+      this.showMessage(view, "Rendering\u2026");
+    }
   }
   clearTimer() {
     if (this.timer) {
@@ -505,41 +692,143 @@ var InlinePreviewManager = class {
       this.timer = null;
     }
   }
+  isInTikzBlock() {
+    const view = this.getActiveMarkdownView();
+    return !!view && !!getCurrentTikzBlock(view.editor);
+  }
   hide() {
     if (this.container) {
       this.container.remove();
       this.container = null;
+      this.resizeListenersAttached = false;
     }
   }
-  containerEl(view) {
+  applyDefaultSize(container) {
+    container.style.width = `${this.previewWidth}px`;
+    container.style.height = `${this.previewHeight}px`;
+    container.style.maxWidth = "none";
+    container.style.maxHeight = "none";
+  }
+  attachResizeHandles(container) {
+    if (this.resizeListenersAttached) {
+      return;
+    }
+    for (const direction of RESIZE_DIRECTIONS) {
+      const handle = container.createDiv({
+        cls: `tikzjax-inline-resize-handle tikzjax-inline-resize-${direction}`
+      });
+      handle.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.beginResize(event, direction, container);
+      });
+    }
+    this.resizeListenersAttached = true;
+  }
+  beginResize(event, direction, container) {
+    const parent = container.offsetParent;
+    if (!parent) {
+      return;
+    }
+    const parentRect = parent.getBoundingClientRect();
+    const rect = container.getBoundingClientRect();
+    const startLeft = rect.left - parentRect.left;
+    const startTop = rect.top - parentRect.top;
+    container.style.right = "auto";
+    container.style.left = `${startLeft}px`;
+    container.style.top = `${startTop}px`;
+    container.style.width = `${rect.width}px`;
+    container.style.height = `${rect.height}px`;
+    const start = {
+      x: event.clientX,
+      y: event.clientY,
+      left: startLeft,
+      top: startTop,
+      width: rect.width,
+      height: rect.height
+    };
+    const onMove = (moveEvent) => {
+      const dx = moveEvent.clientX - start.x;
+      const dy = moveEvent.clientY - start.y;
+      let left = start.left;
+      let top = start.top;
+      let width = start.width;
+      let height = start.height;
+      if (direction.includes("e")) {
+        width = start.width + dx;
+      }
+      if (direction.includes("w")) {
+        width = start.width - dx;
+        left = start.left + dx;
+      }
+      if (direction.includes("s")) {
+        height = start.height + dy;
+      }
+      if (direction.includes("n")) {
+        height = start.height - dy;
+        top = start.top + dy;
+      }
+      width = Math.max(MIN_PREVIEW_WIDTH, width);
+      height = Math.max(MIN_PREVIEW_HEIGHT, height);
+      if (direction.includes("w")) {
+        left = start.left + start.width - width;
+      }
+      if (direction.includes("n")) {
+        top = start.top + start.height - height;
+      }
+      container.style.left = `${left}px`;
+      container.style.top = `${top}px`;
+      container.style.width = `${width}px`;
+      container.style.height = `${height}px`;
+      this.previewWidth = width;
+      this.previewHeight = height;
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+  ensureContainer(view) {
     const activeDocument2 = view.containerEl.ownerDocument;
     if (this.container && activeDocument2.body.contains(this.container)) {
       return this.container;
     }
     this.container = view.containerEl.createDiv({
-      cls: "tikzjax-hebrew-local-inline-preview"
+      cls: "tikzjax-hebrew-local-inline-preview luatikz-glass-card"
     });
+    this.applyDefaultSize(this.container);
+    this.attachResizeHandles(this.container);
+    this.container.createDiv({ cls: "tikzjax-hebrew-local-inline-preview-body" });
     return this.container;
   }
+  previewBody(view) {
+    const shell = this.ensureContainer(view);
+    return shell.querySelector(".tikzjax-hebrew-local-inline-preview-body");
+  }
   showMessage(view, message) {
-    const el = this.containerEl(view);
-    el.empty();
-    el.createDiv({
+    const body = this.previewBody(view);
+    body.empty();
+    const messageEl = body.createDiv({
       cls: "tikzjax-hebrew-local-inline-preview-message",
       text: message
     });
+    applyRtlToContainer(messageEl, message);
   }
   showImage(view, dataUrl) {
-    const el = this.containerEl(view);
-    el.empty();
-    const output = el.createDiv({ cls: "tikzjax-hebrew-local-output" });
+    const body = this.previewBody(view);
+    body.empty();
+    const output = body.createDiv({
+      cls: "tikzjax-hebrew-local-output tikzjax-hebrew-local-inline-preview-output"
+    });
     const img = output.createEl("img");
     img.setAttr("src", dataUrl);
     img.setAttr("alt", "TikZ diagram");
-    img.addClass("tikzjax-hebrew-local-image");
+    img.addClass("tikzjax-hebrew-local-image tikzjax-hebrew-local-inline-preview-image");
   }
-  showError(view, message, details, onRetry) {
-    appendTikzError(this.containerEl(view), message, details, onRetry, "tikzjax-hebrew-local-inline-preview-error");
+  showError(view, message, details, onRetry, source) {
+    appendTikzError(this.previewBody(view), message, details, onRetry, "tikzjax-hebrew-local-inline-preview-error", source, this.getSettings());
   }
   updateFromActiveEditor() {
     return __async(this, null, function* () {
@@ -563,6 +852,7 @@ var InlinePreviewManager = class {
         return;
       }
       if (source === this.lastSource && this.lastGoodDataUrl) {
+        this.showImage(view, this.lastGoodDataUrl);
         return;
       }
       const token = ++this.renderToken;
@@ -589,9 +879,9 @@ var InlinePreviewManager = class {
       if (this.lastGoodDataUrl) {
         this.showImage(view, this.lastGoodDataUrl);
       } else {
-        this.containerEl(view).empty();
+        this.previewBody(view).empty();
       }
-      this.showError(view, (_a = result.error) != null ? _a : "Render failed.", result.rawLog, retry);
+      this.showError(view, (_a = result.error) != null ? _a : "Render failed.", result.rawLog, retry, source);
     });
   }
 };
@@ -991,7 +1281,7 @@ var tikzLibraries = [
 ];
 var allCommandCompletions = [...latexCommands, ...simpleShapeHelpers];
 function insideLatexOrTikzBlock(textBeforeCursor) {
-  const fencePattern = /```(?:tikz|latex|lualatex|tex)\b/g;
+  const fencePattern = /```(?:tikz|luatikz|latex|lualatex|tex)\b/g;
   let lastOpen = -1;
   let match;
   while ((match = fencePattern.exec(textBeforeCursor)) !== null) {
@@ -1071,29 +1361,55 @@ var RenderTimeoutError = class extends Error {
     this.name = "RenderTimeoutError";
   }
 };
-function execFileWithTimeout(file, args, options, timeoutMs) {
+function spawnWithTimeout(file, args, options, timeoutMs) {
   return new Promise((resolve, reject) => {
+    var _a, _b, _c;
     let timedOut = false;
-    const child = (0, import_child_process.execFile)(file, args, options, (err, stdout, stderr) => {
-      var _a, _b;
-      if (timedOut) {
-        return;
+    let stdout = "";
+    let stderr = "";
+    const maxBuffer = (_a = options.maxBuffer) != null ? _a : 10 * 1024 * 1024;
+    const child = (0, import_child_process.spawn)(file, args, {
+      cwd: options.cwd,
+      shell: false,
+      windowsHide: true
+    });
+    (_b = child.stdout) == null ? void 0 : _b.on("data", (chunk) => {
+      stdout += chunk.toString();
+      if (stdout.length > maxBuffer) {
+        stdout = stdout.slice(-maxBuffer);
       }
-      window.clearTimeout(timer);
-      if (err) {
-        reject(err instanceof Error ? err : new Error(String(err)));
-        return;
+    });
+    (_c = child.stderr) == null ? void 0 : _c.on("data", (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > maxBuffer) {
+        stderr = stderr.slice(-maxBuffer);
       }
-      resolve({
-        stdout: (_a = stdout == null ? void 0 : stdout.toString()) != null ? _a : "",
-        stderr: (_b = stderr == null ? void 0 : stderr.toString()) != null ? _b : ""
-      });
     });
     const timer = window.setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
       reject(new RenderTimeoutError(timeoutMs));
     }, timeoutMs);
+    child.on("error", (err) => {
+      window.clearTimeout(timer);
+      if (!timedOut) {
+        reject(err);
+      }
+    });
+    child.on("close", (code) => {
+      window.clearTimeout(timer);
+      if (timedOut) {
+        return;
+      }
+      if (code !== 0) {
+        const err = new Error(`Process exited with code ${code != null ? code : "unknown"}`);
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
   });
 }
 function resolveCommand(candidates) {
@@ -1106,7 +1422,7 @@ function resolveCommand(candidates) {
         continue;
       }
       try {
-        const { stdout } = yield execFileWithTimeout("/usr/bin/which", [candidate], {}, 5e3);
+        const { stdout } = yield spawnWithTimeout("/usr/bin/which", [candidate], {}, 5e3);
         const resolved = stdout.trim();
         if (resolved) {
           return resolved;
@@ -1117,8 +1433,17 @@ function resolveCommand(candidates) {
     return null;
   });
 }
-function resolveLuaLatex() {
+function resolveLuaLatex(customPath) {
   return __async(this, null, function* () {
+    if (customPath == null ? void 0 : customPath.trim()) {
+      const validationError = validateLualatexPath(customPath);
+      if (validationError) {
+        return null;
+      }
+      if (fs.existsSync(customPath.trim())) {
+        return customPath.trim();
+      }
+    }
     return resolveCommand([
       "/Library/TeX/texbin/lualatex",
       "/usr/local/texlive/2025/bin/universal-darwin/lualatex",
@@ -1156,16 +1481,193 @@ function formatExecError(err) {
   return String(err);
 }
 
-// renderer.ts
+// types.ts
+function renderResultToImageResult(result) {
+  var _a;
+  return {
+    ok: result.ok,
+    dataUrl: result.dataUrl,
+    svgText: (_a = result.svgText) != null ? _a : result.svg,
+    pngPath: result.pngPath,
+    html: result.html,
+    error: result.error,
+    rawLog: result.rawLog,
+    userLine: result.userLine,
+    noteLine: result.noteLine,
+    lineContent: result.lineContent,
+    timedOut: result.timedOut,
+    engine: result.engine
+  };
+}
+
+// renderers/LuaLatexRenderer.ts
 var import_crypto = __toModule(require("crypto"));
+var fs3 = __toModule(require("fs"));
+var path2 = __toModule(require("path"));
+
+// pluginPaths.ts
 var fs2 = __toModule(require("fs"));
-var os = __toModule(require("os"));
 var path = __toModule(require("path"));
-var RENDER_TIMEOUT_MS = 6e4;
+var import_obsidian4 = __toModule(require("obsidian"));
+function getPluginDir(app, pluginId) {
+  return (0, import_obsidian4.normalizePath)(`${app.vault.configDir}/plugins/${pluginId}`);
+}
+function getPluginTempDir(app, pluginId) {
+  return (0, import_obsidian4.normalizePath)(`${getPluginDir(app, pluginId)}/.luatikz-temp`);
+}
+function getVaultBasePath(app) {
+  const adapter = app.vault.adapter;
+  if (typeof adapter.basePath === "string" && adapter.basePath.length > 0) {
+    return adapter.basePath;
+  }
+  if (typeof adapter.getBasePath === "function") {
+    const resolved = adapter.getBasePath();
+    if (typeof resolved === "string" && resolved.length > 0) {
+      return resolved;
+    }
+  }
+  return null;
+}
+function getPluginFsDir(app, pluginId) {
+  const basePath = getVaultBasePath(app);
+  if (!basePath) {
+    return null;
+  }
+  return path.join(basePath, app.vault.configDir, "plugins", pluginId);
+}
+function getTikzJaxEntryPath(app, pluginId) {
+  const pluginFsDir = getPluginFsDir(app, pluginId);
+  if (!pluginFsDir) {
+    return null;
+  }
+  return path.join(pluginFsDir, "vendor", "node-tikzjax", "dist", "index.js");
+}
+function getTikzJaxTexPath(app, pluginId) {
+  const pluginFsDir = getPluginFsDir(app, pluginId);
+  if (!pluginFsDir) {
+    return null;
+  }
+  return path.join(pluginFsDir, "vendor", "tex");
+}
+function getDesktopFsPath(app, adapterPath) {
+  const basePath = getVaultBasePath(app);
+  if (!basePath) {
+    return null;
+  }
+  return path.join(basePath, (0, import_obsidian4.normalizePath)(adapterPath));
+}
+function ensureAdapterFolderExists(app, folderPath) {
+  return __async(this, null, function* () {
+    const normalized = (0, import_obsidian4.normalizePath)(folderPath);
+    if (yield app.vault.adapter.exists(normalized)) {
+      return;
+    }
+    const parts = normalized.split("/").filter((part) => part.length > 0);
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      if (!(yield app.vault.adapter.exists(current))) {
+        yield app.vault.adapter.mkdir(current);
+      }
+    }
+  });
+}
+function ensurePluginTempFsDir(app, pluginId) {
+  return __async(this, null, function* () {
+    const pluginAdapterDir = getPluginDir(app, pluginId);
+    const tempAdapterDir = getPluginTempDir(app, pluginId);
+    try {
+      yield ensureAdapterFolderExists(app, pluginAdapterDir);
+      yield ensureAdapterFolderExists(app, tempAdapterDir);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        error: `Could not create LuaTikz temp directory: ${message}`
+      };
+    }
+    const workDir = getDesktopFsPath(app, tempAdapterDir);
+    if (!workDir) {
+      return {
+        ok: false,
+        error: "Local LuaLaTeX rendering requires desktop filesystem access."
+      };
+    }
+    return { ok: true, workDir };
+  });
+}
+function clearPluginTempFsDir(app, pluginId) {
+  return __async(this, null, function* () {
+    const tempAdapterDir = getPluginTempDir(app, pluginId);
+    const workDir = getDesktopFsPath(app, tempAdapterDir);
+    if (!workDir) {
+      return;
+    }
+    if (fs2.existsSync(workDir)) {
+      try {
+        fs2.rmSync(workDir, { recursive: true, force: true });
+      } catch (e) {
+      }
+    }
+    try {
+      yield ensureAdapterFolderExists(app, tempAdapterDir);
+    } catch (e) {
+    }
+  });
+}
+function loadRequiredModule(modulePath) {
+  return require(modulePath);
+}
+function resolveTikzJaxRuntime(app, pluginId) {
+  const entryPath = getTikzJaxEntryPath(app, pluginId);
+  const texPath = getTikzJaxTexPath(app, pluginId);
+  if (!entryPath || !texPath) {
+    return {
+      ok: false,
+      error: "TikZJax requires desktop access to the plugin folder.",
+      rawLog: "Could not resolve an absolute plugin folder path for TikZJax."
+    };
+  }
+  if (!fs2.existsSync(entryPath)) {
+    return {
+      ok: false,
+      error: "TikZJax runtime is missing.",
+      rawLog: [
+        `TikZJax runtime was not found at ${entryPath}.`,
+        "Reinstall the plugin or rebuild the release with vendor/node-tikzjax included.",
+        "",
+        "The plugin release must include:",
+        "vendor/node-tikzjax/",
+        "vendor/tex/",
+        "",
+        "Switch to Local LuaLaTeX or reinstall a release that bundles TikZJax."
+      ].join("\n")
+    };
+  }
+  if (!fs2.existsSync(texPath)) {
+    return {
+      ok: false,
+      error: "TikZJax runtime is missing.",
+      rawLog: [
+        `TikZJax TeX files were not found at ${texPath}.`,
+        "Reinstall the plugin or rebuild the release with vendor/tex included.",
+        "",
+        "The plugin release must include:",
+        "vendor/node-tikzjax/",
+        "vendor/tex/",
+        "",
+        "Switch to Local LuaLaTeX or reinstall a release that bundles TikZJax."
+      ].join("\n")
+    };
+  }
+  return { ok: true, paths: { entryPath, texPath } };
+}
+
+// renderers/LuaLatexRenderer.ts
 var CACHE_MAX = 32;
 var CACHE_TTL_MS = 30 * 60 * 1e3;
-function cacheKey(source, invertDark) {
-  return (0, import_crypto.createHash)("sha256").update(source).update(invertDark ? ":dark" : ":light").digest("hex");
+function cacheKey(source, invertDark, settings) {
+  return (0, import_crypto.createHash)("sha256").update(source).update(invertDark ? ":dark" : ":light").update(settings.lualatexPath).update(settings.extraPreamble).update(String(settings.timeoutMs)).digest("hex");
 }
 function svgDataUrl(svgText) {
   return `data:image/svg+xml;base64,${Buffer.from(svgText, "utf8").toString("base64")}`;
@@ -1173,48 +1675,89 @@ function svgDataUrl(svgText) {
 function invertSvgForDarkMode(svg) {
   return svg.replaceAll("rgb(0%,0%,0%)", "rgb(100%,100%,100%)").replace(/rgb[(]0%,[ \t]*0%,[ \t]*0%[)]/g, "rgb(100%,100%,100%)").replace(/rgb[(]0,[ \t]*0,[ \t]*0[)]/g, "rgb(255,255,255)").replace(/#000000(?![0-9a-f])/gi, "#ffffff").replace(/#000(?![0-9a-f])/gi, "#fff").replace(/stroke:[ \t]*black/gi, "stroke:white").replace(/fill:[ \t]*black/gi, "fill:white").replace(/stroke="black"/gi, 'stroke="white"').replace(/fill="black"/gi, 'fill="white"');
 }
-var TikzRenderer = class {
-  constructor(invertInDarkMode, isDarkTheme) {
-    this.invertInDarkMode = invertInDarkMode;
+function formatCompileDebugLog(debug, body) {
+  return [
+    "Renderer: LuaLaTeX",
+    `LuaLaTeX path: ${debug.lualatexPath}`,
+    `Working directory: ${debug.workDir}`,
+    `Input file: ${debug.inputFile}`,
+    "",
+    body
+  ].join("\n");
+}
+function resolvePngOutputPath(workDir, jobId) {
+  const candidates = [
+    path2.join(workDir, `${jobId}.png`),
+    path2.join(workDir, `${jobId}-1.png`)
+  ];
+  for (const candidate of candidates) {
+    if (fs3.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+var LuaLatexRenderer = class {
+  constructor(app, pluginId, isDarkTheme) {
+    this.app = app;
+    this.pluginId = pluginId;
     this.isDarkTheme = isDarkTheme;
     this.cache = new Map();
-    this.inFlight = new Map();
-  }
-  renderToSvg(source, errorContext) {
-    return __async(this, null, function* () {
-      const invertDark = this.invertInDarkMode() && this.isDarkTheme();
-      const key = cacheKey(source, invertDark);
-      const hit = this.cache.get(key);
-      if (hit && Date.now() - hit.createdAt <= CACHE_TTL_MS) {
-        this.cache.delete(key);
-        this.cache.set(key, hit);
-        return { ok: true, svgText: hit.svgText, dataUrl: svgDataUrl(hit.svgText) };
-      }
-      if (hit) {
-        this.cache.delete(key);
-      }
-      const pending = this.inFlight.get(key);
-      if (pending !== void 0) {
-        return pending;
-      }
-      const renderPromise = this.compile(source, errorContext, invertDark, key).finally(() => this.inFlight.delete(key));
-      this.inFlight.set(key, renderPromise);
-      return renderPromise;
-    });
   }
   clearCache() {
     this.cache.clear();
-    this.inFlight.clear();
+    void clearPluginTempFsDir(this.app, this.pluginId);
   }
-  latexError(rawError, source, errorContext, timedOut = false) {
+  render(request) {
+    return __async(this, null, function* () {
+      var _a;
+      const { settings, normalizedSource, errorContext } = request;
+      const invertDark = (_a = request.invertDark) != null ? _a : this.isDarkTheme();
+      if (!settings.enableLocalShellRenderer) {
+        return {
+          ok: false,
+          engine: "lualatex",
+          error: 'Local LuaLaTeX rendering is disabled. Enable "Allow local LuaLaTeX execution" in LuaTikz settings.'
+        };
+      }
+      const pathValidation = validateLualatexPath(settings.lualatexPath);
+      if (pathValidation) {
+        return { ok: false, engine: "lualatex", error: pathValidation };
+      }
+      const key = cacheKey(normalizedSource, invertDark, settings);
+      if (settings.cacheEnabled) {
+        const hit = this.cache.get(key);
+        if (hit && Date.now() - hit.createdAt <= CACHE_TTL_MS) {
+          this.cache.delete(key);
+          this.cache.set(key, hit);
+          const svgText = hit.svgText;
+          return {
+            ok: true,
+            engine: "lualatex",
+            svg: svgText,
+            svgText,
+            dataUrl: svgDataUrl(svgText)
+          };
+        }
+        if (hit) {
+          this.cache.delete(key);
+        }
+      }
+      return this.compile(normalizedSource, settings, errorContext, invertDark, key);
+    });
+  }
+  latexError(rawError, source, settings, errorContext, timedOut = false, debug) {
     const block = errorContext == null ? void 0 : errorContext.block;
     const editor = errorContext == null ? void 0 : errorContext.editor;
+    const lineOffset = getUserSourceLineOffsetForExtraPreamble(settings.extraPreamble);
     const noteLineMapper = block && editor ? (userLine) => mapTidiedLineToNoteLine(block.startLine, block.endLine, (line) => editor.getLine(line), userLine) : void 0;
-    const mapped = formatLatexErrorWithLineMapping(rawError, source, USER_SOURCE_LINE_OFFSET, noteLineMapper);
+    const mapped = formatLatexErrorWithLineMapping(rawError, source, lineOffset, noteLineMapper);
+    const body = timedOut ? rawError : [mapped.message, rawError].filter(Boolean).join("\n\n");
     return {
       ok: false,
-      error: timedOut ? "Timed out." : mapped.message,
-      rawLog: rawError,
+      engine: "lualatex",
+      error: timedOut ? "Timed out." : "LuaLaTeX failed to compile this diagram.",
+      rawLog: debug ? formatCompileDebugLog(debug, body) : body,
       userLine: mapped.userLine,
       noteLine: mapped.noteLine,
       lineContent: mapped.lineContent,
@@ -1227,81 +1770,135 @@ var TikzRenderer = class {
     }
     this.cache.set(key, { svgText, createdAt: Date.now() });
     while (this.cache.size > CACHE_MAX) {
-      const nextKey = this.cache.keys().next();
-      if (nextKey.done || nextKey.value === void 0) {
+      const oldestKey = this.cache.keys().next().value;
+      if (typeof oldestKey !== "string") {
         break;
       }
-      this.cache.delete(nextKey.value);
+      this.cache.delete(oldestKey);
     }
   }
-  compile(source, errorContext, invertDark, key) {
+  compile(source, settings, errorContext, invertDark, key) {
     return __async(this, null, function* () {
-      const tmpDir = fs2.mkdtempSync(path.join(os.tmpdir(), "obsidian-tikz-"));
-      const texPath = path.join(tmpDir, "diagram.tex");
-      const pdfPath = path.join(tmpDir, "diagram.pdf");
-      const logPath = path.join(tmpDir, "diagram.log");
-      const svgPath = path.join(tmpDir, "diagram.svg");
+      const tempDirResult = yield ensurePluginTempFsDir(this.app, this.pluginId);
+      if (!tempDirResult.ok) {
+        return {
+          ok: false,
+          engine: "lualatex",
+          error: tempDirResult.error
+        };
+      }
+      const workRoot = tempDirResult.workDir;
+      fs3.mkdirSync(workRoot, { recursive: true });
+      const safeId = sanitizeCacheFilename(key.slice(0, 16));
+      const jobId = `luatikz-${safeId}`;
+      const workDir = fs3.mkdtempSync(path2.join(workRoot, `${jobId}-`));
+      const texFileName = `${jobId}.tex`;
+      const pdfFileName = `${jobId}.pdf`;
+      const svgFileName = `${jobId}.svg`;
+      const logPath = path2.join(workDir, `${jobId}.log`);
+      const texPath = path2.join(workDir, texFileName);
+      const pdfPath = path2.join(workDir, pdfFileName);
+      const svgPath = path2.join(workDir, svgFileName);
+      const lualatex = yield resolveLuaLatex(settings.lualatexPath);
+      if (!lualatex) {
+        return {
+          ok: false,
+          engine: "lualatex",
+          error: "LuaLaTeX not found.",
+          rawLog: `Expected at ${settings.lualatexPath}
+Check: which lualatex`
+        };
+      }
+      const debugInfo = {
+        lualatexPath: lualatex,
+        workDir,
+        inputFile: texFileName
+      };
       try {
-        fs2.writeFileSync(texPath, wrapLatexSource(source), "utf8");
-        const lualatex = yield resolveLuaLatex();
-        if (!lualatex) {
-          return {
-            ok: false,
-            error: "LuaLaTeX not found.",
-            rawLog: "Expected at /Library/TeX/texbin/lualatex\nCheck: which lualatex"
-          };
-        }
+        fs3.writeFileSync(texPath, wrapLatexSource(source, settings.extraPreamble), "utf8");
         try {
-          yield execFileWithTimeout(lualatex, [
+          yield spawnWithTimeout(lualatex, [
             "-interaction=nonstopmode",
             "-halt-on-error",
-            `-output-directory=${tmpDir}`,
-            texPath
-          ], { cwd: tmpDir, maxBuffer: 10 * 1024 * 1024 }, RENDER_TIMEOUT_MS);
+            texFileName
+          ], { cwd: workDir, maxBuffer: 10 * 1024 * 1024 }, settings.timeoutMs);
         } catch (err) {
           const logTail = readLogTail(logPath);
           const raw = [formatExecError(err), logTail && `
 --- log ---
 ${logTail}`].filter(Boolean).join("\n");
-          return this.latexError(raw, source, errorContext, err instanceof RenderTimeoutError);
+          return this.latexError(raw, source, settings, errorContext, err instanceof RenderTimeoutError, debugInfo);
         }
-        if (!fs2.existsSync(pdfPath)) {
+        if (!fs3.existsSync(pdfPath)) {
           const logTail = readLogTail(logPath);
-          if (logTail) {
-            return this.latexError(`No PDF produced.
+          const raw = logTail ? `No PDF produced.
 --- log ---
-${logTail}`, source, errorContext);
+${logTail}` : "No PDF produced.";
+          return this.latexError(raw, source, settings, errorContext, false, debugInfo);
+        }
+        if (settings.outputFormat === "png") {
+          const pdftocairo2 = yield resolvePdfToCairo();
+          if (!pdftocairo2) {
+            return {
+              ok: false,
+              engine: "lualatex",
+              error: "pdftocairo not found.",
+              rawLog: formatCompileDebugLog(debugInfo, "Install: brew install poppler")
+            };
           }
-          return { ok: false, error: "No PDF produced.", rawLog: "LuaLaTeX exited without diagram.pdf." };
+          try {
+            yield spawnWithTimeout(pdftocairo2, ["-png", pdfFileName, jobId], {
+              cwd: workDir,
+              maxBuffer: 30 * 1024 * 1024
+            }, settings.timeoutMs);
+          } catch (err) {
+            return this.latexError(formatExecError(err), source, settings, errorContext, err instanceof RenderTimeoutError, debugInfo);
+          }
+          const pngPath = resolvePngOutputPath(workDir, jobId);
+          if (!pngPath) {
+            return this.latexError("No PNG produced.", source, settings, errorContext, false, debugInfo);
+          }
+          const pngData = fs3.readFileSync(pngPath);
+          const dataUrl = `data:image/png;base64,${pngData.toString("base64")}`;
+          return { ok: true, engine: "lualatex", pngPath, dataUrl };
         }
         const pdftocairo = yield resolvePdfToCairo();
         if (!pdftocairo) {
           return {
             ok: false,
+            engine: "lualatex",
             error: "pdftocairo not found.",
-            rawLog: "Install: brew install poppler"
+            rawLog: formatCompileDebugLog(debugInfo, "Install: brew install poppler")
           };
         }
         try {
-          yield execFileWithTimeout(pdftocairo, ["-svg", pdfPath, svgPath], {
-            cwd: tmpDir,
+          yield spawnWithTimeout(pdftocairo, ["-svg", pdfFileName, svgFileName], {
+            cwd: workDir,
             maxBuffer: 30 * 1024 * 1024
-          }, RENDER_TIMEOUT_MS);
+          }, settings.timeoutMs);
         } catch (err) {
-          return this.latexError(formatExecError(err), source, errorContext, err instanceof RenderTimeoutError);
+          return this.latexError(formatExecError(err), source, settings, errorContext, err instanceof RenderTimeoutError, debugInfo);
         }
-        if (!fs2.existsSync(svgPath)) {
-          return { ok: false, error: "No SVG produced.", rawLog: `PDF: ${pdfPath}` };
+        if (!fs3.existsSync(svgPath)) {
+          return this.latexError("No SVG produced.", source, settings, errorContext, false, debugInfo);
         }
-        let svgText = fs2.readFileSync(svgPath, "utf8");
+        let svgText = fs3.readFileSync(svgPath, "utf8");
         if (invertDark) {
           svgText = invertSvgForDarkMode(svgText);
         }
-        this.remember(key, svgText);
-        return { ok: true, svgText, dataUrl: svgDataUrl(svgText) };
+        if (settings.cacheEnabled) {
+          this.remember(key, svgText);
+        }
+        return {
+          ok: true,
+          engine: "lualatex",
+          svg: svgText,
+          svgText,
+          dataUrl: svgDataUrl(svgText)
+        };
       } finally {
         try {
-          fs2.rmSync(tmpDir, { recursive: true, force: true });
+          fs3.rmSync(workDir, { recursive: true, force: true });
         } catch (e) {
         }
       }
@@ -1309,13 +1906,541 @@ ${logTail}`, source, errorContext);
   }
 };
 
+// renderers/TikzJaxRenderer.ts
+var import_crypto2 = __toModule(require("crypto"));
+
+// tikzJaxSource.ts
+var LUALATEX_ONLY_PATTERNS = [
+  /\\usepackage(?:\[[^\]]*\])?\{fontspec\}\n?/g,
+  /\\usepackage(?:\[[^\]]*\])?\{polyglossia\}\n?/g,
+  /\\usepackage(?:\[[^\]]*\])?\{unicode-math\}\n?/g,
+  /\\usepackage(?:\[[^\]]*\])?\{siunitx\}\n?/g,
+  /\\setmainlanguage\{[^}]+\}\n?/g,
+  /\\setotherlanguage\{[^}]+\}\n?/g,
+  /\\setmainfont(?:\[[^\]]*\])?\{[^}]+\}\n?/g,
+  /\\setsansfont(?:\[[^\]]*\])?\{[^}]+\}\n?/g,
+  /\\setmonofont(?:\[[^\]]*\])?\{[^}]+\}\n?/g,
+  /\\newfontfamily\\\w+(?:\[[^\]]*\])?\{[^}]+\}\n?/g,
+  /\\newcommand\{\\he\}(?:\[[^\]]*\])?\{[^}]+\}\n?/g
+];
+var TIKZJAX_UNSUPPORTED_PATTERNS = [
+  /\\documentclass(?:\[[^\]]*\])?\{[^}]+\}\n?/g,
+  /\\begin\{document\}\n?/g,
+  /\\end\{document\}\n?/g
+];
+var TIKZJAX_TEX_PACKAGES = {
+  tikz: "",
+  amsmath: "",
+  amsfonts: "",
+  amssymb: ""
+};
+var TIKZJAX_TIKZ_LIBRARIES = "arrows.meta,positioning,calc,decorations.pathmorphing,decorations.pathreplacing,patterns,shapes.geometric,circuits.logic.US";
+function normalizeUnicodeForTikzJax(source) {
+  return source.replace(/\u2212/g, "-").replace(/\u00D7/g, "\\times ").replace(/\u00B7/g, "\\cdot ").replace(/\u03A9/g, "\\Omega ").replace(/\u2126/g, "\\Omega ").replace(/\u03C9/g, "\\omega ").replace(/\u03BC/g, "\\mu ").replace(/\u03C0/g, "\\pi ").replace(/\u03B1/g, "\\alpha ").replace(/\u03B2/g, "\\beta ").replace(/\u03B3/g, "\\gamma ").replace(/\u03B4/g, "\\delta ").replace(/\u03B8/g, "\\theta ").replace(/\u03BB/g, "\\lambda ").replace(/\u03C3/g, "\\sigma ");
+}
+function stripPatterns(source, patterns) {
+  let cleaned = source;
+  for (const pattern of patterns) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+  return cleaned;
+}
+function replaceHebrewMacros(source) {
+  let converted = false;
+  const text = source.replace(/\\he\{([^}]*)\}/g, (_match, content) => {
+    converted = true;
+    return content;
+  }).replace(/\\texthebrew\{([^}]*)\}/g, (_match, content) => {
+    converted = true;
+    return content;
+  });
+  return { text, converted };
+}
+function normalizeOhmCommands(source) {
+  return source.replace(/\\ohm\b/g, "\\Omega ");
+}
+function sanitizeTikzJaxPreamble(preamble) {
+  const trimmed = preamble.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return stripPatterns(trimmed, LUALATEX_ONLY_PATTERNS).trim();
+}
+function assertTikzJaxNormalizationPreservesLatex(source, tex) {
+  const requiredCommands = ["\\Omega", "\\omega", "\\pi", "\\theta", "\\lambda", "\\mu", "\\times", "\\cdot"];
+  for (const command of requiredCommands) {
+    if (source.includes(command) && !tex.includes(command)) {
+      throw new Error(`TikZJax normalization corrupted ${command}.`);
+    }
+  }
+}
+function normalizeForTikzJax(source) {
+  const tidied = tidyTikzSource(source);
+  const unicodeNormalized = normalizeUnicodeForTikzJax(tidied);
+  const withOhm = normalizeOhmCommands(unicodeNormalized);
+  const { text: withoutHebrewMacros, converted: hebrewConverted } = replaceHebrewMacros(withOhm);
+  const sanitized = stripPatterns(stripPatterns(withoutHebrewMacros, LUALATEX_ONLY_PATTERNS), TIKZJAX_UNSUPPORTED_PATTERNS).trim();
+  let mode;
+  let body;
+  if (/\\documentclass/.test(tidied)) {
+    mode = "full-document";
+    body = sanitized;
+  } else if (/\\begin\{tikzpicture\}/.test(sanitized)) {
+    mode = "bare-tikzpicture";
+    body = sanitized;
+  } else {
+    mode = "raw";
+    body = `\\begin{tikzpicture}
+${sanitized}
+\\end{tikzpicture}`;
+  }
+  const tex = [
+    "\\begin{document}",
+    body,
+    "\\end{document}"
+  ].join("\n");
+  assertTikzJaxNormalizationPreservesLatex(source, tex);
+  return {
+    tex,
+    mode,
+    hebrewNote: hebrewConverted ? "Hebrew \\he{...} macros were converted to plain text. Use Local LuaLaTeX for full Hebrew support." : void 0
+  };
+}
+function formatTikzJaxInputMode(mode) {
+  switch (mode) {
+    case "bare-tikzpicture":
+      return "bare tikzpicture";
+    case "full-document":
+      return "full document (sanitized)";
+    default:
+      return "raw (wrapped in tikzpicture)";
+  }
+}
+
+// utils/tikzJaxSvgFix.ts
+var CMMI10_GLYPH_MAP = {
+  "\xB5": "\u03B8",
+  "\xB8": "\u03BB",
+  "\xB9": "\u03BC",
+  "\xAE": "\u03B1",
+  "\xAF": "\u03B2",
+  "\xB0": "\u03B3",
+  "\xB1": "\u03B4",
+  "\xBE": "\u03C3",
+  "!": "\u03C9",
+  "\xBC": "\u03C0",
+  ":": "."
+};
+var CMR10_GLYPH_MAP = {
+  "\xAC": "\u03A9"
+};
+var CMSY10_GLYPH_MAP = {
+  "\xA1": "-",
+  "\u2212": "-",
+  "\u2219": "\u2264",
+  "\xA3": "\xD7",
+  "\xA2": "\xB7",
+  "\xA7": "\xB1",
+  "1": "\u221E"
+};
+var GLYPH_MAPS = {
+  cmmi10: CMMI10_GLYPH_MAP,
+  cmr10: CMR10_GLYPH_MAP,
+  cmsy10: CMSY10_GLYPH_MAP
+};
+function replaceMappedGlyphs(content, table) {
+  let result = content;
+  for (const [bad, good] of Object.entries(table)) {
+    if (result.includes(bad)) {
+      result = result.replaceAll(bad, good);
+    }
+  }
+  return result;
+}
+function fixTextContent(family, content) {
+  const table = GLYPH_MAPS[family];
+  if (!table) {
+    return content;
+  }
+  return replaceMappedGlyphs(content, table);
+}
+function fixTextNode(full, family, attrs, content) {
+  const mapped = fixTextContent(family, content);
+  if (mapped === content) {
+    return full;
+  }
+  const nextAttrs = attrs.includes("font-family=") ? attrs.replace(/font-family="[^"]+"/, 'font-family="Cambria Math, STIX Two Math, serif"') : `${attrs} font-family="Cambria Math, STIX Two Math, serif"`;
+  return `<text${nextAttrs}>${mapped}</text>`;
+}
+function fixTikzJaxSvgGlyphs(svg) {
+  return svg.replace(/<text\b([^>]*\bfont-family="(cmmi10|cmr10|cmsy10)")([^>]*)>([^<]*)<\/text>/g, (full, beforeFamily, family, afterFamily, content) => fixTextNode(full, family, `${beforeFamily}${afterFamily}`, content));
+}
+function finalizeTikzJaxSvg(svg) {
+  return fixTikzJaxSvgGlyphs(svg);
+}
+
+// renderers/TikzJaxRenderer.ts
+var CACHE_MAX2 = 32;
+var CACHE_TTL_MS2 = 30 * 60 * 1e3;
+var renderQueue = Promise.resolve();
+function runExclusive(task) {
+  const next = renderQueue.then(task, task);
+  renderQueue = next.then(() => void 0, () => void 0);
+  return next;
+}
+function cacheKey2(source, settings) {
+  return (0, import_crypto2.createHash)("sha256").update(source).update(settings.extraPreamble).digest("hex");
+}
+function svgDataUrl2(svgText) {
+  return `data:image/svg+xml;base64,${Buffer.from(svgText, "utf8").toString("base64")}`;
+}
+function isTex2SvgFn(value) {
+  return typeof value === "function";
+}
+function readTex2SvgExport(moduleValue) {
+  if (isTex2SvgFn(moduleValue)) {
+    return moduleValue;
+  }
+  if (!moduleValue || typeof moduleValue !== "object") {
+    return null;
+  }
+  const record = moduleValue;
+  if (isTex2SvgFn(record.default)) {
+    return record.default;
+  }
+  return null;
+}
+function formatTikzJaxDebugLog(debug, body) {
+  return [
+    "Renderer: TikZJax",
+    `TikZJax entry: ${debug.entryPath}`,
+    `TeX path: ${debug.texPath}`,
+    `Input mode: ${debug.inputMode}`,
+    "Normalized source:",
+    debug.normalizedSource,
+    "",
+    body
+  ].join("\n");
+}
+function captureConsoleLogs(task) {
+  return __async(this, null, function* () {
+    const lines = [];
+    const originalLog = console.log.bind(console);
+    console.log = (...args) => {
+      lines.push(args.map((arg) => String(arg)).join(" "));
+      originalLog(...args);
+    };
+    try {
+      const result = yield task();
+      return { result, logs: lines.join("\n") };
+    } finally {
+      console.log = originalLog;
+    }
+  });
+}
+function validateSvgOutput(svg) {
+  return typeof svg === "string" && svg.includes("<svg");
+}
+var TikzJaxRenderer = class {
+  constructor(app, pluginId) {
+    this.app = app;
+    this.pluginId = pluginId;
+    this.cache = new Map();
+    this.tex2svg = null;
+    this.loadError = null;
+    this.loadErrorLog = null;
+    this.runtimePaths = null;
+    this.loadPromise = null;
+  }
+  clearCache() {
+    this.cache.clear();
+    this.tex2svg = null;
+    this.loadError = null;
+    this.loadErrorLog = null;
+    this.runtimePaths = null;
+    this.loadPromise = null;
+  }
+  ensureLoaded() {
+    return __async(this, null, function* () {
+      if (this.tex2svg) {
+        return this.tex2svg;
+      }
+      if (this.loadError) {
+        return null;
+      }
+      if (!this.loadPromise) {
+        this.loadPromise = this.loadModule().finally(() => {
+          this.loadPromise = null;
+        });
+      }
+      return this.loadPromise;
+    });
+  }
+  loadModule() {
+    return __async(this, null, function* () {
+      var _a;
+      const runtime = resolveTikzJaxRuntime(this.app, this.pluginId);
+      if (!runtime.ok) {
+        this.loadError = runtime.error;
+        this.loadErrorLog = (_a = runtime.rawLog) != null ? _a : runtime.error;
+        return null;
+      }
+      this.runtimePaths = runtime.paths;
+      try {
+        setTikzJaxTexDir(runtime.paths.texPath);
+        const moduleValue = loadRequiredModule(runtime.paths.entryPath);
+        if (typeof moduleValue.load === "function") {
+          yield moduleValue.load();
+        }
+        const fn = readTex2SvgExport(moduleValue);
+        if (!fn) {
+          this.loadError = "TikZJax runtime is missing.";
+          this.loadErrorLog = "TikZJax module loaded but tex2svg export is missing.";
+          return null;
+        }
+        this.tex2svg = fn;
+        return fn;
+      } catch (err) {
+        this.loadError = "TikZJax runtime is missing.";
+        this.loadErrorLog = err instanceof Error ? err.message : String(err);
+        return null;
+      }
+    });
+  }
+  render(request) {
+    return __async(this, null, function* () {
+      return runExclusive(() => this.renderInternal(request));
+    });
+  }
+  renderInternal(request) {
+    return __async(this, null, function* () {
+      var _a, _b;
+      const { settings, normalizedSource } = request;
+      const key = cacheKey2(normalizedSource, settings);
+      if (settings.cacheEnabled) {
+        const hit = this.cache.get(key);
+        if (hit && Date.now() - hit.createdAt <= CACHE_TTL_MS2) {
+          this.cache.delete(key);
+          this.cache.set(key, hit);
+          return {
+            ok: true,
+            engine: "tikzjax",
+            svg: hit.svgText,
+            svgText: hit.svgText,
+            dataUrl: svgDataUrl2(hit.svgText)
+          };
+        }
+        if (hit) {
+          this.cache.delete(key);
+        }
+      }
+      const tex2svg = yield this.ensureLoaded();
+      if (!tex2svg || !this.runtimePaths) {
+        return {
+          ok: false,
+          engine: "tikzjax",
+          error: (_a = this.loadError) != null ? _a : "TikZJax renderer is unavailable.",
+          rawLog: (_b = this.loadErrorLog) != null ? _b : [
+            "The plugin release must include:",
+            "vendor/node-tikzjax/",
+            "vendor/tex/",
+            "",
+            "Switch to Local LuaLaTeX or reinstall a release that bundles TikZJax."
+          ].join("\n")
+        };
+      }
+      const normalized = normalizeForTikzJax(normalizedSource);
+      const sanitizedPreamble = sanitizeTikzJaxPreamble(settings.extraPreamble);
+      const debugInfo = {
+        entryPath: this.runtimePaths.entryPath,
+        texPath: this.runtimePaths.texPath,
+        inputMode: formatTikzJaxInputMode(normalized.mode),
+        normalizedSource: normalized.tex
+      };
+      let consoleLogs = "";
+      try {
+        const { result: svgText, logs } = yield captureConsoleLogs(() => __async(this, null, function* () {
+          return tex2svg(normalized.tex, {
+            showConsole: true,
+            texPackages: TIKZJAX_TEX_PACKAGES,
+            tikzLibraries: TIKZJAX_TIKZ_LIBRARIES,
+            addToPreamble: sanitizedPreamble || void 0
+          });
+        }));
+        consoleLogs = logs;
+        const fixedSvg = finalizeTikzJaxSvg(svgText);
+        if (!validateSvgOutput(fixedSvg)) {
+          const logBody = [
+            normalized.hebrewNote,
+            consoleLogs && `TikZJax console:
+${consoleLogs}`,
+            "Raw TikZJax error:",
+            "TikZJax did not return SVG output."
+          ].filter(Boolean).join("\n\n");
+          return {
+            ok: false,
+            engine: "tikzjax",
+            error: "TikZJax failed to render this diagram.",
+            rawLog: formatTikzJaxDebugLog(debugInfo, logBody)
+          };
+        }
+        if (settings.cacheEnabled) {
+          this.cache.set(key, { svgText: fixedSvg, createdAt: Date.now() });
+          while (this.cache.size > CACHE_MAX2) {
+            const oldestKey = this.cache.keys().next().value;
+            if (typeof oldestKey !== "string") {
+              break;
+            }
+            this.cache.delete(oldestKey);
+          }
+        }
+        return {
+          ok: true,
+          engine: "tikzjax",
+          svg: fixedSvg,
+          svgText: fixedSvg,
+          dataUrl: svgDataUrl2(fixedSvg)
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const logBody = [
+          normalized.hebrewNote,
+          logsFromError(err),
+          consoleLogs && `TikZJax console:
+${consoleLogs}`,
+          "Raw TikZJax error:",
+          message
+        ].filter(Boolean).join("\n\n");
+        return {
+          ok: false,
+          engine: "tikzjax",
+          error: "TikZJax failed to render this diagram.",
+          rawLog: formatTikzJaxDebugLog(debugInfo, logBody)
+        };
+      }
+    });
+  }
+};
+function logsFromError(err) {
+  if (!(err instanceof Error)) {
+    return void 0;
+  }
+  const record = err;
+  const parts = [record.stdout, record.stderr].filter(Boolean);
+  return parts.length > 0 ? parts.join("\n") : void 0;
+}
+
+// renderers/RendererManager.ts
+var RendererManager = class {
+  constructor(app, pluginId, isDarkTheme, getSettings) {
+    this.isDarkTheme = isDarkTheme;
+    this.getSettings = getSettings;
+    this.inFlight = new Map();
+    this.cache = new Map();
+    this.luaLatexRenderer = new LuaLatexRenderer(app, pluginId, isDarkTheme);
+    this.tikzJaxRenderer = new TikzJaxRenderer(app, pluginId);
+  }
+  clearCache() {
+    this.cache.clear();
+    this.luaLatexRenderer.clearCache();
+    this.tikzJaxRenderer.clearCache();
+    this.inFlight.clear();
+  }
+  render(source, errorContext) {
+    return __async(this, null, function* () {
+      const settings = this.getSettings();
+      const normalizedSource = source;
+      const invertDark = this.isDarkTheme();
+      const cacheKey3 = `${settings.renderEngine}:${normalizedSource}:${invertDark}:${settings.cacheEnabled}`;
+      if (settings.cacheEnabled) {
+        const hit = this.cache.get(cacheKey3);
+        if (hit && Date.now() - hit.createdAt <= 30 * 60 * 1e3) {
+          return hit.result;
+        }
+      }
+      const pending = this.inFlight.get(cacheKey3);
+      if (pending) {
+        return pending;
+      }
+      const request = {
+        source,
+        normalizedSource,
+        settings,
+        errorContext,
+        invertDark
+      };
+      const renderPromise = this.dispatch(request).finally(() => {
+        this.inFlight.delete(cacheKey3);
+      });
+      this.inFlight.set(cacheKey3, renderPromise);
+      const result = yield renderPromise;
+      if (result.ok && settings.cacheEnabled) {
+        this.cache.set(cacheKey3, { result, createdAt: Date.now() });
+      }
+      return result;
+    });
+  }
+  renderToSvg(source, errorContext) {
+    return __async(this, null, function* () {
+      return renderResultToImageResult(yield this.render(source, errorContext));
+    });
+  }
+  dispatch(request) {
+    if (request.settings.renderEngine === "tikzjax") {
+      return this.tikzJaxRenderer.render(request);
+    }
+    return this.luaLatexRenderer.render(request);
+  }
+};
+
 // settings.ts
-var import_obsidian2 = __toModule(require("obsidian"));
+var import_obsidian5 = __toModule(require("obsidian"));
+
+// settingsModel.ts
 var DEFAULT_SETTINGS = {
-  invertColorsInDarkMode: true,
+  renderEngine: "lualatex",
+  lualatexPath: "/Library/TeX/texbin/lualatex",
+  enableLocalShellRenderer: true,
+  showInstallNotice: true,
+  enableClipboardCopy: false,
+  outputFormat: "svg",
+  timeoutMs: 15e3,
+  cacheEnabled: true,
+  extraPreamble: "",
   inlineLivePreviewEnabledByDefault: true
 };
-var TikzjaxSettingTab = class extends import_obsidian2.PluginSettingTab {
+
+// settings.ts
+function parseRenderEngine(value) {
+  return value === "lualatex" || value === "tikzjax" ? value : void 0;
+}
+function parseOutputFormat(value) {
+  return value === "svg" || value === "png" ? value : void 0;
+}
+function parseSettings(data) {
+  if (!isRecord(data)) {
+    return {};
+  }
+  const parsed = {};
+  const renderEngine = parseRenderEngine(data.renderEngine);
+  if (renderEngine) {
+    parsed.renderEngine = renderEngine;
+  }
+  parsed.lualatexPath = asString(data.lualatexPath, DEFAULT_SETTINGS.lualatexPath);
+  parsed.enableLocalShellRenderer = asBoolean(data.enableLocalShellRenderer, DEFAULT_SETTINGS.enableLocalShellRenderer);
+  parsed.showInstallNotice = asBoolean(data.showInstallNotice, DEFAULT_SETTINGS.showInstallNotice);
+  parsed.enableClipboardCopy = asBoolean(data.enableClipboardCopy, DEFAULT_SETTINGS.enableClipboardCopy);
+  const outputFormat = parseOutputFormat(data.outputFormat);
+  if (outputFormat) {
+    parsed.outputFormat = outputFormat;
+  }
+  parsed.timeoutMs = asNumber(data.timeoutMs, DEFAULT_SETTINGS.timeoutMs);
+  parsed.cacheEnabled = asBoolean(data.cacheEnabled, DEFAULT_SETTINGS.cacheEnabled);
+  parsed.extraPreamble = asString(data.extraPreamble, DEFAULT_SETTINGS.extraPreamble);
+  parsed.inlineLivePreviewEnabledByDefault = asBoolean(data.inlineLivePreviewEnabledByDefault, DEFAULT_SETTINGS.inlineLivePreviewEnabledByDefault);
+  return parsed;
+}
+var LuaTikzSettingTab = class extends import_obsidian5.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -1323,14 +2448,97 @@ var TikzjaxSettingTab = class extends import_obsidian2.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian2.Setting(containerEl).setName("Invert colors in dark mode").setDesc("Flip black strokes/fills to white when Obsidian is in dark mode.").addToggle((toggle) => toggle.setValue(this.plugin.settings.invertColorsInDarkMode).onChange((value) => __async(this, null, function* () {
-      this.plugin.settings.invertColorsInDarkMode = value;
-      yield this.plugin.saveSettings();
+    containerEl.addClass("luatikz-settings-root");
+    const header = containerEl.createDiv({ cls: "luatikz-glass-header" });
+    header.createEl("h2", { text: "LuaTikz" });
+    header.createEl("p", {
+      cls: "luatikz-muted",
+      text: "Render TikZ diagrams with local LuaLaTeX or TikZJax."
+    });
+    this.renderRendererSection(containerEl);
+    this.renderLocalLualatexSection(containerEl);
+    this.renderCacheSection(containerEl);
+    this.renderClipboardSection(containerEl);
+  }
+  section(parent, title, description) {
+    const section = parent.createDiv({ cls: "luatikz-glass-section luatikz-glass-card" });
+    section.createEl("h3", { text: title });
+    if (description) {
+      section.createEl("p", { cls: "luatikz-muted", text: description });
+    }
+    return section;
+  }
+  renderRendererSection(parent) {
+    const section = this.section(parent, "Renderer", "Local LuaLaTeX is recommended for full package support. TikZJax avoids shell execution but supports fewer packages.");
+    const choices = section.createDiv({ cls: "luatikz-renderer-choices" });
+    const engines = [
+      {
+        id: "lualatex",
+        title: "Local LuaLaTeX engine",
+        desc: "Recommended. Requires shell execution and temporary files."
+      },
+      {
+        id: "tikzjax",
+        title: "TikZJax",
+        desc: "No shell execution. Best for standard TikZ and math labels. For Hebrew, fonts, and advanced packages, use Local LuaLaTeX."
+      }
+    ];
+    for (const engine of engines) {
+      const card = choices.createDiv({
+        cls: "luatikz-renderer-choice"
+      });
+      if (this.plugin.settings.renderEngine === engine.id) {
+        card.addClass("luatikz-renderer-choice-active");
+      }
+      card.createEl("strong", { text: engine.title });
+      card.createEl("p", { cls: "luatikz-muted", text: engine.desc });
+      card.addEventListener("click", () => {
+        void this.updateSetting("renderEngine", engine.id);
+        this.display();
+      });
+    }
+  }
+  renderLocalLualatexSection(parent) {
+    const section = this.section(parent, "Local LuaLaTeX", "Filesystem and shell access are used only inside the plugin temp/cache directory.");
+    new import_obsidian5.Setting(section).setName("Allow local LuaLaTeX execution").setDesc("Explicitly allow the plugin to run lualatex on your machine.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableLocalShellRenderer).onChange((value) => __async(this, null, function* () {
+      yield this.updateSetting("enableLocalShellRenderer", value);
     })));
-    new import_obsidian2.Setting(containerEl).setName("Live preview by default").setDesc("Show the floating preview when the cursor is inside a tikz block.").addToggle((toggle) => toggle.setValue(this.plugin.settings.inlineLivePreviewEnabledByDefault).onChange((value) => __async(this, null, function* () {
-      this.plugin.settings.inlineLivePreviewEnabledByDefault = value;
-      yield this.plugin.saveSettings();
+    new import_obsidian5.Setting(section).setName("LuaLaTeX path").setDesc("Direct path to the lualatex executable.").addText((text) => text.setPlaceholder("/Library/TeX/texbin/lualatex").setValue(this.plugin.settings.lualatexPath).onChange((value) => __async(this, null, function* () {
+      yield this.updateSetting("lualatexPath", value);
     })));
+    new import_obsidian5.Setting(section).setName("Timeout (ms)").addText((text) => text.setValue(String(this.plugin.settings.timeoutMs)).onChange((value) => __async(this, null, function* () {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        yield this.updateSetting("timeoutMs", parsed);
+      }
+    })));
+    new import_obsidian5.Setting(section).setName("Output format").addDropdown((dropdown) => dropdown.addOption("svg", "SVG").addOption("png", "PNG").setValue(this.plugin.settings.outputFormat).onChange((value) => __async(this, null, function* () {
+      if (value === "svg" || value === "png") {
+        yield this.updateSetting("outputFormat", value);
+      }
+    })));
+  }
+  renderCacheSection(parent) {
+    const section = this.section(parent, "Cache");
+    new import_obsidian5.Setting(section).setName("Enable cache").addToggle((toggle) => toggle.setValue(this.plugin.settings.cacheEnabled).onChange((value) => __async(this, null, function* () {
+      yield this.updateSetting("cacheEnabled", value);
+    })));
+    new import_obsidian5.Setting(section).setName("Clear cache").setDesc("Remove cached render results and temporary build files.").addButton((button) => button.setButtonText("Clear cache").setClass("luatikz-danger-button").onClick(() => __async(this, null, function* () {
+      this.plugin.renderer.clearCache();
+      new import_obsidian5.Notice("LuaTikz cache cleared.");
+    })));
+  }
+  renderClipboardSection(parent) {
+    const section = this.section(parent, "Clipboard", "Copy actions write rendered output to the clipboard. The plugin does not read from the clipboard.");
+    new import_obsidian5.Setting(section).setName("Enable clipboard copy actions").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableClipboardCopy).onChange((value) => __async(this, null, function* () {
+      yield this.updateSetting("enableClipboardCopy", value);
+    })));
+  }
+  updateSetting(key, value) {
+    return __async(this, null, function* () {
+      this.plugin.settings[key] = value;
+      yield this.plugin.saveSettings();
+    });
   }
 };
 
@@ -1342,21 +2550,15 @@ function getCodeMirror() {
   }
   return cm;
 }
-function parseSettings(data) {
-  if (typeof data !== "object" || data === null) {
-    return {};
+function migrateLegacySettings(raw, parsed) {
+  const merged = Object.assign({}, DEFAULT_SETTINGS, parsed);
+  if (isRecord(raw) && !("enableLocalShellRenderer" in raw) && !("renderEngine" in raw)) {
+    merged.enableLocalShellRenderer = true;
+    merged.showInstallNotice = false;
   }
-  const saved = data;
-  const parsed = {};
-  if (typeof saved.invertColorsInDarkMode === "boolean") {
-    parsed.invertColorsInDarkMode = saved.invertColorsInDarkMode;
-  }
-  if (typeof saved.inlineLivePreviewEnabledByDefault === "boolean") {
-    parsed.inlineLivePreviewEnabledByDefault = saved.inlineLivePreviewEnabledByDefault;
-  }
-  return parsed;
+  return merged;
 }
-var LuaTikzPlugin = class extends import_obsidian3.Plugin {
+var LuaTikzPlugin = class extends import_obsidian6.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -1364,8 +2566,8 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
   onload() {
     return __async(this, null, function* () {
       yield this.loadSettings();
-      this.renderer = new TikzRenderer(() => this.settings.invertColorsInDarkMode, () => activeDocument.body.classList.contains("theme-dark"));
-      this.inlinePreview = new InlinePreviewManager(() => this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView), this.renderer);
+      this.renderer = new RendererManager(this.app, this.manifest.id, () => activeDocument.body.classList.contains("theme-dark"), () => this.settings);
+      this.inlinePreview = new InlinePreviewManager(() => this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView), this.renderer, () => this.settings);
       this.registerEditorExtension(latexAutocompleteExtension());
       this.addCommand({
         id: "toggle-tikz-inline-live-preview",
@@ -1376,14 +2578,20 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
         this.inlinePreview.scheduleUpdate();
       }));
       this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
-        this.inlinePreview.scheduleUpdate();
+        this.inlinePreview.scheduleUpdate(0);
       }));
       this.registerDomEvent(activeDocument, "selectionchange", () => {
-        this.inlinePreview.scheduleUpdate();
+        this.inlinePreview.syncVisibility();
       });
-      this.addSettingTab(new TikzjaxSettingTab(this.app, this));
+      this.addSettingTab(new LuaTikzSettingTab(this.app, this));
       this.addSyntaxHighlighting();
-      this.registerTikzCodeBlock();
+      this.registerTikzCodeBlock("tikz");
+      this.registerTikzCodeBlock("luatikz");
+      if (this.settings.showInstallNotice) {
+        this.app.workspace.onLayoutReady(() => {
+          new InstallNoticeModal(this.app, this).open();
+        });
+      }
       if (this.settings.inlineLivePreviewEnabledByDefault) {
         this.inlinePreview.enable(500);
       }
@@ -1397,7 +2605,9 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
   }
   loadSettings() {
     return __async(this, null, function* () {
-      this.settings = Object.assign({}, DEFAULT_SETTINGS, parseSettings(yield this.loadData()));
+      const raw = yield this.loadData();
+      const parsed = parseSettings(raw);
+      this.settings = migrateLegacySettings(raw, parsed);
     });
   }
   saveSettings() {
@@ -1406,31 +2616,38 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
       this.renderer.clearCache();
     });
   }
-  registerTikzCodeBlock() {
-    this.registerMarkdownCodeBlockProcessor("tikz", (source, el) => __async(this, null, function* () {
+  registerTikzCodeBlock(language) {
+    this.registerMarkdownCodeBlockProcessor(language, (source, el) => __async(this, null, function* () {
       el.empty();
-      el.createDiv({ cls: "tikzjax-hebrew-local-output", text: "Rendering\u2026" });
+      const loading = el.createDiv({
+        cls: "tikzjax-hebrew-local-output luatikz-glass-card",
+        text: "Rendering\u2026"
+      });
+      applyRtlToContainer(loading, source);
       const render = () => __async(this, null, function* () {
         var _a;
         try {
           const cleaned = tidyTikzSource(source);
           if (!cleaned.trim()) {
-            showTikzError(el, "Nothing to render.");
+            showTikzError(el, "Nothing to render.", void 0, void 0, cleaned, this.settings);
             return;
           }
           const result = yield this.renderer.renderToSvg(cleaned);
-          if (!result.ok || !result.dataUrl || !result.svgText) {
+          if (!result.ok || !result.dataUrl) {
             const retry = result.timedOut ? () => {
               el.empty();
-              el.createDiv({ cls: "tikzjax-hebrew-local-output", text: "Rendering\u2026" });
+              el.createDiv({
+                cls: "tikzjax-hebrew-local-output luatikz-glass-card",
+                text: "Rendering\u2026"
+              });
               void render();
             } : void 0;
-            showTikzError(el, (_a = result.error) != null ? _a : "Render failed.", result.rawLog, retry);
+            showTikzError(el, (_a = result.error) != null ? _a : "Render failed.", result.rawLog, retry, cleaned, this.settings);
             return;
           }
-          renderTikzDiagram(el, result);
+          renderTikzDiagram(el, result, cleaned, this.settings);
         } catch (err) {
-          showTikzError(el, "Render failed.", formatExecError(err));
+          showTikzError(el, "Render failed.", formatExecError(err), void 0, source, this.settings);
         }
       });
       yield render();
@@ -1439,18 +2656,20 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
   toggleInlineLivePreview() {
     if (this.inlinePreview.enabled) {
       this.inlinePreview.disable();
-      new import_obsidian3.Notice("Live preview off.");
+      new import_obsidian6.Notice("Live preview off.");
       return;
     }
     this.inlinePreview.enable(0);
-    new import_obsidian3.Notice("Live preview on.");
+    new import_obsidian6.Notice("Live preview on.");
   }
   addSyntaxHighlighting() {
     const cm = getCodeMirror();
     if (!cm) {
       return;
     }
-    cm.modeInfo.push({ name: "Tikz", mime: "text/x-latex", mode: "stex" });
+    if (!cm.modeInfo.some((entry) => entry.name === "Tikz")) {
+      cm.modeInfo.push({ name: "Tikz", mime: "text/x-latex", mode: "stex" });
+    }
   }
   removeSyntaxHighlighting() {
     const cm = getCodeMirror();
@@ -1460,3 +2679,5 @@ var LuaTikzPlugin = class extends import_obsidian3.Plugin {
     cm.modeInfo = cm.modeInfo.filter((el) => el.name !== "Tikz");
   }
 };
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {});

@@ -7,3 +7,7 @@ build/
 .cache/
 *.save
 data.json
+tex/
+.luatikz-temp/
+vendor/
+.vendor-staging/

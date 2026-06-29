@@ -1,8 +1,20 @@
 import { Editor, MarkdownView } from 'obsidian';
 import { appendTikzError } from './diagramView';
 import type { TikzRenderer } from './renderer';
+import type { LuaTikzSettings } from './settingsModel';
 import { tidyTikzSource } from './tikzSource';
 import type { TikzBlock } from './types';
+import { applyRtlToContainer } from './utils/rtl';
+
+const RENDER_DEBOUNCE_MS = 200;
+const MIN_PREVIEW_WIDTH = 160;
+const MIN_PREVIEW_HEIGHT = 120;
+const DEFAULT_PREVIEW_WIDTH = 520;
+const DEFAULT_PREVIEW_HEIGHT = 360;
+
+type ResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+const RESIZE_DIRECTIONS: ResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 
 export function getCurrentTikzBlock(editor: Editor): TikzBlock | null {
 	const cursor = editor.getCursor();
@@ -10,7 +22,7 @@ export function getCurrentTikzBlock(editor: Editor): TikzBlock | null {
 
 	for (let line = cursor.line; line >= 0; line--) {
 		const text = editor.getLine(line).trim();
-		if (text.startsWith('```tikz')) {
+		if (text.startsWith('```tikz') || text.startsWith('```luatikz')) {
 			startLine = line;
 			break;
 		}
@@ -52,10 +64,14 @@ export class InlinePreviewManager {
 	private lastGoodDataUrl: string | null = null;
 	private lastSource: string | null = null;
 	private renderToken = 0;
+	private previewWidth = DEFAULT_PREVIEW_WIDTH;
+	private previewHeight = DEFAULT_PREVIEW_HEIGHT;
+	private resizeListenersAttached = false;
 
 	constructor(
 		private readonly getActiveMarkdownView: () => MarkdownView | null,
 		private readonly renderer: TikzRenderer,
+		private readonly getSettings: () => LuaTikzSettings,
 	) {}
 
 	enable(initialDelayMs = 0): void {
@@ -68,20 +84,54 @@ export class InlinePreviewManager {
 		this.lastGoodDataUrl = null;
 		this.lastSource = null;
 		this.clearTimer();
-		if (this.container) {
-			this.container.remove();
-			this.container = null;
-		}
+		this.hide();
 	}
 
-	scheduleUpdate(delay = 800): void {
+	scheduleUpdate(renderDelay = RENDER_DEBOUNCE_MS): void {
 		if (!this.enabled) {
 			return;
 		}
+
+		this.syncVisibility();
+
+		if (!this.isInTikzBlock()) {
+			this.clearTimer();
+			return;
+		}
+
 		this.clearTimer();
 		this.timer = window.setTimeout(() => {
 			void this.updateFromActiveEditor();
-		}, delay);
+		}, renderDelay);
+	}
+
+	syncVisibility(): void {
+		if (!this.enabled) {
+			return;
+		}
+
+		const view = this.getActiveMarkdownView();
+		const block = view ? getCurrentTikzBlock(view.editor) : null;
+		if (!view || !block) {
+			this.hide();
+			this.lastSource = null;
+			return;
+		}
+
+		const source = tidyTikzSource(block.source);
+		if (!source.trim()) {
+			this.showMessage(view, 'Nothing to render.');
+			return;
+		}
+
+		if (source === this.lastSource && this.lastGoodDataUrl) {
+			this.showImage(view, this.lastGoodDataUrl);
+			return;
+		}
+
+		if (!this.lastGoodDataUrl && !this.container) {
+			this.showMessage(view, 'Rendering…');
+		}
 	}
 
 	clearTimer(): void {
@@ -91,50 +141,184 @@ export class InlinePreviewManager {
 		}
 	}
 
+	private isInTikzBlock(): boolean {
+		const view = this.getActiveMarkdownView();
+		return !!view && !!getCurrentTikzBlock(view.editor);
+	}
+
 	private hide(): void {
 		if (this.container) {
 			this.container.remove();
 			this.container = null;
+			this.resizeListenersAttached = false;
 		}
 	}
 
-	private containerEl(view: MarkdownView): HTMLElement {
+	private applyDefaultSize(container: HTMLElement): void {
+		container.style.width = `${this.previewWidth}px`;
+		container.style.height = `${this.previewHeight}px`;
+		container.style.maxWidth = 'none';
+		container.style.maxHeight = 'none';
+	}
+
+	private attachResizeHandles(container: HTMLElement): void {
+		if (this.resizeListenersAttached) {
+			return;
+		}
+
+		for (const direction of RESIZE_DIRECTIONS) {
+			const handle = container.createDiv({
+				cls: `tikzjax-inline-resize-handle tikzjax-inline-resize-${direction}`,
+			});
+			handle.addEventListener('mousedown', (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				this.beginResize(event, direction, container);
+			});
+		}
+
+		this.resizeListenersAttached = true;
+	}
+
+	private beginResize(
+		event: MouseEvent,
+		direction: ResizeDirection,
+		container: HTMLElement,
+	): void {
+		const parent = container.offsetParent as HTMLElement | null;
+		if (!parent) {
+			return;
+		}
+
+		const parentRect = parent.getBoundingClientRect();
+		const rect = container.getBoundingClientRect();
+		const startLeft = rect.left - parentRect.left;
+		const startTop = rect.top - parentRect.top;
+
+		container.style.right = 'auto';
+		container.style.left = `${startLeft}px`;
+		container.style.top = `${startTop}px`;
+		container.style.width = `${rect.width}px`;
+		container.style.height = `${rect.height}px`;
+
+		const start = {
+			x: event.clientX,
+			y: event.clientY,
+			left: startLeft,
+			top: startTop,
+			width: rect.width,
+			height: rect.height,
+		};
+
+		const onMove = (moveEvent: MouseEvent) => {
+			const dx = moveEvent.clientX - start.x;
+			const dy = moveEvent.clientY - start.y;
+
+			let left = start.left;
+			let top = start.top;
+			let width = start.width;
+			let height = start.height;
+
+			if (direction.includes('e')) {
+				width = start.width + dx;
+			}
+			if (direction.includes('w')) {
+				width = start.width - dx;
+				left = start.left + dx;
+			}
+			if (direction.includes('s')) {
+				height = start.height + dy;
+			}
+			if (direction.includes('n')) {
+				height = start.height - dy;
+				top = start.top + dy;
+			}
+
+			width = Math.max(MIN_PREVIEW_WIDTH, width);
+			height = Math.max(MIN_PREVIEW_HEIGHT, height);
+
+			if (direction.includes('w')) {
+				left = start.left + start.width - width;
+			}
+			if (direction.includes('n')) {
+				top = start.top + start.height - height;
+			}
+
+			container.style.left = `${left}px`;
+			container.style.top = `${top}px`;
+			container.style.width = `${width}px`;
+			container.style.height = `${height}px`;
+
+			this.previewWidth = width;
+			this.previewHeight = height;
+		};
+
+		const onUp = () => {
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
+
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+	}
+
+	private ensureContainer(view: MarkdownView): HTMLElement {
 		const activeDocument = view.containerEl.ownerDocument;
 		if (this.container && activeDocument.body.contains(this.container)) {
 			return this.container;
 		}
+
 		this.container = view.containerEl.createDiv({
-			cls: 'tikzjax-hebrew-local-inline-preview',
+			cls: 'tikzjax-hebrew-local-inline-preview luatikz-glass-card',
 		});
+		this.applyDefaultSize(this.container);
+		this.attachResizeHandles(this.container);
+		this.container.createDiv({ cls: 'tikzjax-hebrew-local-inline-preview-body' });
 		return this.container;
 	}
 
+	private previewBody(view: MarkdownView): HTMLElement {
+		const shell = this.ensureContainer(view);
+		return shell.querySelector('.tikzjax-hebrew-local-inline-preview-body') as HTMLElement;
+	}
+
 	private showMessage(view: MarkdownView, message: string): void {
-		const el = this.containerEl(view);
-		el.empty();
-		el.createDiv({
+		const body = this.previewBody(view);
+		body.empty();
+		const messageEl = body.createDiv({
 			cls: 'tikzjax-hebrew-local-inline-preview-message',
 			text: message,
 		});
+		applyRtlToContainer(messageEl, message);
 	}
 
 	private showImage(view: MarkdownView, dataUrl: string): void {
-		const el = this.containerEl(view);
-		el.empty();
-		const output = el.createDiv({ cls: 'tikzjax-hebrew-local-output' });
+		const body = this.previewBody(view);
+		body.empty();
+		const output = body.createDiv({
+			cls: 'tikzjax-hebrew-local-output tikzjax-hebrew-local-inline-preview-output',
+		});
 		const img = output.createEl('img');
 		img.setAttr('src', dataUrl);
 		img.setAttr('alt', 'TikZ diagram');
-		img.addClass('tikzjax-hebrew-local-image');
+		img.addClass('tikzjax-hebrew-local-image tikzjax-hebrew-local-inline-preview-image');
 	}
 
-	private showError(view: MarkdownView, message: string, details?: string, onRetry?: () => void): void {
+	private showError(
+		view: MarkdownView,
+		message: string,
+		details?: string,
+		onRetry?: () => void,
+		source?: string,
+	): void {
 		appendTikzError(
-			this.containerEl(view),
+			this.previewBody(view),
 			message,
 			details,
 			onRetry,
 			'tikzjax-hebrew-local-inline-preview-error',
+			source,
+			this.getSettings(),
 		);
 	}
 
@@ -162,6 +346,7 @@ export class InlinePreviewManager {
 		}
 
 		if (source === this.lastSource && this.lastGoodDataUrl) {
+			this.showImage(view, this.lastGoodDataUrl);
 			return;
 		}
 
@@ -196,9 +381,9 @@ export class InlinePreviewManager {
 		if (this.lastGoodDataUrl) {
 			this.showImage(view, this.lastGoodDataUrl);
 		} else {
-			this.containerEl(view).empty();
+			this.previewBody(view).empty();
 		}
 
-		this.showError(view, result.error ?? 'Render failed.', result.rawLog, retry);
+		this.showError(view, result.error ?? 'Render failed.', result.rawLog, retry, source);
 	}
 }

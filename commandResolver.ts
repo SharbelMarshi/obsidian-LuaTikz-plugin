@@ -1,5 +1,6 @@
-import { execFile, type ExecFileOptions } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
+import { validateLualatexPath } from './utils/guards';
 
 export class RenderTimeoutError extends Error {
 	constructor(timeoutMs: number) {
@@ -8,28 +9,41 @@ export class RenderTimeoutError extends Error {
 	}
 }
 
-export function execFileWithTimeout(
+export interface SpawnResult {
+	stdout: string;
+	stderr: string;
+}
+
+export function spawnWithTimeout(
 	file: string,
 	args: string[],
-	options: ExecFileOptions,
+	options: { cwd?: string; maxBuffer?: number },
 	timeoutMs: number,
-): Promise<{ stdout: string; stderr: string }> {
+): Promise<SpawnResult> {
 	return new Promise((resolve, reject) => {
 		let timedOut = false;
+		let stdout = '';
+		let stderr = '';
+		const maxBuffer = options.maxBuffer ?? 10 * 1024 * 1024;
 
-		const child = execFile(file, args, options, (err, stdout, stderr) => {
-			if (timedOut) {
-				return;
+		const child = spawn(file, args, {
+			cwd: options.cwd,
+			shell: false,
+			windowsHide: true,
+		});
+
+		child.stdout?.on('data', (chunk: Buffer | string) => {
+			stdout += chunk.toString();
+			if (stdout.length > maxBuffer) {
+				stdout = stdout.slice(-maxBuffer);
 			}
-			window.clearTimeout(timer);
-			if (err) {
-				reject(err instanceof Error ? err : new Error(String(err)));
-				return;
+		});
+
+		child.stderr?.on('data', (chunk: Buffer | string) => {
+			stderr += chunk.toString();
+			if (stderr.length > maxBuffer) {
+				stderr = stderr.slice(-maxBuffer);
 			}
-			resolve({
-				stdout: stdout?.toString() ?? '',
-				stderr: stderr?.toString() ?? '',
-			});
 		});
 
 		const timer = window.setTimeout(() => {
@@ -37,6 +51,28 @@ export function execFileWithTimeout(
 			child.kill('SIGKILL');
 			reject(new RenderTimeoutError(timeoutMs));
 		}, timeoutMs);
+
+		child.on('error', (err) => {
+			window.clearTimeout(timer);
+			if (!timedOut) {
+				reject(err);
+			}
+		});
+
+		child.on('close', (code) => {
+			window.clearTimeout(timer);
+			if (timedOut) {
+				return;
+			}
+			if (code !== 0) {
+				const err = new Error(`Process exited with code ${code ?? 'unknown'}`);
+				(err as Error & { stdout?: string; stderr?: string }).stdout = stdout;
+				(err as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+				reject(err);
+				return;
+			}
+			resolve({ stdout, stderr });
+		});
 	});
 }
 
@@ -50,7 +86,7 @@ async function resolveCommand(candidates: string[]): Promise<string | null> {
 		}
 
 		try {
-			const { stdout } = await execFileWithTimeout('/usr/bin/which', [candidate], {}, 5_000);
+			const { stdout } = await spawnWithTimeout('/usr/bin/which', [candidate], {}, 5_000);
 			const resolved = stdout.trim();
 			if (resolved) {
 				return resolved;
@@ -62,7 +98,17 @@ async function resolveCommand(candidates: string[]): Promise<string | null> {
 	return null;
 }
 
-export async function resolveLuaLatex(): Promise<string | null> {
+export async function resolveLuaLatex(customPath?: string): Promise<string | null> {
+	if (customPath?.trim()) {
+		const validationError = validateLualatexPath(customPath);
+		if (validationError) {
+			return null;
+		}
+		if (fs.existsSync(customPath.trim())) {
+			return customPath.trim();
+		}
+	}
+
 	return resolveCommand([
 		'/Library/TeX/texbin/lualatex',
 		'/usr/local/texlive/2025/bin/universal-darwin/lualatex',
@@ -98,3 +144,6 @@ export function formatExecError(err: unknown): string {
 	}
 	return String(err);
 }
+
+/** @deprecated Use spawnWithTimeout */
+export const execFileWithTimeout = spawnWithTimeout;

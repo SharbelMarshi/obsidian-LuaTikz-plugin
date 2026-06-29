@@ -3,15 +3,28 @@ import { SIMPLE_TIKZ_HELPERS } from './simpleShapes';
 
 const DOCUMENTCLASS_LINE = '\\documentclass[tikz,border=5pt]{standalone}\n';
 
-export const LATEX_WRAPPER_PREFIX = `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
+/** Internal defaults for LuaLaTeX Hebrew/English rendering — not user-configurable. */
+const DEFAULT_HEBREW_FONT = 'Arial Hebrew';
+const DEFAULT_ENGLISH_FONT = 'Times New Roman';
+
+function escapeLatexFontName(fontName: string): string {
+	return fontName.replace(/\\/g, '\\\\').replace(/[{}]/g, '');
+}
+
+export function buildLatexWrapperPrefix(extraPreamble = ''): string {
+	const hebrewFont = escapeLatexFontName(DEFAULT_HEBREW_FONT);
+	const englishFont = escapeLatexFontName(DEFAULT_ENGLISH_FONT);
+
+	return `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
 \\usepackage{polyglossia}
 
 \\setmainlanguage{english}
 \\setotherlanguage{hebrew}
 
-\\newfontfamily\\hebrewfont[Script=Hebrew]{David CLM}
-\\newfontfamily\\hebrewfontsf[Script=Hebrew]{David CLM}
-\\newfontfamily\\hebrewfonttt[Script=Hebrew]{David CLM}
+\\setmainfont{${englishFont}}
+\\newfontfamily\\hebrewfont[Script=Hebrew]{${hebrewFont}}
+\\newfontfamily\\hebrewfontsf[Script=Hebrew]{${hebrewFont}}
+\\newfontfamily\\hebrewfonttt[Script=Hebrew]{${hebrewFont}}
 
 \\usepackage{tikz}
 \\usetikzlibrary{arrows.meta,positioning,calc,shapes,decorations.pathmorphing,shapes.gates.logic.US}
@@ -23,14 +36,21 @@ export const LATEX_WRAPPER_PREFIX = `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
 
 \\newcommand{\\he}[1]{\\texthebrew{#1}}
 ${SIMPLE_TIKZ_HELPERS}
-\\begin{document}
+${extraPreamble.trim() ? `${extraPreamble.trim()}\n` : ''}\\begin{document}
 `;
+}
 
-const LATEX_WRAPPER_SUFFIX = `
+export const LATEX_WRAPPER_SUFFIX = `
 \\end{document}
 `;
 
-export const USER_SOURCE_LINE_OFFSET = getUserSourceLineOffset(LATEX_WRAPPER_PREFIX);
+export function getUserSourceLineOffsetForExtraPreamble(extraPreamble = ''): number {
+	return getUserSourceLineOffset(buildLatexWrapperPrefix(extraPreamble));
+}
+
+export const USER_SOURCE_LINE_OFFSET = getUserSourceLineOffset(
+	buildLatexWrapperPrefix(),
+);
 
 export function tidyTikzSource(tikzSource: string): string {
 	return tikzSource
@@ -41,7 +61,7 @@ export function tidyTikzSource(tikzSource: string): string {
 		.join('\n');
 }
 
-export function wrapLatexSource(source: string): string {
+export function stripUserDocumentPreamble(source: string): string {
 	let cleanedSource = source;
 
 	cleanedSource = cleanedSource.replace(/\\documentclass(?:\[[^\]]*\])?\{[^}]+\}/g, '');
@@ -55,5 +75,10 @@ export function wrapLatexSource(source: string): string {
 	cleanedSource = cleanedSource.replace(/\\setsansfont(?:\[[^\]]*\])?\{[^}]+\}/g, '');
 	cleanedSource = cleanedSource.replace(/\\newfontfamily\\\w+(?:\[[^\]]*\])?\{[^}]+\}/g, '');
 
-	return LATEX_WRAPPER_PREFIX + cleanedSource.trim() + LATEX_WRAPPER_SUFFIX;
+	return cleanedSource.trim();
 }
+
+export function wrapLatexSource(source: string, extraPreamble = ''): string {
+	return buildLatexWrapperPrefix(extraPreamble) + stripUserDocumentPreamble(source) + LATEX_WRAPPER_SUFFIX;
+}
+
