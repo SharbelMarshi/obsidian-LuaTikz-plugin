@@ -102,7 +102,7 @@ export default class LuaTikzPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const raw = await this.loadData();
+		const raw: unknown = await this.loadData();
 		const parsed = parseSettings(raw);
 		this.settings = migrateLegacySettings(raw, parsed);
 	}

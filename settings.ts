@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, type SettingDefinitionItem } from 'obsidian';
 import LuaTikzPlugin from './main';
 import { DEFAULT_SETTINGS, type LuaTikzRenderEngine, type LuaTikzSettings } from './settingsModel';
 import { asBoolean, asNumber, asString, isRecord } from './utils/guards';
@@ -54,41 +54,158 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
-		containerEl.addClass('luatikz-settings-root');
-
-		const header = containerEl.createDiv({ cls: 'luatikz-glass-header' });
-		header.createEl('h2', { text: 'LuaTikz' });
-		header.createEl('p', {
-			cls: 'luatikz-muted',
-			text: 'Render TikZ diagrams with local LuaLaTeX or TikZJax.',
-		});
-
-		this.renderRendererSection(containerEl);
-		this.renderLocalLualatexSection(containerEl);
-		this.renderCacheSection(containerEl);
-		this.renderClipboardSection(containerEl);
+	override update(): void {
+		this.containerEl.addClass('luatikz-settings-root');
+		super.update();
 	}
 
-	private section(parent: HTMLElement, title: string, description?: string): HTMLElement {
-		const section = parent.createDiv({ cls: 'luatikz-glass-section luatikz-glass-card' });
-		section.createEl('h3', { text: title });
-		if (description) {
-			section.createEl('p', { cls: 'luatikz-muted', text: description });
+	getSettingDefinitions(): SettingDefinitionItem<keyof LuaTikzSettings>[] {
+		return [
+			{
+				type: 'group',
+				heading: 'LuaTikz',
+				cls: 'luatikz-glass-header',
+				items: [
+					{
+						name: 'About LuaTikz',
+						desc: 'Render TikZ diagrams with local LuaLaTeX or TikZJax.',
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Renderer',
+				cls: 'luatikz-glass-section luatikz-glass-card',
+				items: [
+					{
+						name: 'Renderer choices',
+						desc: 'Local LuaLaTeX is recommended for full package support. TikZJax avoids shell execution but supports fewer packages.',
+						searchable: false,
+						render: (setting) => {
+							this.renderRendererChoices(setting);
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Local LuaLaTeX',
+				cls: 'luatikz-glass-section luatikz-glass-card',
+				items: [
+					{
+						name: 'Allow local LuaLaTeX execution',
+						desc: 'Explicitly allow the plugin to run lualatex on your machine.',
+						control: {
+							type: 'toggle',
+							key: 'enableLocalShellRenderer',
+						},
+					},
+					{
+						name: 'LuaLaTeX path',
+						desc: 'Direct path to the lualatex executable.',
+						control: {
+							type: 'text',
+							key: 'lualatexPath',
+							placeholder: '/Library/TeX/texbin/lualatex',
+						},
+					},
+					{
+						name: 'Timeout (ms)',
+						control: {
+							type: 'number',
+							key: 'timeoutMs',
+						},
+					},
+					{
+						name: 'Output format',
+						control: {
+							type: 'dropdown',
+							key: 'outputFormat',
+							options: {
+								svg: 'SVG',
+								png: 'PNG',
+							},
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Cache',
+				cls: 'luatikz-glass-section luatikz-glass-card',
+				items: [
+					{
+						name: 'Enable cache',
+						control: {
+							type: 'toggle',
+							key: 'cacheEnabled',
+						},
+					},
+					{
+						name: 'Clear cache',
+						desc: 'Remove cached render results and temporary build files.',
+						action: () => {
+							this.plugin.renderer.clearCache();
+							new Notice('LuaTikz cache cleared.');
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Clipboard',
+				cls: 'luatikz-glass-section luatikz-glass-card',
+				items: [
+					{
+						name: 'Enable clipboard copy actions',
+						desc: 'Copy actions write rendered output to the clipboard. The plugin does not read from the clipboard.',
+						control: {
+							type: 'toggle',
+							key: 'enableClipboardCopy',
+						},
+					},
+				],
+			},
+		];
+	}
+
+	override async setControlValue(key: string, value: unknown): Promise<void> {
+		if (!(key in DEFAULT_SETTINGS)) {
+			return;
 		}
-		return section;
+
+		const settingKey = key as keyof LuaTikzSettings;
+		if (settingKey === 'renderEngine') {
+			const renderEngine = parseRenderEngine(value);
+			if (renderEngine) {
+				this.plugin.settings.renderEngine = renderEngine;
+			}
+		} else if (settingKey === 'outputFormat') {
+			const outputFormat = parseOutputFormat(value);
+			if (outputFormat) {
+				this.plugin.settings.outputFormat = outputFormat;
+			}
+		} else if (settingKey === 'timeoutMs') {
+			this.plugin.settings.timeoutMs = asNumber(value, DEFAULT_SETTINGS.timeoutMs);
+		} else if (settingKey === 'lualatexPath' || settingKey === 'extraPreamble') {
+			this.plugin.settings[settingKey] = asString(value, DEFAULT_SETTINGS[settingKey]);
+		} else if (
+			settingKey === 'enableLocalShellRenderer'
+			|| settingKey === 'showInstallNotice'
+			|| settingKey === 'enableClipboardCopy'
+			|| settingKey === 'cacheEnabled'
+			|| settingKey === 'inlineLivePreviewEnabledByDefault'
+		) {
+			this.plugin.settings[settingKey] = asBoolean(value, DEFAULT_SETTINGS[settingKey]);
+		}
+
+		await this.plugin.saveSettings();
 	}
 
-	private renderRendererSection(parent: HTMLElement): void {
-		const section = this.section(
-			parent,
-			'Renderer',
-			'Local LuaLaTeX is recommended for full package support. TikZJax avoids shell execution but supports fewer packages.',
-		);
-
-		const choices = section.createDiv({ cls: 'luatikz-renderer-choices' });
+	private renderRendererChoices(setting: Setting): void {
+		setting.settingEl.addClass('luatikz-renderer-setting');
+		setting.setDesc('Local LuaLaTeX is recommended for full package support. TikZJax avoids shell execution but supports fewer packages.');
+		const choices = setting.controlEl.createDiv({ cls: 'luatikz-renderer-choices' });
 		const engines: Array<{ id: LuaTikzRenderEngine; title: string; desc: string }> = [
 			{
 				id: 'lualatex',
@@ -103,116 +220,18 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 		];
 
 		for (const engine of engines) {
-			const card = choices.createDiv({
-				cls: 'luatikz-renderer-choice',
-			});
+			const card = choices.createDiv({ cls: 'luatikz-renderer-choice' });
 			if (this.plugin.settings.renderEngine === engine.id) {
 				card.addClass('luatikz-renderer-choice-active');
 			}
 			card.createEl('strong', { text: engine.title });
 			card.createEl('p', { cls: 'luatikz-muted', text: engine.desc });
 			card.addEventListener('click', () => {
-				void this.updateSetting('renderEngine', engine.id);
-				this.display();
+				void this.setControlValue('renderEngine', engine.id).then(() => {
+					this.update();
+				});
 			});
 		}
-	}
-
-	private renderLocalLualatexSection(parent: HTMLElement): void {
-		const section = this.section(
-			parent,
-			'Local LuaLaTeX',
-			'Filesystem and shell access are used only inside the plugin temp/cache directory.',
-		);
-
-		new Setting(section)
-			.setName('Allow local LuaLaTeX execution')
-			.setDesc('Explicitly allow the plugin to run lualatex on your machine.')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enableLocalShellRenderer)
-				.onChange(async (value) => {
-					await this.updateSetting('enableLocalShellRenderer', value);
-				}));
-
-		new Setting(section)
-			.setName('LuaLaTeX path')
-			.setDesc('Direct path to the lualatex executable.')
-			.addText(text => text
-				.setPlaceholder('/Library/TeX/texbin/lualatex')
-				.setValue(this.plugin.settings.lualatexPath)
-				.onChange(async (value) => {
-					await this.updateSetting('lualatexPath', value);
-				}));
-
-		new Setting(section)
-			.setName('Timeout (ms)')
-			.addText(text => text
-				.setValue(String(this.plugin.settings.timeoutMs))
-				.onChange(async (value) => {
-					const parsed = Number.parseInt(value, 10);
-					if (Number.isFinite(parsed) && parsed > 0) {
-						await this.updateSetting('timeoutMs', parsed);
-					}
-				}));
-
-		new Setting(section)
-			.setName('Output format')
-			.addDropdown(dropdown => dropdown
-				.addOption('svg', 'SVG')
-				.addOption('png', 'PNG')
-				.setValue(this.plugin.settings.outputFormat)
-				.onChange(async (value) => {
-					if (value === 'svg' || value === 'png') {
-						await this.updateSetting('outputFormat', value);
-					}
-				}));
-	}
-
-	private renderCacheSection(parent: HTMLElement): void {
-		const section = this.section(parent, 'Cache');
-
-		new Setting(section)
-			.setName('Enable cache')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.cacheEnabled)
-				.onChange(async (value) => {
-					await this.updateSetting('cacheEnabled', value);
-				}));
-
-		new Setting(section)
-			.setName('Clear cache')
-			.setDesc('Remove cached render results and temporary build files.')
-			.addButton(button => button
-				.setButtonText('Clear cache')
-				.setClass('luatikz-danger-button')
-				.onClick(async () => {
-					this.plugin.renderer.clearCache();
-					new Notice('LuaTikz cache cleared.');
-				}));
-	}
-
-	private renderClipboardSection(parent: HTMLElement): void {
-		const section = this.section(
-			parent,
-			'Clipboard',
-			'Copy actions write rendered output to the clipboard. The plugin does not read from the clipboard.',
-		);
-
-		new Setting(section)
-			.setName('Enable clipboard copy actions')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enableClipboardCopy)
-				.onChange(async (value) => {
-					await this.updateSetting('enableClipboardCopy', value);
-				}));
-	}
-
-	private async updateSetting<K extends keyof LuaTikzSettings>(
-		key: K,
-		value: LuaTikzSettings[K],
-	): Promise<void> {
-		this.plugin.settings[key] = value;
-		await this.plugin.saveSettings();
 	}
 }
 

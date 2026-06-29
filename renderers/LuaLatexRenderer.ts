@@ -21,7 +21,7 @@ import {
 import type { LuaTikzSettings } from '../settingsModel';
 import { getUserSourceLineOffsetForExtraPreamble, wrapLatexSource } from '../tikzSource';
 import type { RenderRequest, RenderResult } from '../types';
-import { sanitizeCacheFilename, validateLualatexPath } from '../utils/guards';
+import { sanitizeCacheFilename, validateLualatexPath, firstMapKey } from '../utils/guards';
 
 const CACHE_MAX = 32;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -191,7 +191,7 @@ export class LuaLatexRenderer {
 		}
 		this.cache.set(key, { svgText, createdAt: Date.now() });
 		while (this.cache.size > CACHE_MAX) {
-			const oldestKey = this.cache.keys().next().value;
+			const oldestKey = firstMapKey(this.cache);
 			if (typeof oldestKey !== 'string') {
 				break;
 			}

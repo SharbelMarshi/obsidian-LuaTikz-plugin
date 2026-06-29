@@ -45,6 +45,13 @@ Enable **LuaTikZ** under Settings → Community plugins.
 
 These diagrams were rendered with LuaTikZ and exported as SVG. Preview files live in [`samples/`](samples/).
 
+### Anatomy and science
+
+| | |
+|---|---|
+| ![Heart anatomy](samples/heartanatomy.svg) | ![Eye anatomy](samples/eyeanatomy.svg) |
+| ![Neural anatomy](samples/neuralanatomy.svg) | ![Airflow path](samples/airflowpath.svg) |
+
 ### Circuits and logic
 
 | | |
@@ -64,13 +71,6 @@ These diagrams were rendered with LuaTikZ and exported as SVG. Preview files liv
 | | |
 |---|---|
 | ![Train routes](samples/trainroutes.svg) | ![Isometric city](samples/isometriccity.svg) |
-
-### Anatomy and science
-
-| | |
-|---|---|
-| ![Heart anatomy](samples/heartanatomy.svg) | ![Eye anatomy](samples/eyeanatomy.svg) |
-| ![Neural anatomy](samples/neuralanatomy.svg) | ![Airflow path](samples/airflowpath.svg) |
 
 ## Examples
 

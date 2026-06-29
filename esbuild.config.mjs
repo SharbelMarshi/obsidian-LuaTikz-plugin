@@ -79,6 +79,7 @@ async function copyVendorAssets() {
 	bootstrap = bootstrap.replace(
 		"(0, path_1.join)(__dirname, '../tex')",
 		"(globalThis.__LUATIKZ_TEX_DIR || (0, path_1.join)(__dirname, '../../tex'))",
+		"(typeof window !== 'undefined' && window.__LUATIKZ_TEX_DIR) || (globalThis.__LUATIKZ_TEX_DIR || (0, path_1.join)(__dirname, '../../tex'))",
 	);
 	await fs.promises.writeFile(bootstrapPath, bootstrap, 'utf8');
 

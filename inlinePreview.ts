@@ -16,6 +16,25 @@ type ResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
 const RESIZE_DIRECTIONS: ResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 
+type PreviewBoxCss = {
+	left?: string;
+	top?: string;
+	right?: string;
+	width?: string;
+	height?: string;
+};
+
+function applyPreviewBoxCss(container: HTMLElement, props: PreviewBoxCss): void {
+	container.addClass('luatikz-inline-preview-sized');
+	container.setCssProps({
+		...(props.left !== undefined ? { '--luatikz-preview-left': props.left } : {}),
+		...(props.top !== undefined ? { '--luatikz-preview-top': props.top } : {}),
+		...(props.right !== undefined ? { '--luatikz-preview-right': props.right } : {}),
+		...(props.width !== undefined ? { '--luatikz-preview-width': props.width } : {}),
+		...(props.height !== undefined ? { '--luatikz-preview-height': props.height } : {}),
+	});
+}
+
 export function getCurrentTikzBlock(editor: Editor): TikzBlock | null {
 	const cursor = editor.getCursor();
 	let startLine = -1;
@@ -155,10 +174,10 @@ export class InlinePreviewManager {
 	}
 
 	private applyDefaultSize(container: HTMLElement): void {
-		container.style.width = `${this.previewWidth}px`;
-		container.style.height = `${this.previewHeight}px`;
-		container.style.maxWidth = 'none';
-		container.style.maxHeight = 'none';
+		applyPreviewBoxCss(container, {
+			width: `${this.previewWidth}px`,
+			height: `${this.previewHeight}px`,
+		});
 	}
 
 	private attachResizeHandles(container: HTMLElement): void {
@@ -195,11 +214,13 @@ export class InlinePreviewManager {
 		const startLeft = rect.left - parentRect.left;
 		const startTop = rect.top - parentRect.top;
 
-		container.style.right = 'auto';
-		container.style.left = `${startLeft}px`;
-		container.style.top = `${startTop}px`;
-		container.style.width = `${rect.width}px`;
-		container.style.height = `${rect.height}px`;
+		applyPreviewBoxCss(container, {
+			right: 'auto',
+			left: `${startLeft}px`,
+			top: `${startTop}px`,
+			width: `${rect.width}px`,
+			height: `${rect.height}px`,
+		});
 
 		const start = {
 			x: event.clientX,
@@ -244,10 +265,12 @@ export class InlinePreviewManager {
 				top = start.top + start.height - height;
 			}
 
-			container.style.left = `${left}px`;
-			container.style.top = `${top}px`;
-			container.style.width = `${width}px`;
-			container.style.height = `${height}px`;
+			applyPreviewBoxCss(container, {
+				left: `${left}px`,
+				top: `${top}px`,
+				width: `${width}px`,
+				height: `${height}px`,
+			});
 
 			this.previewWidth = width;
 			this.previewHeight = height;
@@ -279,7 +302,12 @@ export class InlinePreviewManager {
 
 	private previewBody(view: MarkdownView): HTMLElement {
 		const shell = this.ensureContainer(view);
-		return shell.querySelector('.tikzjax-hebrew-local-inline-preview-body') as HTMLElement;
+		const body = shell.querySelector('.tikzjax-hebrew-local-inline-preview-body');
+		if (body instanceof HTMLElement) {
+			return body;
+		}
+
+		return shell.createDiv({ cls: 'tikzjax-hebrew-local-inline-preview-body' });
 	}
 
 	private showMessage(view: MarkdownView, message: string): void {

@@ -135,7 +135,7 @@ export async function clearPluginTempFsDir(app: App, pluginId: string): Promise<
 }
 
 export function loadRequiredModule(modulePath: string): unknown {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- node-tikzjax ships as CommonJS and must be loaded from the plugin vendor folder at runtime.
 	return require(modulePath);
 }
 

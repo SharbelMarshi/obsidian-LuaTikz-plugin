@@ -224,6 +224,16 @@
   box-sizing: border-box;
 }
 
+.tikzjax-hebrew-local-inline-preview.luatikz-inline-preview-sized {
+  left: var(--luatikz-preview-left, auto);
+  top: var(--luatikz-preview-top, 30px);
+  right: var(--luatikz-preview-right, 24px);
+  width: var(--luatikz-preview-width, min(520px, 45vw));
+  height: var(--luatikz-preview-height, min(360px, 40vh));
+  max-width: none;
+  max-height: none;
+}
+
 .tikzjax-hebrew-local-inline-preview-body {
   flex: 1;
   min-height: 0;

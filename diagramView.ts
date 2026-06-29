@@ -161,7 +161,7 @@ export function renderTikzDiagram(
 		const parser = new DOMParser();
 		const doc = parser.parseFromString(svgText, 'image/svg+xml');
 		const svgEl = doc.documentElement;
-		if (svgEl instanceof SVGSVGElement) {
+		if (svgEl.instanceOf(SVGSVGElement)) {
 			svgHost.appendChild(svgEl);
 		} else {
 			svgHost.setText('Invalid SVG from TikZJax renderer.');

@@ -46,7 +46,7 @@ export class RendererManager {
 		}
 
 		const pending = this.inFlight.get(cacheKey);
-		if (pending) {
+		if (pending !== undefined) {
 			return pending;
 		}
 

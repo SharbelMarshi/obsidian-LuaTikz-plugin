@@ -7,8 +7,22 @@ var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getOwnPropSymbols = Object.getOwnPropertySymbols;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __propIsEnum = Object.prototype.propertyIsEnumerable;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __spreadValues = (a, b) => {
+  for (var prop in b || (b = {}))
+    if (__hasOwnProp.call(b, prop))
+      __defNormalProp(a, prop, b[prop]);
+  if (__getOwnPropSymbols)
+    for (var prop of __getOwnPropSymbols(b)) {
+      if (__propIsEnum.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
+    }
+  return a;
+};
 var __markAsModule = (target) => __defProp(target, "__esModule", { value: true });
 var __export = (target, all) => {
   __markAsModule(target);
@@ -78,6 +92,9 @@ function writeClipboardText(text, settings) {
 function isRecord(value) {
   return typeof value === "object" && value !== null;
 }
+function isCallable(value) {
+  return typeof value === "function";
+}
 function asString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
@@ -89,6 +106,10 @@ function asNumber(value, fallback) {
 }
 function containsRtlText(text) {
   return /[\u0590-\u05FF\u0600-\u06FF]/.test(text);
+}
+function firstMapKey(map) {
+  const next = map.keys().next();
+  return next.done ? void 0 : next.value;
 }
 var SHELL_METACHAR_RE = /[;&|`$(){}[\]<>'"\\!\n\r\0]/;
 function validateLualatexPath(pathValue) {
@@ -108,7 +129,7 @@ function sanitizeCacheFilename(name) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 128);
 }
 function setTikzJaxTexDir(texDir) {
-  globalThis.__LUATIKZ_TEX_DIR = texDir;
+  window.__LUATIKZ_TEX_DIR = texDir;
 }
 
 // utils/rtl.ts
@@ -230,7 +251,7 @@ function renderTikzDiagram(el, result, source, settings) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(svgText, "image/svg+xml");
     const svgEl = doc.documentElement;
-    if (svgEl instanceof SVGSVGElement) {
+    if (svgEl.instanceOf(SVGSVGElement)) {
       svgHost.appendChild(svgEl);
     } else {
       svgHost.setText("Invalid SVG from TikZJax renderer.");
@@ -590,6 +611,10 @@ var MIN_PREVIEW_HEIGHT = 120;
 var DEFAULT_PREVIEW_WIDTH = 520;
 var DEFAULT_PREVIEW_HEIGHT = 360;
 var RESIZE_DIRECTIONS = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+function applyPreviewBoxCss(container, props) {
+  container.addClass("luatikz-inline-preview-sized");
+  container.setCssProps(__spreadValues(__spreadValues(__spreadValues(__spreadValues(__spreadValues({}, props.left !== void 0 ? { "--luatikz-preview-left": props.left } : {}), props.top !== void 0 ? { "--luatikz-preview-top": props.top } : {}), props.right !== void 0 ? { "--luatikz-preview-right": props.right } : {}), props.width !== void 0 ? { "--luatikz-preview-width": props.width } : {}), props.height !== void 0 ? { "--luatikz-preview-height": props.height } : {}));
+}
 function getCurrentTikzBlock(editor) {
   const cursor = editor.getCursor();
   let startLine = -1;
@@ -704,10 +729,10 @@ var InlinePreviewManager = class {
     }
   }
   applyDefaultSize(container) {
-    container.style.width = `${this.previewWidth}px`;
-    container.style.height = `${this.previewHeight}px`;
-    container.style.maxWidth = "none";
-    container.style.maxHeight = "none";
+    applyPreviewBoxCss(container, {
+      width: `${this.previewWidth}px`,
+      height: `${this.previewHeight}px`
+    });
   }
   attachResizeHandles(container) {
     if (this.resizeListenersAttached) {
@@ -734,11 +759,13 @@ var InlinePreviewManager = class {
     const rect = container.getBoundingClientRect();
     const startLeft = rect.left - parentRect.left;
     const startTop = rect.top - parentRect.top;
-    container.style.right = "auto";
-    container.style.left = `${startLeft}px`;
-    container.style.top = `${startTop}px`;
-    container.style.width = `${rect.width}px`;
-    container.style.height = `${rect.height}px`;
+    applyPreviewBoxCss(container, {
+      right: "auto",
+      left: `${startLeft}px`,
+      top: `${startTop}px`,
+      width: `${rect.width}px`,
+      height: `${rect.height}px`
+    });
     const start = {
       x: event.clientX,
       y: event.clientY,
@@ -776,10 +803,12 @@ var InlinePreviewManager = class {
       if (direction.includes("n")) {
         top = start.top + start.height - height;
       }
-      container.style.left = `${left}px`;
-      container.style.top = `${top}px`;
-      container.style.width = `${width}px`;
-      container.style.height = `${height}px`;
+      applyPreviewBoxCss(container, {
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${width}px`,
+        height: `${height}px`
+      });
       this.previewWidth = width;
       this.previewHeight = height;
     };
@@ -805,7 +834,11 @@ var InlinePreviewManager = class {
   }
   previewBody(view) {
     const shell = this.ensureContainer(view);
-    return shell.querySelector(".tikzjax-hebrew-local-inline-preview-body");
+    const body = shell.querySelector(".tikzjax-hebrew-local-inline-preview-body");
+    if (body instanceof HTMLElement) {
+      return body;
+    }
+    return shell.createDiv({ cls: "tikzjax-hebrew-local-inline-preview-body" });
   }
   showMessage(view, message) {
     const body = this.previewBody(view);
@@ -1770,7 +1803,7 @@ var LuaLatexRenderer = class {
     }
     this.cache.set(key, { svgText, createdAt: Date.now() });
     while (this.cache.size > CACHE_MAX) {
-      const oldestKey = this.cache.keys().next().value;
+      const oldestKey = firstMapKey(this.cache);
       if (typeof oldestKey !== "string") {
         break;
       }
@@ -2048,6 +2081,7 @@ var GLYPH_MAPS = {
   cmr10: CMR10_GLYPH_MAP,
   cmsy10: CMSY10_GLYPH_MAP
 };
+var MATH_FONT_FAMILIES = new Set(["cmmi10", "cmr10", "cmsy10"]);
 function replaceMappedGlyphs(content, table) {
   let result = content;
   for (const [bad, good] of Object.entries(table)) {
@@ -2072,11 +2106,19 @@ function fixTextNode(full, family, attrs, content) {
   const nextAttrs = attrs.includes("font-family=") ? attrs.replace(/font-family="[^"]+"/, 'font-family="Cambria Math, STIX Two Math, serif"') : `${attrs} font-family="Cambria Math, STIX Two Math, serif"`;
   return `<text${nextAttrs}>${mapped}</text>`;
 }
-function fixTikzJaxSvgGlyphs(svg) {
-  return svg.replace(/<text\b([^>]*\bfont-family="(cmmi10|cmr10|cmsy10)")([^>]*)>([^<]*)<\/text>/g, (full, beforeFamily, family, afterFamily, content) => fixTextNode(full, family, `${beforeFamily}${afterFamily}`, content));
+function fixTikzJaxSvgGlyphs(svgInput) {
+  if (typeof svgInput !== "string") {
+    return "";
+  }
+  return svgInput.replace(/<text\b([^>]*\bfont-family="(cmmi10|cmr10|cmsy10)")([^>]*)>([^<]*)<\/text>/g, (full, beforeFamily, family, afterFamily, content) => {
+    if (!MATH_FONT_FAMILIES.has(family)) {
+      return full;
+    }
+    return fixTextNode(full, family, `${beforeFamily}${afterFamily}`, content);
+  });
 }
-function finalizeTikzJaxSvg(svg) {
-  return fixTikzJaxSvgGlyphs(svg);
+function finalizeTikzJaxSvg(svgInput) {
+  return fixTikzJaxSvgGlyphs(svgInput);
 }
 
 // renderers/TikzJaxRenderer.ts
@@ -2094,21 +2136,28 @@ function cacheKey2(source, settings) {
 function svgDataUrl2(svgText) {
   return `data:image/svg+xml;base64,${Buffer.from(svgText, "utf8").toString("base64")}`;
 }
-function isTex2SvgFn(value) {
-  return typeof value === "function";
-}
-function readTex2SvgExport(moduleValue) {
-  if (isTex2SvgFn(moduleValue)) {
-    return moduleValue;
-  }
-  if (!moduleValue || typeof moduleValue !== "object") {
+function asTex2SvgFn(value) {
+  if (!isCallable(value)) {
     return null;
   }
-  const record = moduleValue;
-  if (isTex2SvgFn(record.default)) {
-    return record.default;
+  return (input, options) => __async(this, null, function* () {
+    const result = yield value(input, options);
+    if (typeof result !== "string") {
+      throw new Error("TikZJax did not return a string.");
+    }
+    return result;
+  });
+}
+function readTex2SvgExport(moduleValue) {
+  var _a;
+  const direct = asTex2SvgFn(moduleValue);
+  if (direct) {
+    return direct;
   }
-  return null;
+  if (!isRecord(moduleValue)) {
+    return null;
+  }
+  return (_a = asTex2SvgFn(moduleValue.default)) != null ? _a : asTex2SvgFn(moduleValue.render);
 }
 function formatTikzJaxDebugLog(debug, body) {
   return [
@@ -2128,7 +2177,7 @@ function captureConsoleLogs(task) {
     const originalLog = console.log.bind(console);
     console.log = (...args) => {
       lines.push(args.map((arg) => String(arg)).join(" "));
-      originalLog(...args);
+      Reflect.apply(originalLog, console, args);
     };
     try {
       const result = yield task();
@@ -2168,7 +2217,7 @@ var TikzJaxRenderer = class {
       if (this.loadError) {
         return null;
       }
-      if (!this.loadPromise) {
+      if (this.loadPromise === null) {
         this.loadPromise = this.loadModule().finally(() => {
           this.loadPromise = null;
         });
@@ -2189,7 +2238,7 @@ var TikzJaxRenderer = class {
       try {
         setTikzJaxTexDir(runtime.paths.texPath);
         const moduleValue = loadRequiredModule(runtime.paths.entryPath);
-        if (typeof moduleValue.load === "function") {
+        if (isRecord(moduleValue) && isCallable(moduleValue.load)) {
           yield moduleValue.load();
         }
         const fn = readTex2SvgExport(moduleValue);
@@ -2287,7 +2336,7 @@ ${consoleLogs}`,
         if (settings.cacheEnabled) {
           this.cache.set(key, { svgText: fixedSvg, createdAt: Date.now() });
           while (this.cache.size > CACHE_MAX2) {
-            const oldestKey = this.cache.keys().next().value;
+            const oldestKey = firstMapKey(this.cache);
             if (typeof oldestKey !== "string") {
               break;
             }
@@ -2322,11 +2371,15 @@ ${consoleLogs}`,
   }
 };
 function logsFromError(err) {
-  if (!(err instanceof Error)) {
+  if (!isRecord(err)) {
     return void 0;
   }
-  const record = err;
-  const parts = [record.stdout, record.stderr].filter(Boolean);
+  const stdout = err.stdout;
+  const stderr = err.stderr;
+  const parts = [
+    typeof stdout === "string" ? stdout : void 0,
+    typeof stderr === "string" ? stderr : void 0
+  ].filter((part) => typeof part === "string");
   return parts.length > 0 ? parts.join("\n") : void 0;
 }
 
@@ -2359,7 +2412,7 @@ var RendererManager = class {
         }
       }
       const pending = this.inFlight.get(cacheKey3);
-      if (pending) {
+      if (pending !== void 0) {
         return pending;
       }
       const request = {
@@ -2445,32 +2498,149 @@ var LuaTikzSettingTab = class extends import_obsidian5.PluginSettingTab {
     super(app, plugin);
     this.plugin = plugin;
   }
-  display() {
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.addClass("luatikz-settings-root");
-    const header = containerEl.createDiv({ cls: "luatikz-glass-header" });
-    header.createEl("h2", { text: "LuaTikz" });
-    header.createEl("p", {
-      cls: "luatikz-muted",
-      text: "Render TikZ diagrams with local LuaLaTeX or TikZJax."
+  update() {
+    this.containerEl.addClass("luatikz-settings-root");
+    super.update();
+  }
+  getSettingDefinitions() {
+    return [
+      {
+        type: "group",
+        heading: "LuaTikz",
+        cls: "luatikz-glass-header",
+        items: [
+          {
+            name: "About LuaTikz",
+            desc: "Render TikZ diagrams with local LuaLaTeX or TikZJax."
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Renderer",
+        cls: "luatikz-glass-section luatikz-glass-card",
+        items: [
+          {
+            name: "Renderer choices",
+            desc: "Local LuaLaTeX is recommended for full package support. TikZJax avoids shell execution but supports fewer packages.",
+            searchable: false,
+            render: (setting) => {
+              this.renderRendererChoices(setting);
+            }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Local LuaLaTeX",
+        cls: "luatikz-glass-section luatikz-glass-card",
+        items: [
+          {
+            name: "Allow local LuaLaTeX execution",
+            desc: "Explicitly allow the plugin to run lualatex on your machine.",
+            control: {
+              type: "toggle",
+              key: "enableLocalShellRenderer"
+            }
+          },
+          {
+            name: "LuaLaTeX path",
+            desc: "Direct path to the lualatex executable.",
+            control: {
+              type: "text",
+              key: "lualatexPath",
+              placeholder: "/Library/TeX/texbin/lualatex"
+            }
+          },
+          {
+            name: "Timeout (ms)",
+            control: {
+              type: "number",
+              key: "timeoutMs"
+            }
+          },
+          {
+            name: "Output format",
+            control: {
+              type: "dropdown",
+              key: "outputFormat",
+              options: {
+                svg: "SVG",
+                png: "PNG"
+              }
+            }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Cache",
+        cls: "luatikz-glass-section luatikz-glass-card",
+        items: [
+          {
+            name: "Enable cache",
+            control: {
+              type: "toggle",
+              key: "cacheEnabled"
+            }
+          },
+          {
+            name: "Clear cache",
+            desc: "Remove cached render results and temporary build files.",
+            action: () => {
+              this.plugin.renderer.clearCache();
+              new import_obsidian5.Notice("LuaTikz cache cleared.");
+            }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Clipboard",
+        cls: "luatikz-glass-section luatikz-glass-card",
+        items: [
+          {
+            name: "Enable clipboard copy actions",
+            desc: "Copy actions write rendered output to the clipboard. The plugin does not read from the clipboard.",
+            control: {
+              type: "toggle",
+              key: "enableClipboardCopy"
+            }
+          }
+        ]
+      }
+    ];
+  }
+  setControlValue(key, value) {
+    return __async(this, null, function* () {
+      if (!(key in DEFAULT_SETTINGS)) {
+        return;
+      }
+      const settingKey = key;
+      if (settingKey === "renderEngine") {
+        const renderEngine = parseRenderEngine(value);
+        if (renderEngine) {
+          this.plugin.settings.renderEngine = renderEngine;
+        }
+      } else if (settingKey === "outputFormat") {
+        const outputFormat = parseOutputFormat(value);
+        if (outputFormat) {
+          this.plugin.settings.outputFormat = outputFormat;
+        }
+      } else if (settingKey === "timeoutMs") {
+        this.plugin.settings.timeoutMs = asNumber(value, DEFAULT_SETTINGS.timeoutMs);
+      } else if (settingKey === "lualatexPath" || settingKey === "extraPreamble") {
+        this.plugin.settings[settingKey] = asString(value, DEFAULT_SETTINGS[settingKey]);
+      } else if (settingKey === "enableLocalShellRenderer" || settingKey === "showInstallNotice" || settingKey === "enableClipboardCopy" || settingKey === "cacheEnabled" || settingKey === "inlineLivePreviewEnabledByDefault") {
+        this.plugin.settings[settingKey] = asBoolean(value, DEFAULT_SETTINGS[settingKey]);
+      }
+      yield this.plugin.saveSettings();
     });
-    this.renderRendererSection(containerEl);
-    this.renderLocalLualatexSection(containerEl);
-    this.renderCacheSection(containerEl);
-    this.renderClipboardSection(containerEl);
   }
-  section(parent, title, description) {
-    const section = parent.createDiv({ cls: "luatikz-glass-section luatikz-glass-card" });
-    section.createEl("h3", { text: title });
-    if (description) {
-      section.createEl("p", { cls: "luatikz-muted", text: description });
-    }
-    return section;
-  }
-  renderRendererSection(parent) {
-    const section = this.section(parent, "Renderer", "Local LuaLaTeX is recommended for full package support. TikZJax avoids shell execution but supports fewer packages.");
-    const choices = section.createDiv({ cls: "luatikz-renderer-choices" });
+  renderRendererChoices(setting) {
+    setting.settingEl.addClass("luatikz-renderer-setting");
+    setting.setDesc("Local LuaLaTeX is recommended for full package support. TikZJax avoids shell execution but supports fewer packages.");
+    const choices = setting.controlEl.createDiv({ cls: "luatikz-renderer-choices" });
     const engines = [
       {
         id: "lualatex",
@@ -2484,61 +2654,18 @@ var LuaTikzSettingTab = class extends import_obsidian5.PluginSettingTab {
       }
     ];
     for (const engine of engines) {
-      const card = choices.createDiv({
-        cls: "luatikz-renderer-choice"
-      });
+      const card = choices.createDiv({ cls: "luatikz-renderer-choice" });
       if (this.plugin.settings.renderEngine === engine.id) {
         card.addClass("luatikz-renderer-choice-active");
       }
       card.createEl("strong", { text: engine.title });
       card.createEl("p", { cls: "luatikz-muted", text: engine.desc });
       card.addEventListener("click", () => {
-        void this.updateSetting("renderEngine", engine.id);
-        this.display();
+        void this.setControlValue("renderEngine", engine.id).then(() => {
+          this.update();
+        });
       });
     }
-  }
-  renderLocalLualatexSection(parent) {
-    const section = this.section(parent, "Local LuaLaTeX", "Filesystem and shell access are used only inside the plugin temp/cache directory.");
-    new import_obsidian5.Setting(section).setName("Allow local LuaLaTeX execution").setDesc("Explicitly allow the plugin to run lualatex on your machine.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableLocalShellRenderer).onChange((value) => __async(this, null, function* () {
-      yield this.updateSetting("enableLocalShellRenderer", value);
-    })));
-    new import_obsidian5.Setting(section).setName("LuaLaTeX path").setDesc("Direct path to the lualatex executable.").addText((text) => text.setPlaceholder("/Library/TeX/texbin/lualatex").setValue(this.plugin.settings.lualatexPath).onChange((value) => __async(this, null, function* () {
-      yield this.updateSetting("lualatexPath", value);
-    })));
-    new import_obsidian5.Setting(section).setName("Timeout (ms)").addText((text) => text.setValue(String(this.plugin.settings.timeoutMs)).onChange((value) => __async(this, null, function* () {
-      const parsed = Number.parseInt(value, 10);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        yield this.updateSetting("timeoutMs", parsed);
-      }
-    })));
-    new import_obsidian5.Setting(section).setName("Output format").addDropdown((dropdown) => dropdown.addOption("svg", "SVG").addOption("png", "PNG").setValue(this.plugin.settings.outputFormat).onChange((value) => __async(this, null, function* () {
-      if (value === "svg" || value === "png") {
-        yield this.updateSetting("outputFormat", value);
-      }
-    })));
-  }
-  renderCacheSection(parent) {
-    const section = this.section(parent, "Cache");
-    new import_obsidian5.Setting(section).setName("Enable cache").addToggle((toggle) => toggle.setValue(this.plugin.settings.cacheEnabled).onChange((value) => __async(this, null, function* () {
-      yield this.updateSetting("cacheEnabled", value);
-    })));
-    new import_obsidian5.Setting(section).setName("Clear cache").setDesc("Remove cached render results and temporary build files.").addButton((button) => button.setButtonText("Clear cache").setClass("luatikz-danger-button").onClick(() => __async(this, null, function* () {
-      this.plugin.renderer.clearCache();
-      new import_obsidian5.Notice("LuaTikz cache cleared.");
-    })));
-  }
-  renderClipboardSection(parent) {
-    const section = this.section(parent, "Clipboard", "Copy actions write rendered output to the clipboard. The plugin does not read from the clipboard.");
-    new import_obsidian5.Setting(section).setName("Enable clipboard copy actions").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableClipboardCopy).onChange((value) => __async(this, null, function* () {
-      yield this.updateSetting("enableClipboardCopy", value);
-    })));
-  }
-  updateSetting(key, value) {
-    return __async(this, null, function* () {
-      this.plugin.settings[key] = value;
-      yield this.plugin.saveSettings();
-    });
   }
 };
 

@@ -13,7 +13,7 @@ import {
 	TIKZJAX_TIKZ_LIBRARIES,
 } from '../tikzJaxSource';
 import type { RenderRequest, RenderResult } from '../types';
-import { setTikzJaxTexDir } from '../utils/guards';
+import { firstMapKey, isCallable, isRecord, setTikzJaxTexDir } from '../utils/guards';
 import { finalizeTikzJaxSvg } from '../utils/tikzJaxSvgFix';
 
 const CACHE_MAX = 32;
@@ -24,20 +24,14 @@ interface CacheEntry {
 	createdAt: number;
 }
 
-type Tex2SvgFn = (
-	input: string,
-	options?: {
-		showConsole?: boolean;
-		texPackages?: Record<string, string>;
-		tikzLibraries?: string;
-		addToPreamble?: string;
-	},
-) => Promise<string>;
-
-type TikzJaxModule = {
-	default?: Tex2SvgFn;
-	load?: () => Promise<void>;
+type Tex2SvgOptions = {
+	showConsole?: boolean;
+	texPackages?: Record<string, string>;
+	tikzLibraries?: string;
+	addToPreamble?: string;
 };
+
+type Tex2SvgFn = (input: string, options?: Tex2SvgOptions) => Promise<string>;
 
 interface TikzJaxDebugInfo {
 	entryPath: string;
@@ -65,25 +59,31 @@ function svgDataUrl(svgText: string): string {
 	return `data:image/svg+xml;base64,${Buffer.from(svgText, 'utf8').toString('base64')}`;
 }
 
-function isTex2SvgFn(value: unknown): value is Tex2SvgFn {
-	return typeof value === 'function';
-}
-
-function readTex2SvgExport(moduleValue: unknown): Tex2SvgFn | null {
-	if (isTex2SvgFn(moduleValue)) {
-		return moduleValue;
-	}
-
-	if (!moduleValue || typeof moduleValue !== 'object') {
+function asTex2SvgFn(value: unknown): Tex2SvgFn | null {
+	if (!isCallable(value)) {
 		return null;
 	}
 
-	const record = moduleValue as TikzJaxModule;
-	if (isTex2SvgFn(record.default)) {
-		return record.default;
+	return async (input: string, options?: Tex2SvgOptions) => {
+		const result: unknown = await value(input, options);
+		if (typeof result !== 'string') {
+			throw new Error('TikZJax did not return a string.');
+		}
+		return result;
+	};
+}
+
+function readTex2SvgExport(moduleValue: unknown): Tex2SvgFn | null {
+	const direct = asTex2SvgFn(moduleValue);
+	if (direct) {
+		return direct;
 	}
 
-	return null;
+	if (!isRecord(moduleValue)) {
+		return null;
+	}
+
+	return asTex2SvgFn(moduleValue.default) ?? asTex2SvgFn(moduleValue.render);
 }
 
 function formatTikzJaxDebugLog(
@@ -110,7 +110,7 @@ async function captureConsoleLogs<T>(
 
 	console.log = (...args: unknown[]) => {
 		lines.push(args.map(arg => String(arg)).join(' '));
-		originalLog(...args);
+		Reflect.apply(originalLog, console, args);
 	};
 
 	try {
@@ -155,7 +155,7 @@ export class TikzJaxRenderer {
 			return null;
 		}
 
-		if (!this.loadPromise) {
+		if (this.loadPromise === null) {
 			this.loadPromise = this.loadModule().finally(() => {
 				this.loadPromise = null;
 			});
@@ -176,8 +176,8 @@ export class TikzJaxRenderer {
 
 		try {
 			setTikzJaxTexDir(runtime.paths.texPath);
-			const moduleValue = loadRequiredModule(runtime.paths.entryPath) as TikzJaxModule;
-			if (typeof moduleValue.load === 'function') {
+			const moduleValue: unknown = loadRequiredModule(runtime.paths.entryPath);
+			if (isRecord(moduleValue) && isCallable(moduleValue.load)) {
 				await moduleValue.load();
 			}
 
@@ -281,7 +281,7 @@ export class TikzJaxRenderer {
 			if (settings.cacheEnabled) {
 				this.cache.set(key, { svgText: fixedSvg, createdAt: Date.now() });
 				while (this.cache.size > CACHE_MAX) {
-					const oldestKey = this.cache.keys().next().value;
+					const oldestKey = firstMapKey(this.cache);
 					if (typeof oldestKey !== 'string') {
 						break;
 					}
@@ -317,10 +317,16 @@ export class TikzJaxRenderer {
 }
 
 function logsFromError(err: unknown): string | undefined {
-	if (!(err instanceof Error)) {
+	if (!isRecord(err)) {
 		return undefined;
 	}
-	const record = err as Error & { stdout?: string; stderr?: string };
-	const parts = [record.stdout, record.stderr].filter(Boolean);
+
+	const stdout = err.stdout;
+	const stderr = err.stderr;
+	const parts = [
+		typeof stdout === 'string' ? stdout : undefined,
+		typeof stderr === 'string' ? stderr : undefined,
+	].filter((part): part is string => typeof part === 'string');
+
 	return parts.length > 0 ? parts.join('\n') : undefined;
 }

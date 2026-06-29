@@ -34,6 +34,8 @@ const GLYPH_MAPS: Record<string, Record<string, string>> = {
 	cmsy10: CMSY10_GLYPH_MAP,
 };
 
+const MATH_FONT_FAMILIES = new Set(['cmmi10', 'cmr10', 'cmsy10']);
+
 function replaceMappedGlyphs(content: string, table: Record<string, string>): string {
 	let result = content;
 	for (const [bad, good] of Object.entries(table)) {
@@ -66,14 +68,22 @@ function fixTextNode(full: string, family: string, attrs: string, content: strin
 }
 
 /** Fix common corrupted math symbols in TikZJax SVG output. */
-export function fixTikzJaxSvgGlyphs(svg: string): string {
-	return svg.replace(
+export function fixTikzJaxSvgGlyphs(svgInput: unknown): string {
+	if (typeof svgInput !== 'string') {
+		return '';
+	}
+
+	return svgInput.replace(
 		/<text\b([^>]*\bfont-family="(cmmi10|cmr10|cmsy10)")([^>]*)>([^<]*)<\/text>/g,
-		(full, beforeFamily, family, afterFamily, content) =>
-			fixTextNode(full, family, `${beforeFamily}${afterFamily}`, content),
+		(full: string, beforeFamily: string, family: string, afterFamily: string, content: string) => {
+			if (!MATH_FONT_FAMILIES.has(family)) {
+				return full;
+			}
+			return fixTextNode(full, family, `${beforeFamily}${afterFamily}`, content);
+		},
 	);
 }
 
-export function finalizeTikzJaxSvg(svg: string): string {
-	return fixTikzJaxSvgGlyphs(svg);
+export function finalizeTikzJaxSvg(svgInput: unknown): string {
+	return fixTikzJaxSvgGlyphs(svgInput);
 }
