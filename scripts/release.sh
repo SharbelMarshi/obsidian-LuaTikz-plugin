@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="0.1.3"
+VERSION="1.1.0"
 
 npm run build
 
