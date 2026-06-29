@@ -1,13 +1,11 @@
 import { createHash } from 'crypto';
-import tex2svgDefault, { load as loadTikzJaxRuntime } from 'node-tikzjax';
 import type { App } from 'obsidian';
 import type { LuaTikzSettings } from '../settingsModel';
 import {
 	formatTikzJaxInputMode,
 	normalizeForTikzJax,
 	sanitizeTikzJaxPreamble,
-	TIKZJAX_TEX_PACKAGES,
-	TIKZJAX_TIKZ_LIBRARIES,
+	tikzJaxRenderErrorMessage,
 } from '../tikzJaxSource';
 import type { RenderRequest, RenderResult } from '../types';
 import { firstMapKey, isCallable, isRecord } from '../utils/guards';
@@ -38,6 +36,14 @@ interface TikzJaxDebugInfo {
 }
 
 let renderQueue: Promise<unknown> = Promise.resolve();
+let tikzJaxModulePromise: Promise<unknown> | null = null;
+
+async function loadTikzJaxModule(): Promise<unknown> {
+	if (tikzJaxModulePromise === null) {
+		tikzJaxModulePromise = import('node-tikzjax');
+	}
+	return tikzJaxModulePromise;
+}
 
 function runExclusive<T>(task: () => Promise<T>): Promise<T> {
 	const next = renderQueue.then(task, task);
@@ -89,22 +95,30 @@ function formatTikzJaxDebugLog(
 	].join('\n');
 }
 
-async function captureConsoleLogs<T>(
+async function captureConsoleOutput<T>(
 	task: () => Promise<T>,
 ): Promise<{ result: T; logs: string }> {
 	const lines: string[] = [];
 	const originalLog = console.log.bind(console);
+	const originalWarn = console.warn.bind(console);
+	const originalError = console.error.bind(console);
 
-	console.log = (...args: unknown[]) => {
-		lines.push(args.map(arg => String(arg)).join(' '));
-		Reflect.apply(originalLog, console, args);
+	const capture = (prefix: string, original: (...args: unknown[]) => void) => (...args: unknown[]) => {
+		lines.push(`${prefix}${args.map(arg => String(arg)).join(' ')}`);
+		Reflect.apply(original, console, args);
 	};
+
+	console.log = capture('', originalLog);
+	console.warn = capture('[warn] ', originalWarn);
+	console.error = capture('[error] ', originalError);
 
 	try {
 		const result = await task();
 		return { result, logs: lines.join('\n') };
 	} finally {
 		console.log = originalLog;
+		console.warn = originalWarn;
+		console.error = originalError;
 	}
 }
 
@@ -161,9 +175,16 @@ export class TikzJaxRenderer {
 			}
 
 			this.texDir = texResult.texDir;
-			await loadTikzJaxRuntime();
 
-			const fn = readTex2SvgExport(tex2svgDefault);
+			const moduleValue = await loadTikzJaxModule();
+			if (isRecord(moduleValue) && isCallable(moduleValue.load)) {
+				await moduleValue.load();
+			}
+
+			const exportValue = isRecord(moduleValue)
+				? moduleValue.default ?? moduleValue
+				: moduleValue;
+			const fn = readTex2SvgExport(exportValue);
 			if (!fn) {
 				this.loadError = 'TikZJax failed to initialize.';
 				this.loadErrorLog = 'Bundled TikZJax module did not export tex2svg.';
@@ -215,8 +236,8 @@ export class TikzJaxRenderer {
 			};
 		}
 
-		const normalized = normalizeForTikzJax(normalizedSource);
 		const sanitizedPreamble = sanitizeTikzJaxPreamble(settings.extraPreamble);
+		const normalized = normalizeForTikzJax(normalizedSource, sanitizedPreamble);
 		const debugInfo: TikzJaxDebugInfo = {
 			texDir: this.texDir,
 			inputMode: formatTikzJaxInputMode(normalized.mode),
@@ -224,14 +245,15 @@ export class TikzJaxRenderer {
 		};
 
 		let consoleLogs = '';
+		const renderErrorMessage = tikzJaxRenderErrorMessage(normalizedSource);
 
 		try {
-			const { result: svgText, logs } = await captureConsoleLogs(async () =>
-				tex2svg(normalized.tex, {
+			const { result: svgText, logs } = await captureConsoleOutput(async () =>
+				tex2svg(normalized.renderTex, {
 					showConsole: true,
-					texPackages: TIKZJAX_TEX_PACKAGES,
-					tikzLibraries: TIKZJAX_TIKZ_LIBRARIES,
-					addToPreamble: sanitizedPreamble || undefined,
+					texPackages: normalized.texPackages,
+					tikzLibraries: normalized.tikzLibraries,
+					addToPreamble: normalized.addToPreamble || undefined,
 				}),
 			);
 			consoleLogs = logs;
@@ -248,7 +270,7 @@ export class TikzJaxRenderer {
 				return {
 					ok: false,
 					engine: 'tikzjax',
-					error: 'TikZJax failed to render this diagram.',
+					error: renderErrorMessage,
 					rawLog: formatTikzJaxDebugLog(debugInfo, logBody),
 				};
 			}
@@ -284,7 +306,7 @@ export class TikzJaxRenderer {
 			return {
 				ok: false,
 				engine: 'tikzjax',
-				error: 'TikZJax failed to render this diagram.',
+				error: renderErrorMessage,
 				rawLog: formatTikzJaxDebugLog(debugInfo, logBody),
 			};
 		}

@@ -1,7 +1,9 @@
 import esbuild from "esbuild";
 import process from "process";
-import { builtinModules } from "node:module";
+import { builtinModules, createRequire } from "node:module";
 import fs from "node:fs";
+
+const require = createRequire(import.meta.url);
 
 const banner =
 `/*
@@ -11,6 +13,20 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === 'production');
+
+const punycodePath = require.resolve("punycode/");
+
+const punycodeAliasPlugin = {
+	name: "punycode-alias",
+	setup(build) {
+		build.onResolve({ filter: /^punycode\/$/ }, () => ({
+			path: punycodePath,
+		}));
+		build.onResolve({ filter: /^punycode$/ }, () => ({
+			path: punycodePath,
+		}));
+	},
+};
 
 const tikzjaxBootstrapPatch = {
 	name: 'tikzjax-bootstrap-texdir',
@@ -26,13 +42,15 @@ const tikzjaxBootstrapPatch = {
 	},
 };
 
+const externalBuiltins = builtinModules.filter(name => name !== 'punycode');
+
 esbuild.build({
 	banner: {
 		js: banner,
 	},
 	entryPoints: ['main.ts'],
 	bundle: true,
-	plugins: [tikzjaxBootstrapPatch],
+	plugins: [punycodeAliasPlugin, tikzjaxBootstrapPatch],
 	external: [
 		'obsidian',
 		'electron',
@@ -57,7 +75,7 @@ esbuild.build({
 		'@codemirror/text',
 		'@codemirror/tooltip',
 		'@codemirror/view',
-		...builtinModules],
+		...externalBuiltins],
 	format: 'cjs',
 	watch: !prod,
 	target: 'es2020',

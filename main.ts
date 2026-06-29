@@ -43,54 +43,60 @@ export default class LuaTikzPlugin extends Plugin {
 	renderer!: TikzRenderer;
 	private inlinePreview!: InlinePreviewManager;
 
-	async onload() {
-		await this.loadSettings();
+	async onload(): Promise<void> {
+		try {
+			await this.loadSettings();
+			this.addSettingTab(new LuaTikzSettingTab(this.app, this));
 
-		this.renderer = new TikzRenderer(
-			this.app,
-			this.manifest.id,
-			() => activeDocument.body.classList.contains('theme-dark'),
-			() => this.settings,
-		);
-		this.inlinePreview = new InlinePreviewManager(
-			() => this.app.workspace.getActiveViewOfType(MarkdownView),
-			this.renderer,
-			() => this.settings,
-		);
+			this.renderer = new TikzRenderer(
+				this.app,
+				this.manifest.id,
+				() => activeDocument.body.classList.contains('theme-dark'),
+				() => this.settings,
+			);
+			this.inlinePreview = new InlinePreviewManager(
+				() => this.app.workspace.getActiveViewOfType(MarkdownView),
+				this.renderer,
+				() => this.settings,
+			);
 
-		this.registerEditorExtension(latexAutocompleteExtension());
+			this.registerEditorExtension(latexAutocompleteExtension());
 
-		this.addCommand({
-			id: 'toggle-tikz-inline-live-preview',
-			name: 'Toggle inline live preview',
-			callback: () => this.toggleInlineLivePreview(),
-		});
-
-		this.registerEvent(this.app.workspace.on('editor-change', () => {
-			this.inlinePreview.scheduleUpdate();
-		}));
-
-		this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
-			this.inlinePreview.scheduleUpdate(0);
-		}));
-
-		this.registerDomEvent(activeDocument, 'selectionchange', () => {
-			this.inlinePreview.syncVisibility();
-		});
-
-		this.addSettingTab(new LuaTikzSettingTab(this.app, this));
-		this.addSyntaxHighlighting();
-		this.registerTikzCodeBlock('tikz');
-		this.registerTikzCodeBlock('luatikz');
-
-		if (this.settings.showInstallNotice) {
-			this.app.workspace.onLayoutReady(() => {
-				new InstallNoticeModal(this.app, this).open();
+			this.addCommand({
+				id: 'toggle-tikz-inline-live-preview',
+				name: 'Toggle inline live preview',
+				callback: () => this.toggleInlineLivePreview(),
 			});
-		}
 
-		if (this.settings.inlineLivePreviewEnabledByDefault) {
-			this.inlinePreview.enable(500);
+			this.registerEvent(this.app.workspace.on('editor-change', () => {
+				this.inlinePreview.scheduleUpdate();
+			}));
+
+			this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
+				this.inlinePreview.scheduleUpdate(0);
+			}));
+
+			this.registerDomEvent(activeDocument, 'selectionchange', () => {
+				this.inlinePreview.syncVisibility();
+			});
+
+			this.addSyntaxHighlighting();
+			this.registerTikzCodeBlock('tikz');
+			this.registerTikzCodeBlock('luatikz');
+
+			if (this.settings.showInstallNotice) {
+				this.app.workspace.onLayoutReady(() => {
+					new InstallNoticeModal(this.app, this).open();
+				});
+			}
+
+			if (this.settings.inlineLivePreviewEnabledByDefault) {
+				this.inlinePreview.enable(500);
+			}
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.stack ?? error.message : String(error);
+			console.error('LuaTikz failed to load:', message);
+			throw error;
 		}
 	}
 
