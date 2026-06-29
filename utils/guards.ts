@@ -46,14 +46,3 @@ export function validateLualatexPath(pathValue: string): string | null {
 export function sanitizeCacheFilename(name: string): string {
 	return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 128);
 }
-
-declare global {
-	interface Window {
-		__LUATIKZ_TEX_DIR?: string;
-	}
-}
-
-/** Absolute path to vendor/tex (core.dump.gz, tex.wasm.gz, tex_files.tar.gz). */
-export function setTikzJaxTexDir(texDir: string): void {
-	window.__LUATIKZ_TEX_DIR = texDir;
-}

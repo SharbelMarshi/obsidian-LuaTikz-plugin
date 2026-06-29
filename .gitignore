@@ -9,5 +9,9 @@ build/
 data.json
 tex/
 .luatikz-temp/
+.luatikz-test-tex/
+generated/
+release/
+luatikz-*.zip
 vendor/
 .vendor-staging/

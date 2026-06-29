@@ -7,15 +7,47 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const entryPath = path.join(projectRoot, 'vendor/node-tikzjax/dist/index.js');
-const texPath = path.join(projectRoot, 'vendor/tex');
+const generatedAssetsPath = path.join(projectRoot, 'generated/tikzjaxTexAssets.ts');
+const sourceTexDir = path.join(projectRoot, 'node_modules/node-tikzjax/tex');
 
-if (!fs.existsSync(entryPath) || !fs.existsSync(texPath)) {
-	console.error('TikZJax vendor files missing. Run npm run build first.');
+if (!fs.existsSync(generatedAssetsPath)) {
+	console.error('Generated TikZJax tex assets missing. Run npm run build first.');
 	process.exit(1);
 }
 
-globalThis.__LUATIKZ_TEX_DIR = texPath;
+const generatedSource = fs.readFileSync(generatedAssetsPath, 'utf8');
+const assetEntries = [...generatedSource.matchAll(/'([^']+\.gz)': '([^']+)'/g)];
+
+if (assetEntries.length < 3) {
+	console.error('Could not parse generated/tikzjaxTexAssets.ts.');
+	process.exit(1);
+}
+
+for (const match of assetEntries) {
+	const fileName = match[1];
+	const encoded = match[2];
+	if (!fileName || !encoded) {
+		continue;
+	}
+
+	const sourcePath = path.join(sourceTexDir, fileName);
+	if (!fs.existsSync(sourcePath)) {
+		console.error(`Missing source tex file: ${sourcePath}`);
+		process.exit(1);
+	}
+
+	const decoded = Buffer.from(encoded, 'base64');
+	const sourceBytes = fs.readFileSync(sourcePath);
+	if (!decoded.equals(sourceBytes)) {
+		console.error(`Bundled asset mismatch for ${fileName}.`);
+		process.exit(1);
+	}
+}
+
+console.log('Bundled TikZJax tex assets verified against node-tikzjax source files.');
+
+const mod = require('node-tikzjax');
+const tex2svg = mod.default ?? mod;
 
 const texPackages = {
 	tikz: '',
@@ -26,10 +58,6 @@ const texPackages = {
 
 const tikzLibraries =
 	'arrows.meta,positioning,calc,decorations.pathmorphing,decorations.pathreplacing,patterns,shapes.geometric,circuits.logic.US';
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const mod = require(entryPath);
-const tex2svg = mod.default ?? mod;
 
 function normalizeUnicodeForTikzJax(source) {
 	return source
@@ -167,6 +195,18 @@ function assertNoCorruption(name, svg, forbidden, required) {
 \end{tikzpicture}`).then(svg =>
 		assertNoCorruption('Test 3 (edge label)', svg, ['\u00AC'], ['\u03A9']),
 	);
+
+	await renderSource(String.raw`\begin{tikzpicture}
+\draw[->] (0,0) -- (3,0) node[right] {$x$};
+\draw[->] (0,0) -- (0,2) node[above] {$y$};
+\draw[blue, thick] (0,0) circle (1cm);
+\node at (1.5,1.5) {TikZJax bundled};
+\end{tikzpicture}`).then(svg => {
+		if (!svg.includes('<svg')) {
+			throw new Error('Bundled TikZJax smoke test did not return SVG.');
+		}
+		console.log('Test 4 (bundled smoke): OK');
+	});
 
 	console.log('All TikZJax symbol tests passed.');
 })().catch(err => {

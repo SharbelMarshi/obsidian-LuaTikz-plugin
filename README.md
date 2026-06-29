@@ -37,7 +37,7 @@ Hebrew text works best when Arial Hebrew (or another Hebrew font from the built-
 
 - Desktop Obsidian
 - No shell or local TeX install required
-- Bundled `vendor/node-tikzjax/` and `vendor/tex/` assets from the release
+- TikZJax runtime is bundled into `main.js` (Community Plugins install needs only `main.js`, `manifest.json`, and `styles.css`)
 
 Enable **LuaTikZ** under Settings → Community plugins.
 

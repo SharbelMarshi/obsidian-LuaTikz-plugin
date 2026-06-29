@@ -29,29 +29,32 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Package release assets
+      - name: Package optional manual-install ZIP
         run: |
+          rm -rf release
           mkdir -p release
-          cp main.js manifest.json styles.css release/
-          cp -R vendor release/
+          cp main.js release/main.js
+          cp manifest.json release/manifest.json
+          cp styles.css release/styles.css
+          cd release
+          zip -r "../luatikz-${GITHUB_REF_NAME}.zip" .
+          cd ..
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            release/main.js
-            release/manifest.json
-            release/styles.css
-            release/vendor/node-tikzjax/dist/index.js
+            main.js
+            manifest.json
+            styles.css
           show-summary: true
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd release
-          shopt -s globstar
           gh release create "${GITHUB_REF_NAME}" \
-            main.js manifest.json styles.css vendor/** \
-            --title "LuaTikZ ${GITHUB_REF_NAME}" \
+            main.js manifest.json styles.css \
+            "luatikz-${GITHUB_REF_NAME}.zip" \
+            --title "LuaTikz ${GITHUB_REF_NAME}" \
             --generate-notes

@@ -2,8 +2,6 @@ import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from "node:module";
 import fs from "node:fs";
-import path from "node:path";
-import { spawn } from "node:child_process";
 
 const banner =
 `/*
@@ -14,78 +12,19 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === 'production');
 
-function runCommand(command, args, cwd) {
-	return new Promise((resolve, reject) => {
-		const child = spawn(command, args, { cwd, stdio: 'inherit', shell: false });
-		child.on('error', reject);
-		child.on('close', (code) => {
-			if (code === 0) {
-				resolve();
-			} else {
-				reject(new Error(`${command} ${args.join(' ')} failed with code ${code ?? 'unknown'}`));
-			}
+const tikzjaxBootstrapPatch = {
+	name: 'tikzjax-bootstrap-texdir',
+	setup(build) {
+		build.onLoad({ filter: /node-tikzjax[\\/]dist[\\/]bootstrap\.js$/ }, async (args) => {
+			let contents = await fs.promises.readFile(args.path, 'utf8');
+			contents = contents.replace(
+				"(0, path_1.join)(__dirname, '../tex')",
+				"((typeof window !== 'undefined' && window.__LUATIKZ_TEX_DIR) || (typeof globalThis !== 'undefined' && globalThis.__LUATIKZ_TEX_DIR) || (0, path_1.join)(__dirname, '../tex'))",
+			);
+			return { contents, loader: 'js' };
 		});
-	});
-}
-
-async function copyVendorAssets() {
-	const stagingDir = path.join('.vendor-staging');
-	const vendorRoot = path.join('vendor');
-	const stagingModules = path.join(stagingDir, 'node_modules');
-
-	await fs.promises.rm(vendorRoot, { recursive: true, force: true });
-	await fs.promises.rm(stagingDir, { recursive: true, force: true });
-	await fs.promises.mkdir(stagingDir, { recursive: true });
-
-	await fs.promises.writeFile(path.join(stagingDir, 'package.json'), JSON.stringify({
-		name: 'luatikz-vendor-staging',
-		private: true,
-		dependencies: {
-			'node-tikzjax': '1.0.5',
-		},
-	}, null, 2));
-
-	await runCommand('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], stagingDir);
-
-	await fs.promises.mkdir(vendorRoot, { recursive: true });
-
-	await fs.promises.cp(
-		path.join(stagingModules, 'node-tikzjax'),
-		path.join(vendorRoot, 'node-tikzjax'),
-		{ recursive: true },
-	);
-
-	await fs.promises.cp(
-		path.join(stagingModules, 'node-tikzjax', 'tex'),
-		path.join(vendorRoot, 'tex'),
-		{ recursive: true },
-	);
-
-	const vendorModules = path.join(vendorRoot, 'node_modules');
-	await fs.promises.mkdir(vendorModules, { recursive: true });
-	for (const name of await fs.promises.readdir(stagingModules)) {
-		if (name === 'node-tikzjax') {
-			continue;
-		}
-		await fs.promises.cp(
-			path.join(stagingModules, name),
-			path.join(vendorModules, name),
-			{ recursive: true },
-		);
-	}
-
-	const bootstrapPath = path.join(vendorRoot, 'node-tikzjax', 'dist', 'bootstrap.js');
-	let bootstrap = await fs.promises.readFile(bootstrapPath, 'utf8');
-	bootstrap = bootstrap.replace(
-		"(0, path_1.join)(__dirname, '../tex')",
-		"(globalThis.__LUATIKZ_TEX_DIR || (0, path_1.join)(__dirname, '../../tex'))",
-		"(typeof window !== 'undefined' && window.__LUATIKZ_TEX_DIR) || (globalThis.__LUATIKZ_TEX_DIR || (0, path_1.join)(__dirname, '../../tex'))",
-	);
-	await fs.promises.writeFile(bootstrapPath, bootstrap, 'utf8');
-
-	await fs.promises.rm(stagingDir, { recursive: true, force: true });
-	await fs.promises.rm(path.join('tex'), { recursive: true, force: true });
-}
+	},
+};
 
 esbuild.build({
 	banner: {
@@ -93,6 +32,7 @@ esbuild.build({
 	},
 	entryPoints: ['main.ts'],
 	bundle: true,
+	plugins: [tikzjaxBootstrapPatch],
 	external: [
 		'obsidian',
 		'electron',
@@ -120,14 +60,10 @@ esbuild.build({
 		...builtinModules],
 	format: 'cjs',
 	watch: !prod,
-	target: 'es2016',
+	target: 'es2020',
 	logLevel: "info",
 	sourcemap: prod ? false : 'inline',
 	treeShaking: true,
 	outfile: 'main.js',
 	platform: 'node',
-}).then(async () => {
-	if (prod) {
-		await copyVendorAssets();
-	}
 }).catch(() => process.exit(1));

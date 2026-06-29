@@ -3,23 +3,35 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="1.2.0"
+VERSION="${1:-1.2.0}"
+ZIP_NAME="luatikz-${VERSION}.zip"
 
 npm run build
 
+rm -rf release
+mkdir -p release
+cp main.js release/main.js
+cp manifest.json release/manifest.json
+cp styles.css release/styles.css
+cd release
+zip -r "../${ZIP_NAME}" .
+cd ..
+
 gh release create "$VERSION" \
   main.js manifest.json styles.css \
-  vendor/ \
-  --title "LuaTikZ $VERSION" \
+  "${ZIP_NAME}" \
+  --title "LuaTikz ${VERSION}" \
   --notes "$(cat <<'EOF'
-LuaTikZ release with dual renderers and explicit local execution consent.
+LuaTikz release with dual renderers and explicit local execution consent.
+
+Obsidian Community Plugins install uses main.js, manifest.json, and styles.css.
+TikZJax is bundled into main.js — no vendor folder is required.
 
 - Local LuaLaTeX engine (recommended) with opt-in shell execution
-- TikZJax renderer bundled under vendor/node-tikzjax and vendor/tex
+- TikZJax renderer bundled for shell-free rendering
 - One-time renderer installation notice
 - RTL support, Liquid Glass UI, opt-in clipboard copy
-- GitHub artifact attestations for main.js, manifest.json, styles.css, and TikZJax entry
 EOF
 )"
 
-echo "Release $VERSION published."
+echo "Release ${VERSION} published with Obsidian assets and ${ZIP_NAME}."

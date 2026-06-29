@@ -1,9 +1,6 @@
 import { createHash } from 'crypto';
+import tex2svgDefault, { load as loadTikzJaxRuntime } from 'node-tikzjax';
 import type { App } from 'obsidian';
-import {
-	loadRequiredModule,
-	resolveTikzJaxRuntime,
-} from '../pluginPaths';
 import type { LuaTikzSettings } from '../settingsModel';
 import {
 	formatTikzJaxInputMode,
@@ -13,8 +10,9 @@ import {
 	TIKZJAX_TIKZ_LIBRARIES,
 } from '../tikzJaxSource';
 import type { RenderRequest, RenderResult } from '../types';
-import { firstMapKey, isCallable, isRecord, setTikzJaxTexDir } from '../utils/guards';
+import { firstMapKey, isCallable, isRecord } from '../utils/guards';
 import { finalizeTikzJaxSvg } from '../utils/tikzJaxSvgFix';
+import { ensureTikzJaxTexExtracted } from '../utils/tikzJaxTexRuntime';
 
 const CACHE_MAX = 32;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -34,8 +32,7 @@ type Tex2SvgOptions = {
 type Tex2SvgFn = (input: string, options?: Tex2SvgOptions) => Promise<string>;
 
 interface TikzJaxDebugInfo {
-	entryPath: string;
-	texPath: string;
+	texDir: string;
 	inputMode: string;
 	normalizedSource: string;
 }
@@ -74,16 +71,7 @@ function asTex2SvgFn(value: unknown): Tex2SvgFn | null {
 }
 
 function readTex2SvgExport(moduleValue: unknown): Tex2SvgFn | null {
-	const direct = asTex2SvgFn(moduleValue);
-	if (direct) {
-		return direct;
-	}
-
-	if (!isRecord(moduleValue)) {
-		return null;
-	}
-
-	return asTex2SvgFn(moduleValue.default) ?? asTex2SvgFn(moduleValue.render);
+	return asTex2SvgFn(moduleValue) ?? (isRecord(moduleValue) ? asTex2SvgFn(moduleValue.default) : null);
 }
 
 function formatTikzJaxDebugLog(
@@ -92,8 +80,7 @@ function formatTikzJaxDebugLog(
 ): string {
 	return [
 		'Renderer: TikZJax',
-		`TikZJax entry: ${debug.entryPath}`,
-		`TeX path: ${debug.texPath}`,
+		`TeX path: ${debug.texDir}`,
 		`Input mode: ${debug.inputMode}`,
 		'Normalized source:',
 		debug.normalizedSource,
@@ -130,7 +117,7 @@ export class TikzJaxRenderer {
 	private tex2svg: Tex2SvgFn | null = null;
 	private loadError: string | null = null;
 	private loadErrorLog: string | null = null;
-	private runtimePaths: { entryPath: string; texPath: string } | null = null;
+	private texDir: string | null = null;
 	private loadPromise: Promise<Tex2SvgFn | null> | null = null;
 
 	constructor(
@@ -143,7 +130,7 @@ export class TikzJaxRenderer {
 		this.tex2svg = null;
 		this.loadError = null;
 		this.loadErrorLog = null;
-		this.runtimePaths = null;
+		this.texDir = null;
 		this.loadPromise = null;
 	}
 
@@ -165,33 +152,28 @@ export class TikzJaxRenderer {
 	}
 
 	private async loadModule(): Promise<Tex2SvgFn | null> {
-		const runtime = resolveTikzJaxRuntime(this.app, this.pluginId);
-		if (!runtime.ok) {
-			this.loadError = runtime.error;
-			this.loadErrorLog = runtime.rawLog ?? runtime.error;
-			return null;
-		}
-
-		this.runtimePaths = runtime.paths;
-
 		try {
-			setTikzJaxTexDir(runtime.paths.texPath);
-			const moduleValue: unknown = loadRequiredModule(runtime.paths.entryPath);
-			if (isRecord(moduleValue) && isCallable(moduleValue.load)) {
-				await moduleValue.load();
+			const texResult = await ensureTikzJaxTexExtracted(this.app, this.pluginId);
+			if (!texResult.ok) {
+				this.loadError = 'TikZJax failed to initialize.';
+				this.loadErrorLog = texResult.error;
+				return null;
 			}
 
-			const fn = readTex2SvgExport(moduleValue);
+			this.texDir = texResult.texDir;
+			await loadTikzJaxRuntime();
+
+			const fn = readTex2SvgExport(tex2svgDefault);
 			if (!fn) {
-				this.loadError = 'TikZJax runtime is missing.';
-				this.loadErrorLog = 'TikZJax module loaded but tex2svg export is missing.';
+				this.loadError = 'TikZJax failed to initialize.';
+				this.loadErrorLog = 'Bundled TikZJax module did not export tex2svg.';
 				return null;
 			}
 
 			this.tex2svg = fn;
 			return fn;
 		} catch (err) {
-			this.loadError = 'TikZJax runtime is missing.';
+			this.loadError = 'TikZJax failed to initialize.';
 			this.loadErrorLog = err instanceof Error ? err.message : String(err);
 			return null;
 		}
@@ -224,26 +206,19 @@ export class TikzJaxRenderer {
 		}
 
 		const tex2svg = await this.ensureLoaded();
-		if (!tex2svg || !this.runtimePaths) {
+		if (!tex2svg || !this.texDir) {
 			return {
 				ok: false,
 				engine: 'tikzjax',
-				error: this.loadError ?? 'TikZJax renderer is unavailable.',
-				rawLog: this.loadErrorLog ?? [
-					'The plugin release must include:',
-					'vendor/node-tikzjax/',
-					'vendor/tex/',
-					'',
-					'Switch to Local LuaLaTeX or reinstall a release that bundles TikZJax.',
-				].join('\n'),
+				error: this.loadError ?? 'TikZJax failed to initialize.',
+				rawLog: this.loadErrorLog ?? 'Bundled TikZJax runtime could not be loaded.',
 			};
 		}
 
 		const normalized = normalizeForTikzJax(normalizedSource);
 		const sanitizedPreamble = sanitizeTikzJaxPreamble(settings.extraPreamble);
 		const debugInfo: TikzJaxDebugInfo = {
-			entryPath: this.runtimePaths.entryPath,
-			texPath: this.runtimePaths.texPath,
+			texDir: this.texDir,
 			inputMode: formatTikzJaxInputMode(normalized.mode),
 			normalizedSource: normalized.tex,
 		};

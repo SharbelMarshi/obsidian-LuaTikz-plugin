@@ -40,24 +40,6 @@ export function getPluginFsDir(app: App, pluginId: string): string | null {
 	return path.join(basePath, app.vault.configDir, 'plugins', pluginId);
 }
 
-export function getTikzJaxEntryPath(app: App, pluginId: string): string | null {
-	const pluginFsDir = getPluginFsDir(app, pluginId);
-	if (!pluginFsDir) {
-		return null;
-	}
-
-	return path.join(pluginFsDir, 'vendor', 'node-tikzjax', 'dist', 'index.js');
-}
-
-export function getTikzJaxTexPath(app: App, pluginId: string): string | null {
-	const pluginFsDir = getPluginFsDir(app, pluginId);
-	if (!pluginFsDir) {
-		return null;
-	}
-
-	return path.join(pluginFsDir, 'vendor', 'tex');
-}
-
 export function getDesktopFsPath(app: App, adapterPath: string): string | null {
 	const basePath = getVaultBasePath(app);
 	if (!basePath) {
@@ -132,66 +114,4 @@ export async function clearPluginTempFsDir(app: App, pluginId: string): Promise<
 	} catch {
 		// ignore re-create errors after clear
 	}
-}
-
-export function loadRequiredModule(modulePath: string): unknown {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- node-tikzjax ships as CommonJS and must be loaded from the plugin vendor folder at runtime.
-	return require(modulePath);
-}
-
-export interface TikzJaxRuntimePaths {
-	entryPath: string;
-	texPath: string;
-}
-
-export function resolveTikzJaxRuntime(
-	app: App,
-	pluginId: string,
-): { ok: true; paths: TikzJaxRuntimePaths } | { ok: false; error: string; rawLog?: string } {
-	const entryPath = getTikzJaxEntryPath(app, pluginId);
-	const texPath = getTikzJaxTexPath(app, pluginId);
-
-	if (!entryPath || !texPath) {
-		return {
-			ok: false,
-			error: 'TikZJax requires desktop access to the plugin folder.',
-			rawLog: 'Could not resolve an absolute plugin folder path for TikZJax.',
-		};
-	}
-
-	if (!fs.existsSync(entryPath)) {
-		return {
-			ok: false,
-			error: 'TikZJax runtime is missing.',
-			rawLog: [
-				`TikZJax runtime was not found at ${entryPath}.`,
-				'Reinstall the plugin or rebuild the release with vendor/node-tikzjax included.',
-				'',
-				'The plugin release must include:',
-				'vendor/node-tikzjax/',
-				'vendor/tex/',
-				'',
-				'Switch to Local LuaLaTeX or reinstall a release that bundles TikZJax.',
-			].join('\n'),
-		};
-	}
-
-	if (!fs.existsSync(texPath)) {
-		return {
-			ok: false,
-			error: 'TikZJax runtime is missing.',
-			rawLog: [
-				`TikZJax TeX files were not found at ${texPath}.`,
-				'Reinstall the plugin or rebuild the release with vendor/tex included.',
-				'',
-				'The plugin release must include:',
-				'vendor/node-tikzjax/',
-				'vendor/tex/',
-				'',
-				'Switch to Local LuaLaTeX or reinstall a release that bundles TikZJax.',
-			].join('\n'),
-		};
-	}
-
-	return { ok: true, paths: { entryPath, texPath } };
 }
