@@ -120,6 +120,7 @@ export default class LuaTikzPlugin extends Plugin {
 
 	registerTikzCodeBlock(language: string) {
 		this.registerMarkdownCodeBlockProcessor(language, async (source, el) => {
+			el.addClass('luatikz-render-wrapper');
 			el.empty();
 			const loading = el.createDiv({
 				cls: 'tikzjax-hebrew-local-output luatikz-glass-card',

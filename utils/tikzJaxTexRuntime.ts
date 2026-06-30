@@ -40,6 +40,14 @@ const isTikzJaxAssetName = (value: string): value is TikzJaxAssetName =>
 const isNonEmptyString = (value: unknown): value is string =>
 	typeof value === 'string' && value.length > 0;
 
+const getBundledTikzJaxAssetHash = (): string => {
+	const hash = TIKZJAX_TEX_ASSET_HASH;
+	if (!isNonEmptyString(hash)) {
+		throw new Error('Invalid TikZJax asset hash.');
+	}
+	return hash;
+};
+
 const normalizeAsset = (raw: unknown): TikzJaxBundledAsset => {
 	if (typeof raw !== 'object' || raw === null) {
 		throw new Error('Invalid TikZJax asset entry.');
@@ -111,7 +119,7 @@ export function writeBundledTikzJaxTexToDir(texDir: string): void {
 		fs.writeFileSync(targetPath, nextBytes);
 	}
 
-	fs.writeFileSync(path.join(texDir, HASH_FILE), `${TIKZJAX_TEX_ASSET_HASH}\n`, 'utf8');
+	fs.writeFileSync(path.join(texDir, HASH_FILE), `${getBundledTikzJaxAssetHash()}\n`, 'utf8');
 }
 
 function texDirIsCurrent(texDir: string): boolean {
@@ -122,7 +130,7 @@ function texDirIsCurrent(texDir: string): boolean {
 
 	try {
 		const storedHash = fs.readFileSync(hashPath, 'utf8').trim();
-		if (storedHash !== TIKZJAX_TEX_ASSET_HASH) {
+		if (storedHash !== getBundledTikzJaxAssetHash()) {
 			return false;
 		}
 	} catch {
@@ -180,7 +188,7 @@ export async function ensureTikzJaxTexExtracted(
 
 export function bundledTikzJaxTexAssetFingerprint(): string {
 	return createHash('sha256')
-		.update(TIKZJAX_TEX_ASSET_HASH)
+		.update(getBundledTikzJaxAssetHash())
 		.digest('hex')
 		.slice(0, 16);
 }

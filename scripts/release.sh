@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-1.3.3}"
+VERSION="${1:-1.3.4}"
 ZIP_NAME="luatikz-${VERSION}.zip"
 
 npm run build

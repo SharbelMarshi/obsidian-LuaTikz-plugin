@@ -15,38 +15,39 @@
   }
 }
 
-/* --- Reading-view render blocks: frameless finished output --- */
+/* --- Plugin render blocks: frameless Obsidian code-block wrapper --- */
 
-.markdown-reading-view .block-language-tikz,
-.markdown-reading-view .block-language-luatikz,
-.markdown-preview-view .block-language-tikz,
-.markdown-preview-view .block-language-luatikz,
-.markdown-rendered .block-language-tikz,
-.markdown-rendered .block-language-luatikz,
-.block-language-tikz:has(.tikzjax-hebrew-local-output),
-.block-language-luatikz:has(.tikzjax-hebrew-local-output),
-.block-language-tikz:has(.tikzjax-hebrew-local-block),
-.block-language-luatikz:has(.tikzjax-hebrew-local-block),
-.block-language-tikz:has(.tikzjax-hebrew-local-error),
-.block-language-luatikz:has(.tikzjax-hebrew-local-error) {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
+.markdown-reading-view .block-language-tikz.luatikz-render-wrapper,
+.markdown-reading-view .block-language-luatikz.luatikz-render-wrapper,
+.markdown-preview-view .block-language-tikz.luatikz-render-wrapper,
+.markdown-preview-view .block-language-luatikz.luatikz-render-wrapper,
+.markdown-rendered .block-language-tikz.luatikz-render-wrapper,
+.markdown-rendered .block-language-luatikz.luatikz-render-wrapper {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
   padding: 0;
 }
 
 /* Finished diagram: no card, border, or panel */
-.tikzjax-hebrew-local-block.luatikz-output-card,
-.tikzjax-hebrew-local-output.luatikz-output-card,
-.tikzjax-hebrew-local-block,
-.tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card),
-.tikzjax-hebrew-local-block:not(.luatikz-error-card) {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-  border-radius: 0 !important;
+.markdown-reading-view .tikzjax-hebrew-local-block.luatikz-output-card,
+.markdown-preview-view .tikzjax-hebrew-local-block.luatikz-output-card,
+.markdown-rendered .tikzjax-hebrew-local-block.luatikz-output-card,
+.markdown-reading-view .tikzjax-hebrew-local-output.luatikz-output-card,
+.markdown-preview-view .tikzjax-hebrew-local-output.luatikz-output-card,
+.markdown-rendered .tikzjax-hebrew-local-output.luatikz-output-card,
+.markdown-reading-view .tikzjax-hebrew-local-block:not(.luatikz-error-card),
+.markdown-preview-view .tikzjax-hebrew-local-block:not(.luatikz-error-card),
+.markdown-rendered .tikzjax-hebrew-local-block:not(.luatikz-error-card),
+.markdown-reading-view .tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card),
+.markdown-preview-view .tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card),
+.markdown-rendered .tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card) {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  border-radius: 0;
 }
 
 .tikzjax-hebrew-local-block.luatikz-output-card {
@@ -57,7 +58,9 @@
 }
 
 /* Loading placeholder: subtle background/border for readability */
-.tikzjax-hebrew-local-output.luatikz-glass-card {
+.markdown-reading-view .tikzjax-hebrew-local-output.luatikz-glass-card,
+.markdown-preview-view .tikzjax-hebrew-local-output.luatikz-glass-card,
+.markdown-rendered .tikzjax-hebrew-local-output.luatikz-glass-card {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 18px;
@@ -73,7 +76,9 @@
 }
 
 /* Error cards stay readable */
-.tikzjax-hebrew-local-error.luatikz-error-card {
+.markdown-reading-view .tikzjax-hebrew-local-error.luatikz-error-card,
+.markdown-preview-view .tikzjax-hebrew-local-error.luatikz-error-card,
+.markdown-rendered .tikzjax-hebrew-local-error.luatikz-error-card {
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 12px;
@@ -83,16 +88,28 @@
   box-shadow: none;
 }
 
-.tikzjax-hebrew-local-image,
-.tikzjax-hebrew-local-svg,
-.luatikz-tikzjax-host,
-.tikzjax-hebrew-local-output svg,
-.tikzjax-hebrew-local-block svg,
-.luatikz-tikzjax-host svg {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
+.markdown-reading-view .tikzjax-hebrew-local-image,
+.markdown-preview-view .tikzjax-hebrew-local-image,
+.markdown-rendered .tikzjax-hebrew-local-image,
+.markdown-reading-view .tikzjax-hebrew-local-svg,
+.markdown-preview-view .tikzjax-hebrew-local-svg,
+.markdown-rendered .tikzjax-hebrew-local-svg,
+.markdown-reading-view .luatikz-tikzjax-host,
+.markdown-preview-view .luatikz-tikzjax-host,
+.markdown-rendered .luatikz-tikzjax-host,
+.markdown-reading-view .tikzjax-hebrew-local-output svg,
+.markdown-preview-view .tikzjax-hebrew-local-output svg,
+.markdown-rendered .tikzjax-hebrew-local-output svg,
+.markdown-reading-view .tikzjax-hebrew-local-block svg,
+.markdown-preview-view .tikzjax-hebrew-local-block svg,
+.markdown-rendered .tikzjax-hebrew-local-block svg,
+.markdown-reading-view .luatikz-tikzjax-host svg,
+.markdown-preview-view .luatikz-tikzjax-host svg,
+.markdown-rendered .luatikz-tikzjax-host svg {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
 }
 
 .tikzjax-hebrew-local-output > *,
@@ -104,12 +121,14 @@
   background-color: transparent;
 }
 
-.tikzjax-hebrew-local-block .tikzjax-hebrew-local-output {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-  border-radius: 0 !important;
+.markdown-reading-view .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output,
+.markdown-preview-view .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output,
+.markdown-rendered .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  border-radius: 0;
   overflow-x: auto;
   text-align: center;
   padding: 0;
@@ -223,12 +242,15 @@
 
 .markdown-reading-view .luatikz-output-card,
 .markdown-preview-view .luatikz-output-card,
-.markdown-rendered .luatikz-output-card {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-  border-radius: 0 !important;
+.markdown-rendered .luatikz-output-card,
+.markdown-reading-view .tikzjax-hebrew-local-block.luatikz-output-card,
+.markdown-preview-view .tikzjax-hebrew-local-block.luatikz-output-card,
+.markdown-rendered .tikzjax-hebrew-local-block.luatikz-output-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  border-radius: 0;
 }
 
 .luatikz-error-card {
@@ -255,24 +277,34 @@
   border-top: none;
 }
 
-.block-language-tikz img.tikzjax-hebrew-local-image,
-.block-language-luatikz img.tikzjax-hebrew-local-image,
-.block-language-tikz .luatikz-tikzjax-host,
-.block-language-luatikz .luatikz-tikzjax-host {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-  border-radius: 0 !important;
+.markdown-reading-view .block-language-tikz.luatikz-render-wrapper img.tikzjax-hebrew-local-image,
+.markdown-reading-view .block-language-luatikz.luatikz-render-wrapper img.tikzjax-hebrew-local-image,
+.markdown-preview-view .block-language-tikz.luatikz-render-wrapper img.tikzjax-hebrew-local-image,
+.markdown-preview-view .block-language-luatikz.luatikz-render-wrapper img.tikzjax-hebrew-local-image,
+.markdown-rendered .block-language-tikz.luatikz-render-wrapper img.tikzjax-hebrew-local-image,
+.markdown-rendered .block-language-luatikz.luatikz-render-wrapper img.tikzjax-hebrew-local-image,
+.markdown-reading-view .block-language-tikz.luatikz-render-wrapper .luatikz-tikzjax-host,
+.markdown-reading-view .block-language-luatikz.luatikz-render-wrapper .luatikz-tikzjax-host,
+.markdown-preview-view .block-language-tikz.luatikz-render-wrapper .luatikz-tikzjax-host,
+.markdown-preview-view .block-language-luatikz.luatikz-render-wrapper .luatikz-tikzjax-host,
+.markdown-rendered .block-language-tikz.luatikz-render-wrapper .luatikz-tikzjax-host,
+.markdown-rendered .block-language-luatikz.luatikz-render-wrapper .luatikz-tikzjax-host {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  border-radius: 0;
 }
 
-.luatikz-tikzjax-host svg {
+.markdown-reading-view .luatikz-tikzjax-host svg,
+.markdown-preview-view .luatikz-tikzjax-host svg,
+.markdown-rendered .luatikz-tikzjax-host svg {
   max-width: 100%;
   height: auto;
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
 }
 
 .luatikz-rtl {
@@ -285,14 +317,16 @@
   text-align: left;
 }
 
-.tikzjax-hebrew-local-block {
+.markdown-reading-view .tikzjax-hebrew-local-block,
+.markdown-preview-view .tikzjax-hebrew-local-block,
+.markdown-rendered .tikzjax-hebrew-local-block {
   margin: 1em 0;
   position: relative;
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-  border-radius: 0 !important;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  border-radius: 0;
 }
 
 .tikzjax-hebrew-local-toolbar {
@@ -339,21 +373,25 @@
 }
 
 /* Finished output only; loading uses .luatikz-glass-card styling above. */
-.tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card) {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-  border-radius: 0 !important;
+.markdown-reading-view .tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card),
+.markdown-preview-view .tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card),
+.markdown-rendered .tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card) {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  border-radius: 0;
 }
 
-.tikzjax-hebrew-local-image {
+.markdown-reading-view .tikzjax-hebrew-local-image,
+.markdown-preview-view .tikzjax-hebrew-local-image,
+.markdown-rendered .tikzjax-hebrew-local-image {
   max-width: 100%;
   height: auto;
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
 }
 
 .tikzjax-hebrew-local-error {
