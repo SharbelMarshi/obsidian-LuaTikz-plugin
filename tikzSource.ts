@@ -3,8 +3,9 @@ import { SIMPLE_TIKZ_HELPERS } from './simpleShapes';
 
 const DOCUMENTCLASS_LINE = '\\documentclass[tikz,border=5pt]{standalone}\n';
 
-/** Internal defaults for LuaLaTeX Hebrew/English rendering — not user-configurable. */
+/** Internal defaults for LuaLaTeX RTL/English rendering — not user-configurable. */
 const DEFAULT_HEBREW_FONT = 'Arial Hebrew';
+const DEFAULT_ARABIC_FONT = 'Geeza Pro';
 const DEFAULT_ENGLISH_FONT = 'Times New Roman';
 
 function escapeLatexFontName(fontName: string): string {
@@ -13,6 +14,7 @@ function escapeLatexFontName(fontName: string): string {
 
 export function buildLatexWrapperPrefix(extraPreamble = ''): string {
 	const hebrewFont = escapeLatexFontName(DEFAULT_HEBREW_FONT);
+	const arabicFont = escapeLatexFontName(DEFAULT_ARABIC_FONT);
 	const englishFont = escapeLatexFontName(DEFAULT_ENGLISH_FONT);
 
 	return `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
@@ -20,11 +22,13 @@ export function buildLatexWrapperPrefix(extraPreamble = ''): string {
 
 \\setmainlanguage{english}
 \\setotherlanguage{hebrew}
+\\setotherlanguage{arabic}
 
 \\setmainfont{${englishFont}}
 \\newfontfamily\\hebrewfont[Script=Hebrew]{${hebrewFont}}
 \\newfontfamily\\hebrewfontsf[Script=Hebrew]{${hebrewFont}}
 \\newfontfamily\\hebrewfonttt[Script=Hebrew]{${hebrewFont}}
+\\newfontfamily\\arabicfont[Script=Arabic]{${arabicFont}}
 
 \\usepackage{tikz}
 \\usetikzlibrary{arrows.meta,positioning,calc,shapes,decorations.pathmorphing,shapes.gates.logic.US}
@@ -35,6 +39,7 @@ export function buildLatexWrapperPrefix(extraPreamble = ''): string {
 \\pgfplotsset{compat=1.18}
 
 \\newcommand{\\he}[1]{\\texthebrew{#1}}
+\\newcommand{\\ar}[1]{\\textarabic{#1}}
 ${SIMPLE_TIKZ_HELPERS}
 ${extraPreamble.trim() ? `${extraPreamble.trim()}\n` : ''}\\begin{document}
 `;

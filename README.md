@@ -16,7 +16,7 @@ Render `tikz` and `luatikz` code blocks in Obsidian using **local LuaLaTeX** (re
 
 **Export.** Rendered blocks get *Export SVG* and *Copy SVG* buttons on hover (clipboard copy is opt-in in settings).
 
-**RTL and Hebrew.** Use `\he{...}` for Hebrew labels and mixed Hebrew/English diagrams. RTL layout is applied automatically when Hebrew or Arabic is detected.
+**RTL text.** Use `\he{...}` for Hebrew and `\ar{...}` for Arabic labels in mixed RTL/LTR diagrams. RTL layout is applied automatically when Hebrew or Arabic is detected.
 
 **Errors mapped to your note.** LaTeX compile errors are mapped back to the line in your TikZ block (and note line when using live preview).
 
@@ -31,7 +31,7 @@ Render `tikz` and `luatikz` code blocks in Obsidian using **local LuaLaTeX** (re
 - `pdftocairo` for PDF → SVG (`brew install poppler`)
 - Enable **Allow local LuaLaTeX execution** in LuaTikz settings
 
-Hebrew text works best when Arial Hebrew (or another Hebrew font from the built-in LuaLaTeX preamble) is available to LuaLaTeX.
+Hebrew and Arabic text work best when Arial Hebrew and Geeza Pro (or fonts from the built-in LuaLaTeX preamble) are available to LuaLaTeX.
 
 ### TikZJax
 
@@ -74,15 +74,16 @@ These diagrams were rendered with LuaTikZ and exported as SVG. Preview files liv
 
 ## Examples
 
-### Basic diagram with Hebrew
+### Basic diagram with Hebrew and Arabic
 
 ````markdown
 ```tikz
 \begin{tikzpicture}
 \Text(0,0,Hello)
 \Text(0,-1,\he{שלום עולם})
-\Arrow(0,-2,2,-2)
-\ANDgate(4,-2,and1)
+\Text(0,-2,\ar{مرحبا بالعالم})
+\Arrow(0,-3,2,-3)
+\ANDgate(4,-3,and1)
 \end{tikzpicture}
 ```
 ````
@@ -131,9 +132,18 @@ The `luatikz` fence alias works the same way:
 
 Live preview is available from the command palette: *Toggle inline live preview*.
 
+## RTL text
+Local LuaLaTeX supports RTL text in TikZ diagrams through helper macros:
+```latex
+\he{טקסט בעברית}
+\ar{نص عربي}
+```
+Hebrew uses the configured Hebrew font, and Arabic uses the configured Arabic font. TikZJax provides only a limited fallback for these macros and is not recommended for real RTL text shaping. Use Local LuaLaTeX for Hebrew or Arabic diagrams.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
 ## TikZJax limitation
-TikZJax is a limited renderer. It supports many standard TikZ diagrams and basic PGFPlots, but advanced PGFPlots features such as interpolated 3D surface shading may require Local LuaLaTeX.
+TikZJax is bundled into `main.js` so that LuaTikz works offline with the standard Obsidian Community Plugin installation files: `main.js`, `manifest.json`, and `styles.css`. This can make `main.js` larger than 5 MB, so users with the Obsidian Sync Standard plan may not be able to sync the plugin file through Obsidian Sync.
+TikZJax supports many standard TikZ diagrams and basic PGFPlots. Advanced PGFPlots features, including interpolated 3D surface shading, may require Local LuaLaTeX.

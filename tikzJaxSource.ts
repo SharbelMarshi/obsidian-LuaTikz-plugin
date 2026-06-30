@@ -1,4 +1,5 @@
 import { tidyTikzSource } from './tikzSource';
+import { containsRtlText } from './utils/guards';
 
 export type TikzJaxInputMode = 'bare-tikzpicture' | 'full-document' | 'raw';
 
@@ -28,6 +29,7 @@ const LUALATEX_ONLY_PATTERNS: RegExp[] = [
 	/\\setmonofont(?:\[[^\]]*\])?\{[^}]+\}\s*/g,
 	/\\newfontfamily\\\w+(?:\[[^\]]*\])?\{[^}]+\}\s*/g,
 	/\\newcommand\{\\he\}(?:\[[^\]]*\])?\{[^}]+\}\s*/g,
+	/\\newcommand\{\\ar\}(?:\[[^\]]*\])?\{[^}]+\}\s*/g,
 ];
 
 export const TIKZJAX_TEX_PACKAGES: Record<string, string> = {
@@ -55,6 +57,11 @@ const PGFLOTS_BODY_MARKERS = [
 ];
 
 const DEFAULT_PGFLOTS_COMPAT = '\\pgfplotsset{compat=1.16}';
+
+const TIKZJAX_RTL_FALLBACK_MACROS = [
+	'\\newcommand{\\he}[1]{#1}',
+	'\\newcommand{\\ar}[1]{#1}',
+].join('\n');
 
 function clampPgfplotsCompatLine(line: string): string {
 	return line.replace(/\\pgfplotsset\{compat=1\.18\}/g, '\\pgfplotsset{compat=1.16}');
@@ -88,18 +95,24 @@ function stripPatterns(source: string, patterns: RegExp[]): string {
 	return cleaned;
 }
 
-function replaceHebrewMacros(source: string): { text: string; converted: boolean } {
-	let converted = false;
-	const text = source
-		.replace(/\\he\{([^}]*)\}/g, (_match, content: string) => {
-			converted = true;
-			return content;
-		})
-		.replace(/\\texthebrew\{([^}]*)\}/g, (_match, content: string) => {
-			converted = true;
-			return content;
-		});
-	return { text, converted };
+function sourceUsesRtlMacros(source: string): boolean {
+	return /\\he\{/.test(source)
+		|| /\\ar\{/.test(source)
+		|| /\\texthebrew\{/.test(source)
+		|| /\\textarabic\{/.test(source);
+}
+
+/** TikZJax cannot shape RTL Unicode; keep macros defined but drop RTL glyph content at render time. */
+function sanitizeRtlMacroContentForTikzJax(source: string): string {
+	return source
+		.replace(/\\he\{([^}]*)\}/g, (match, content: string) =>
+			containsRtlText(content) ? '\\he{}' : match)
+		.replace(/\\ar\{([^}]*)\}/g, (match, content: string) =>
+			containsRtlText(content) ? '\\ar{}' : match)
+		.replace(/\\texthebrew\{([^}]*)\}/g, (match, content: string) =>
+			containsRtlText(content) ? '\\texthebrew{}' : match)
+		.replace(/\\textarabic\{([^}]*)\}/g, (match, content: string) =>
+			containsRtlText(content) ? '\\textarabic{}' : match);
 }
 
 function normalizeOhmCommands(source: string): string {
@@ -195,6 +208,7 @@ function buildStandaloneDocument(
 		usetikzlibraryLines: string[];
 		pgfplotssetLines: string[];
 		extraPreamble?: string;
+		usesRtlMacros?: boolean;
 	},
 ): string {
 	const preamble: string[] = [
@@ -203,6 +217,10 @@ function buildStandaloneDocument(
 		'\\usepackage{amssymb}',
 		'\\usepackage{tikz}',
 	];
+
+	if (options.usesRtlMacros) {
+		preamble.push(TIKZJAX_RTL_FALLBACK_MACROS);
+	}
 
 	if (options.usesPgfplots) {
 		preamble.push('\\usepackage{pgfplots}');
@@ -231,6 +249,7 @@ function buildRenderPayload(
 		usetikzlibraryLines: string[];
 		pgfplotssetLines: string[];
 		extraPreamble?: string;
+		usesRtlMacros?: boolean;
 	},
 ): Pick<TikzJaxNormalizedInput, 'tex' | 'renderTex' | 'texPackages' | 'tikzLibraries' | 'addToPreamble'> {
 	const texPackages: Record<string, string> = {
@@ -243,6 +262,9 @@ function buildRenderPayload(
 	}
 
 	const addToPreambleParts: string[] = [];
+	if (options.usesRtlMacros) {
+		addToPreambleParts.push(TIKZJAX_RTL_FALLBACK_MACROS);
+	}
 	if (options.usesPgfplots) {
 		addToPreambleParts.push(...mergePgfplotssetLines(options.pgfplotssetLines));
 	}
@@ -261,11 +283,13 @@ function buildRenderPayload(
 	}
 	const tikzLibraries = [...new Set(libraryNames)].join(',');
 
+	const renderBody = options.usesRtlMacros ? sanitizeRtlMacroContentForTikzJax(body) : body;
+
 	return {
 		tex: buildStandaloneDocument(body, options),
 		renderTex: [
 			'\\begin{document}',
-			body.trim(),
+			renderBody.trim(),
 			'\\end{document}',
 		].join('\n'),
 		texPackages,
@@ -289,11 +313,13 @@ function processFullDocument(
 	const beginIndex = sanitized.indexOf(beginMarker);
 	if (beginIndex < 0) {
 		const usesPgfplots = sourceUsesPgfplots(sanitized);
+		const usesRtlMacros = sourceUsesRtlMacros(sanitized);
 		const payload = buildRenderPayload(sanitized, {
 			usesPgfplots,
 			usetikzlibraryLines: [],
 			pgfplotssetLines: [],
 			extraPreamble,
+			usesRtlMacros,
 		});
 		return {
 			displayTex: payload.tex,
@@ -337,6 +363,10 @@ function processFullDocument(
 	const extra = sanitizeTikzJaxPreamble(extraPreamble ?? '');
 	if (extra) {
 		preamble = `${preamble}\n${extra}`.trim();
+	}
+
+	if (sourceUsesRtlMacros(sanitized)) {
+		preamble = `${preamble}\n${TIKZJAX_RTL_FALLBACK_MACROS}`.trim();
 	}
 
 	const displayTex = [
@@ -390,35 +420,37 @@ export function normalizeForTikzJax(source: string, extraPreamble = ''): TikzJax
 	const tidied = tidyTikzSource(source);
 	const unicodeNormalized = normalizeUnicodeForTikzJax(tidied);
 	const withOhm = normalizeOhmCommands(unicodeNormalized);
-	const { text: withoutHebrewMacros, converted: hebrewConverted } = replaceHebrewMacros(withOhm);
+	const usesRtlMacros = sourceUsesRtlMacros(withOhm);
 
-	const usesPgfplots = sourceUsesPgfplots(withoutHebrewMacros);
-	const isAdvancedPgfplots = isAdvancedPgfplotsDiagram(withoutHebrewMacros);
+	const usesPgfplots = sourceUsesPgfplots(withOhm);
+	const isAdvancedPgfplots = isAdvancedPgfplotsDiagram(withOhm);
 
 	let mode: TikzJaxInputMode;
 	let payload: Pick<TikzJaxNormalizedInput, 'tex' | 'renderTex' | 'texPackages' | 'tikzLibraries' | 'addToPreamble'>;
 
 	if (/\\documentclass/.test(tidied) && /\\begin\{document\}/.test(tidied)) {
 		mode = 'full-document';
-		const processed = processFullDocument(withoutHebrewMacros, extraPreamble);
+		const processed = processFullDocument(withOhm, extraPreamble);
 		const renderPayload = buildRenderPayload(processed.body, {
 			usesPgfplots: processed.usesPgfplots,
 			usetikzlibraryLines: processed.usetikzlibraryLines,
 			pgfplotssetLines: processed.pgfplotssetLines,
 			extraPreamble,
+			usesRtlMacros,
 		});
 		payload = {
 			...renderPayload,
 			tex: processed.displayTex,
 		};
 	} else {
-		const prepared = prepareBody(withoutHebrewMacros);
+		const prepared = prepareBody(withOhm);
 		mode = prepared.mode;
 		payload = buildRenderPayload(prepared.body, {
 			usesPgfplots: usesPgfplots || sourceUsesPgfplots(prepared.body),
 			usetikzlibraryLines: prepared.usetikzlibraryLines,
 			pgfplotssetLines: prepared.pgfplotssetLines,
 			extraPreamble,
+			usesRtlMacros,
 		});
 	}
 
@@ -439,8 +471,8 @@ export function normalizeForTikzJax(source: string, extraPreamble = ''): TikzJax
 		mode,
 		usesPgfplots,
 		isAdvancedPgfplots,
-		hebrewNote: hebrewConverted
-			? 'Hebrew \\he{...} macros were converted to plain text. Use Local LuaLaTeX for full Hebrew support.'
+		hebrewNote: usesRtlMacros
+			? 'RTL \\he{...} and \\ar{...} macros use a limited TikZJax fallback. Use Local LuaLaTeX for real Hebrew or Arabic text shaping.'
 			: undefined,
 	};
 }

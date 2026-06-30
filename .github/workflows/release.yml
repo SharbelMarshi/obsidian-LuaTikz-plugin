@@ -29,31 +29,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Package optional manual-install ZIP
-        run: |
-          rm -rf release
-          mkdir -p release/tikzjax-tex
-          cp main.js release/main.js
-          cp tikzjax.js release/tikzjax.js
-          cp manifest.json release/manifest.json
-          cp styles.css release/styles.css
-          cp -R tikzjax-tex/. release/tikzjax-tex/
-          cd release
-          zip -r "../luatikz-${GITHUB_REF_NAME}.zip" .
-          cd ..
-
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             main.js
-            tikzjax.js
             manifest.json
             styles.css
-            tikzjax-tex/core.dump.gz
-            tikzjax-tex/tex.wasm.gz
-            tikzjax-tex/tex_files.tar.gz
-            tikzjax-tex/.luatikz-tex-hash
           show-summary: true
 
       - name: Create GitHub release
@@ -61,14 +43,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            main.js \
-            tikzjax.js \
-            manifest.json \
-            styles.css \
-            tikzjax-tex/core.dump.gz \
-            tikzjax-tex/tex.wasm.gz \
-            tikzjax-tex/tex_files.tar.gz \
-            tikzjax-tex/.luatikz-tex-hash \
-            "luatikz-${GITHUB_REF_NAME}.zip" \
+            main.js manifest.json styles.css \
             --title "LuaTikz ${GITHUB_REF_NAME}" \
             --generate-notes

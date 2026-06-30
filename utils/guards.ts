@@ -19,7 +19,9 @@ export function asNumber(value: unknown, fallback: number): number {
 }
 
 export function containsRtlText(text: string): boolean {
-	return /[\u0590-\u05FF\u0600-\u06FF]/.test(text);
+	const hebrew = /[\u0590-\u05FF]/;
+	const arabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+	return hebrew.test(text) || arabic.test(text);
 }
 
 export function getStringProperty(

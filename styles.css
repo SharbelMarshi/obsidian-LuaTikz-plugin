@@ -15,6 +15,105 @@
   }
 }
 
+/* --- Reading-view render blocks: one rounded card, no rectangular wrapper --- */
+
+.markdown-reading-view .block-language-tikz,
+.markdown-reading-view .block-language-luatikz,
+.markdown-preview-view .block-language-tikz,
+.markdown-preview-view .block-language-luatikz,
+.block-language-tikz:has(.tikzjax-hebrew-local-output),
+.block-language-luatikz:has(.tikzjax-hebrew-local-output),
+.block-language-tikz:has(.tikzjax-hebrew-local-block),
+.block-language-luatikz:has(.tikzjax-hebrew-local-block),
+.block-language-tikz:has(.tikzjax-hebrew-local-error),
+.block-language-luatikz:has(.tikzjax-hebrew-local-error) {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.tikzjax-hebrew-local-block.luatikz-output-card,
+.tikzjax-hebrew-local-output.luatikz-glass-card,
+.tikzjax-hebrew-local-error.luatikz-error-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 18px;
+  overflow: hidden;
+  background-clip: padding-box;
+  box-sizing: border-box;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12);
+}
+
+.tikzjax-hebrew-local-output.luatikz-glass-card {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9em;
+  backdrop-filter: none;
+}
+
+.tikzjax-hebrew-local-block.luatikz-output-card {
+  position: relative;
+  padding: 0;
+  backdrop-filter: none;
+}
+
+.tikzjax-hebrew-local-block.luatikz-output-card > *,
+.tikzjax-hebrew-local-output.luatikz-glass-card > * {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.tikzjax-hebrew-local-block .tikzjax-hebrew-local-output {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow-x: auto;
+  text-align: center;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.tikzjax-hebrew-local-block .luatikz-tikzjax-host {
+  background: transparent;
+}
+
+.block-language-tikz .edit-block-button,
+.block-language-luatikz .edit-block-button,
+.block-language-tikz .code-block-flair,
+.block-language-luatikz .code-block-flair,
+.block-language-tikz .clickable-icon,
+.block-language-luatikz .clickable-icon {
+  background: transparent;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.block-language-tikz .edit-block-button:hover,
+.block-language-luatikz .edit-block-button:hover,
+.block-language-tikz .code-block-flair:hover,
+.block-language-luatikz .code-block-flair:hover {
+  background: var(--background-modifier-hover);
+}
+
+.luatikz-glass-card::before,
+.luatikz-glass-card::after,
+.tikzjax-hebrew-local-block.luatikz-output-card::before,
+.tikzjax-hebrew-local-block.luatikz-output-card::after,
+.tikzjax-hebrew-local-output.luatikz-glass-card::before,
+.tikzjax-hebrew-local-output.luatikz-glass-card::after {
+  border-radius: inherit;
+}
+
+/* Settings / modals keep translucent glass; render cards use solid surfaces above. */
+.luatikz-settings .luatikz-glass-card,
+.luatikz-install-notice .luatikz-glass-card {
+  overflow: hidden;
+  background-clip: padding-box;
+}
+
 .luatikz-glass-header {
   margin-bottom: 16px;
 }
@@ -91,7 +190,9 @@
 }
 
 .luatikz-error-card {
-  border-radius: 16px;
+  border-radius: 18px;
+  overflow: hidden;
+  background-clip: padding-box;
 }
 
 .luatikz-install-notice {
@@ -176,18 +277,23 @@
   text-align: center;
 }
 
+/* Standalone output (outside block wrapper) uses card styling via .luatikz-glass-card. */
+.tikzjax-hebrew-local-output:not(.luatikz-glass-card) {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
 .tikzjax-hebrew-local-image {
   max-width: 100%;
   height: auto;
 }
 
 .tikzjax-hebrew-local-error {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 16px;
   padding: 12px 14px;
-  background: color-mix(in srgb, var(--background-secondary) 78%, transparent);
   color: var(--text-normal);
   font-size: 0.9em;
+  backdrop-filter: none;
 }
 
 .tikzjax-hebrew-local-error-title {
@@ -219,6 +325,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background-clip: padding-box;
   text-align: center;
   padding: 0;
   box-sizing: border-box;
@@ -241,6 +348,15 @@
   overflow: auto;
   padding: 0.75em;
   box-sizing: border-box;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.tikzjax-hebrew-local-inline-preview-body > * {
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .tikzjax-hebrew-local-inline-preview-output {

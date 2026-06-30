@@ -14,8 +14,7 @@ const defaultVault = path.join(
 const vaultBase = process.env.OBSIDIAN_VAULT ?? defaultVault;
 const destDir = path.join(vaultBase, '.obsidian', 'plugins', pluginId);
 
-const releaseFiles = ['main.js', 'tikzjax.js', 'manifest.json', 'styles.css'];
-const runtimeDir = path.join(projectRoot, 'tikzjax-tex');
+const releaseFiles = ['main.js', 'manifest.json', 'styles.css'];
 
 for (const fileName of releaseFiles) {
 	const sourcePath = path.join(projectRoot, fileName);
@@ -24,12 +23,6 @@ for (const fileName of releaseFiles) {
 		console.error('Run npm run build first.');
 		process.exit(1);
 	}
-}
-
-if (!fs.existsSync(runtimeDir)) {
-	console.error('Missing TikZJax runtime folder: tikzjax-tex/');
-	console.error('Run npm run build first.');
-	process.exit(1);
 }
 
 fs.mkdirSync(destDir, { recursive: true });
@@ -41,9 +34,5 @@ for (const fileName of releaseFiles) {
 	);
 }
 
-const destRuntimeDir = path.join(destDir, 'tikzjax-tex');
-fs.rmSync(destRuntimeDir, { recursive: true, force: true });
-fs.cpSync(runtimeDir, destRuntimeDir, { recursive: true });
-
 console.log(`Installed LuaTikz to ${destDir}`);
-console.log('Copied: main.js, tikzjax.js, manifest.json, styles.css, tikzjax-tex/');
+console.log('Copied: main.js, manifest.json, styles.css');

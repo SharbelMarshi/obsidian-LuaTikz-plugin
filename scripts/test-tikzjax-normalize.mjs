@@ -109,4 +109,16 @@ assert(normB.tex.includes('\\usepackage{pgfplots}'), 'Test B must include pgfplo
 assert(normB.usesPgfplots, 'Test B must flag pgfplots usage');
 assert(!normB.isAdvancedPgfplots, 'Test B must not flag advanced pgfplots');
 
+const rtlInput = String.raw`\begin{tikzpicture}
+\node at (0,0) {\he{עברית}};
+\node at (0,-1) {\ar{العربية}};
+\end{tikzpicture}`;
+
+const rtlNorm = normalizeForTikzJax(rtlInput);
+assert(rtlNorm.addToPreamble.includes('\\newcommand{\\he}[1]{#1}'), 'RTL test must include \\he fallback macro');
+assert(rtlNorm.addToPreamble.includes('\\newcommand{\\ar}[1]{#1}'), 'RTL test must include \\ar fallback macro');
+assert(rtlNorm.tex.includes('\\he{עברית}'), 'RTL test must preserve \\he macro in body');
+assert(rtlNorm.tex.includes('\\ar{العربية}'), 'RTL test must preserve \\ar macro in body');
+assert(rtlNorm.hebrewNote, 'RTL test must set fallback note');
+
 console.log('TikZJax normalization tests passed.');

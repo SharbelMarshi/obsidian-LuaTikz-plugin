@@ -10,11 +10,6 @@ import {
 import type { RenderRequest, RenderResult } from '../types';
 import { firstMapKey, isCallable, isRecord, asString } from '../utils/guards';
 import { finalizeTikzJaxSvg } from '../utils/tikzJaxSvgFix';
-import {
-	invokeTikzJaxLoadHook,
-	loadTikzJaxModule,
-	resetTikzJaxModuleCache,
-} from '../utils/tikzJaxLoader';
 import { ensureTikzJaxTexExtracted } from '../utils/tikzJaxTexRuntime';
 
 const CACHE_MAX = 32;
@@ -41,8 +36,16 @@ interface TikzJaxDebugInfo {
 }
 
 let renderQueue: Promise<unknown> = Promise.resolve();
+let tikzJaxModulePromise: Promise<unknown> | null = null;
 
 type ConsoleWriteFn = (...args: unknown[]) => void;
+
+async function loadTikzJaxModule(): Promise<unknown> {
+	if (tikzJaxModulePromise === null) {
+		tikzJaxModulePromise = import('node-tikzjax');
+	}
+	return tikzJaxModulePromise;
+}
 
 function runExclusive<T>(task: () => Promise<T>): Promise<T> {
 	const next = renderQueue.then(task, task);
@@ -167,7 +170,7 @@ export class TikzJaxRenderer {
 		this.loadErrorLog = null;
 		this.texDir = null;
 		this.loadPromise = null;
-		resetTikzJaxModuleCache();
+		tikzJaxModulePromise = null;
 	}
 
 	private async ensureLoaded(): Promise<Tex2SvgFn | null> {
@@ -198,8 +201,13 @@ export class TikzJaxRenderer {
 
 			this.texDir = texResult.texDir;
 
-			const moduleValue = await loadTikzJaxModule(this.app, this.pluginId);
-			await invokeTikzJaxLoadHook(moduleValue);
+			const moduleValue = await loadTikzJaxModule();
+			if (isRecord(moduleValue)) {
+				const load = moduleValue.load;
+				if (isCallable(load)) {
+					await load();
+				}
+			}
 
 			const exportValue = isRecord(moduleValue)
 				? moduleValue.default ?? moduleValue

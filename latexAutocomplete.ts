@@ -104,6 +104,11 @@ const latexCommands: Completion[] = [
     type: "function",
     detail: "Hebrew text wrapper",
   }),
+  snippetCompletion(String.raw`\ar\{\${}\}`, {
+    label: "\\ar{}",
+    type: "function",
+    detail: "Arabic text wrapper",
+  }),
   snippetCompletion(String.raw`\text\{\${}\}`, {
     label: "\\text{}",
     type: "function",
