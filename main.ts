@@ -132,7 +132,7 @@ export default class LuaTikzPlugin extends Plugin {
 				try {
 					const cleaned = tidyTikzSource(source);
 					if (!cleaned.trim()) {
-						showTikzError(el, 'Nothing to render.', undefined, undefined, cleaned, this.settings);
+						showTikzError(el, 'Nothing to render.', undefined, undefined, cleaned);
 						return;
 					}
 
@@ -154,14 +154,13 @@ export default class LuaTikzPlugin extends Plugin {
 							result.rawLog,
 							retry,
 							cleaned,
-							this.settings,
 						);
 						return;
 					}
 
 					renderTikzDiagram(el, result, cleaned, this.settings);
 				} catch (err) {
-					showTikzError(el, 'Render failed.', formatExecError(err), undefined, source, this.settings);
+					showTikzError(el, 'Render failed.', formatExecError(err), undefined, source);
 				}
 			};
 

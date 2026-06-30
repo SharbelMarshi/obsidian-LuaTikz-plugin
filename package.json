@@ -1,6 +1,6 @@
 {
 	"name": "luatikz",
-	"version": "1.3.4",
+	"version": "1.3.5",
 	"description": "Render TikZ diagrams in Obsidian using local LuaLaTeX with Hebrew support",
 	"main": "main.js",
 	"scripts": {

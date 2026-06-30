@@ -5,7 +5,6 @@ export interface LuaTikzSettings {
 	lualatexPath: string;
 	enableLocalShellRenderer: boolean;
 	showInstallNotice: boolean;
-	enableClipboardCopy: boolean;
 	outputFormat: 'svg' | 'png';
 	timeoutMs: number;
 	cacheEnabled: boolean;
@@ -18,7 +17,6 @@ export const DEFAULT_SETTINGS: LuaTikzSettings = {
 	lualatexPath: '/Library/TeX/texbin/lualatex',
 	enableLocalShellRenderer: true,
 	showInstallNotice: true,
-	enableClipboardCopy: false,
 	outputFormat: 'svg',
 	timeoutMs: 15000,
 	cacheEnabled: true,

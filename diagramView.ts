@@ -1,7 +1,6 @@
 import { Notice } from 'obsidian';
 import type { LuaTikzSettings } from './settingsModel';
 import type { RenderImageResult } from './types';
-import { writeClipboardText } from './utils/clipboard';
 import { applyRtlToContainer } from './utils/rtl';
 
 function downloadSvg(
@@ -28,7 +27,6 @@ export function appendTikzError(
 	onRetry?: () => void,
 	extraCls?: string,
 	source?: string,
-	settings?: LuaTikzSettings,
 ): void {
 	const cls = extraCls
 		? `tikzjax-hebrew-local-error luatikz-error-card ${extraCls}`
@@ -64,22 +62,6 @@ export function appendTikzError(
 		return;
 	}
 
-	const copyButton = buttonRow.createEl('button', {
-		text: 'Copy error',
-		cls: 'tikzjax-hebrew-local-error-button luatikz-soft-button',
-	});
-
-	copyButton.addEventListener('click', () => {
-		if (!settings) {
-			return;
-		}
-		void writeClipboardText(details, settings).then((ok) => {
-			if (ok) {
-				new Notice('Error copied.');
-			}
-		});
-	});
-
 	const toggleButton = buttonRow.createEl('button', {
 		text: 'Show log',
 		cls: 'tikzjax-hebrew-local-error-button luatikz-soft-button',
@@ -105,10 +87,9 @@ export function showTikzError(
 	details?: string,
 	onRetry?: () => void,
 	source?: string,
-	settings?: LuaTikzSettings,
 ): void {
 	el.empty();
-	appendTikzError(el, message, details, onRetry, undefined, source, settings);
+	appendTikzError(el, message, details, onRetry, undefined, source);
 }
 
 export function renderTikzDiagram(
@@ -138,20 +119,6 @@ export function renderTikzDiagram(
 			new Notice('SVG exported.');
 		}
 	});
-
-	if (svgText) {
-		const copyButton = toolbar.createEl('button', {
-			text: 'Copy SVG',
-			cls: 'tikzjax-hebrew-local-toolbar-button luatikz-soft-button',
-		});
-		copyButton.addEventListener('click', () => {
-			void writeClipboardText(svgText, settings).then((ok) => {
-				if (ok) {
-					new Notice('SVG copied.');
-				}
-			});
-		});
-	}
 
 	const container = block.createDiv({ cls: 'tikzjax-hebrew-local-output' });
 	applyRtlToContainer(container, source);

@@ -14,7 +14,7 @@ Render `tikz` and `luatikz` code blocks in Obsidian using **local LuaLaTeX** (re
 
 **Built-in helpers.** Short macros for quick diagrams — `\Circle`, `\Arrow`, `\Rect`, logic gates (`\ANDgate`, `\NOTgate`, …), wires, and basic circuit symbols. Autocomplete inside `tikz` blocks suggests TikZ commands, helpers, and snippets.
 
-**Export.** Rendered blocks get *Export SVG* and *Copy SVG* buttons on hover (clipboard copy is opt-in in settings).
+**Export.** Rendered blocks get an *Export SVG* button on hover. LuaTikz does not read or write the system clipboard.
 
 **RTL text.** Use `\he{...}` for Hebrew and `\ar{...}` for Arabic labels in mixed RTL/LTR diagrams. RTL layout is applied automatically when Hebrew or Arabic is detected.
 
@@ -128,7 +128,6 @@ The `luatikz` fence alias works the same way:
 - **Renderer** — Local LuaLaTeX (recommended) or TikZJax
 - **Allow local LuaLaTeX execution** — explicit opt-in for shell rendering
 - **Enable cache** — reuse recent render results
-- **Enable clipboard copy actions** — off by default
 
 Live preview is available from the command palette: *Toggle inline live preview*.
 

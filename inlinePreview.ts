@@ -346,7 +346,6 @@ export class InlinePreviewManager {
 			onRetry,
 			'tikzjax-hebrew-local-inline-preview-error',
 			source,
-			this.getSettings(),
 		);
 	}
 

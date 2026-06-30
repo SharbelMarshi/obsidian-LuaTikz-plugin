@@ -31,10 +31,6 @@ export function parseSettings(data: unknown): Partial<LuaTikzSettings> {
 		DEFAULT_SETTINGS.enableLocalShellRenderer,
 	);
 	parsed.showInstallNotice = asBoolean(data.showInstallNotice, DEFAULT_SETTINGS.showInstallNotice);
-	parsed.enableClipboardCopy = asBoolean(
-		data.enableClipboardCopy,
-		DEFAULT_SETTINGS.enableClipboardCopy,
-	);
 	const outputFormat = parseOutputFormat(data.outputFormat);
 	if (outputFormat) {
 		parsed.outputFormat = outputFormat;
@@ -138,20 +134,6 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 					this.plugin.renderer.clearCache();
 					new Notice('LuaTikz cache cleared.');
 				}));
-
-		const clipboardSection = containerEl.createDiv({ cls: 'luatikz-glass-section luatikz-glass-card' });
-		new Setting(clipboardSection)
-			.setName('Clipboard')
-			.setHeading();
-
-		new Setting(clipboardSection)
-			.setName('Enable clipboard copy actions')
-			.setDesc('Copy actions write rendered output to the clipboard. The plugin does not read from the clipboard.')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enableClipboardCopy)
-				.onChange(async value => {
-					await this.persistSetting('enableClipboardCopy', value);
-				}));
 	}
 
 	private async persistSetting(key: string, value: unknown): Promise<void> {
@@ -177,7 +159,6 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 		} else if (
 			settingKey === 'enableLocalShellRenderer'
 			|| settingKey === 'showInstallNotice'
-			|| settingKey === 'enableClipboardCopy'
 			|| settingKey === 'cacheEnabled'
 			|| settingKey === 'inlineLivePreviewEnabledByDefault'
 		) {

@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-1.3.4}"
+VERSION="${1:-1.3.5}"
 ZIP_NAME="luatikz-${VERSION}.zip"
 
 npm run build
@@ -29,7 +29,7 @@ TikZJax is bundled into main.js — no vendor folder is required.
 - Local LuaLaTeX engine (recommended) with opt-in shell execution
 - TikZJax renderer bundled for shell-free rendering
 - One-time renderer installation notice
-- RTL support for Hebrew and Arabic, Liquid Glass UI, opt-in clipboard copy
+- RTL support for Hebrew and Arabic and Liquid Glass UI
 EOF
 )"
 

@@ -41,11 +41,12 @@ const isNonEmptyString = (value: unknown): value is string =>
 	typeof value === 'string' && value.length > 0;
 
 const getBundledTikzJaxAssetHash = (): string => {
-	const hash = TIKZJAX_TEX_ASSET_HASH;
-	if (!isNonEmptyString(hash)) {
+	const rawHash: unknown = TIKZJAX_TEX_ASSET_HASH;
+	if (!isNonEmptyString(rawHash)) {
 		throw new Error('Invalid TikZJax asset hash.');
 	}
-	return hash;
+	const assetHash: string = rawHash;
+	return assetHash;
 };
 
 const normalizeAsset = (raw: unknown): TikzJaxBundledAsset => {
