@@ -15,69 +15,105 @@
   }
 }
 
-/* --- Reading-view render blocks: one rounded card, no rectangular wrapper --- */
+/* --- Reading-view render blocks: frameless finished output --- */
 
 .markdown-reading-view .block-language-tikz,
 .markdown-reading-view .block-language-luatikz,
 .markdown-preview-view .block-language-tikz,
 .markdown-preview-view .block-language-luatikz,
+.markdown-rendered .block-language-tikz,
+.markdown-rendered .block-language-luatikz,
 .block-language-tikz:has(.tikzjax-hebrew-local-output),
 .block-language-luatikz:has(.tikzjax-hebrew-local-output),
 .block-language-tikz:has(.tikzjax-hebrew-local-block),
 .block-language-luatikz:has(.tikzjax-hebrew-local-block),
 .block-language-tikz:has(.tikzjax-hebrew-local-error),
 .block-language-luatikz:has(.tikzjax-hebrew-local-error) {
-  background: transparent;
-  border: none;
-  box-shadow: none;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
   padding: 0;
 }
 
+/* Finished diagram: no card, border, or panel */
 .tikzjax-hebrew-local-block.luatikz-output-card,
-.tikzjax-hebrew-local-output.luatikz-glass-card,
-.tikzjax-hebrew-local-error.luatikz-error-card {
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 18px;
-  overflow: hidden;
-  background-clip: padding-box;
-  box-sizing: border-box;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12);
-}
-
-.tikzjax-hebrew-local-output.luatikz-glass-card {
-  padding: 16px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 0.9em;
-  backdrop-filter: none;
+.tikzjax-hebrew-local-output.luatikz-output-card,
+.tikzjax-hebrew-local-block,
+.tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card),
+.tikzjax-hebrew-local-block:not(.luatikz-error-card) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
 }
 
 .tikzjax-hebrew-local-block.luatikz-output-card {
   position: relative;
   padding: 0;
+  overflow: visible;
   backdrop-filter: none;
 }
 
-.tikzjax-hebrew-local-block.luatikz-output-card > *,
-.tikzjax-hebrew-local-output.luatikz-glass-card > * {
-  background: transparent;
-  border: none;
+/* Loading placeholder: subtle background/border for readability */
+.tikzjax-hebrew-local-output.luatikz-glass-card {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 18px;
+  overflow: hidden;
+  background-clip: padding-box;
+  box-sizing: border-box;
   box-shadow: none;
+  backdrop-filter: none;
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+/* Error cards stay readable */
+.tikzjax-hebrew-local-error.luatikz-error-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background-clip: padding-box;
+  box-sizing: border-box;
+  box-shadow: none;
+}
+
+.tikzjax-hebrew-local-image,
+.tikzjax-hebrew-local-svg,
+.luatikz-tikzjax-host,
+.tikzjax-hebrew-local-output svg,
+.tikzjax-hebrew-local-block svg,
+.luatikz-tikzjax-host svg {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.tikzjax-hebrew-local-output > *,
+.tikzjax-hebrew-local-block > *,
+.block-language-tikz .luatikz-output-card > *,
+.block-language-luatikz .luatikz-output-card > *,
+.block-language-tikz .tikzjax-hebrew-local-output.luatikz-glass-card > *,
+.block-language-luatikz .tikzjax-hebrew-local-output.luatikz-glass-card > * {
+  background-color: transparent;
 }
 
 .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output {
-  background: transparent;
-  border: none;
-  box-shadow: none;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
   overflow-x: auto;
   text-align: center;
-  padding: 12px;
+  padding: 0;
   box-sizing: border-box;
-}
-
-.tikzjax-hebrew-local-block .luatikz-tikzjax-host {
-  background: transparent;
 }
 
 .block-language-tikz .edit-block-button,
@@ -98,16 +134,12 @@
   background: var(--background-modifier-hover);
 }
 
-.luatikz-glass-card::before,
-.luatikz-glass-card::after,
-.tikzjax-hebrew-local-block.luatikz-output-card::before,
-.tikzjax-hebrew-local-block.luatikz-output-card::after,
 .tikzjax-hebrew-local-output.luatikz-glass-card::before,
 .tikzjax-hebrew-local-output.luatikz-glass-card::after {
   border-radius: inherit;
 }
 
-/* Settings / modals keep translucent glass; render cards use solid surfaces above. */
+/* Settings / modals keep translucent glass styling. */
 .luatikz-settings .luatikz-glass-card,
 .luatikz-install-notice .luatikz-glass-card {
   overflow: hidden;
@@ -189,8 +221,17 @@
   margin: 1em 0;
 }
 
+.markdown-reading-view .luatikz-output-card,
+.markdown-preview-view .luatikz-output-card,
+.markdown-rendered .luatikz-output-card {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
+}
+
 .luatikz-error-card {
-  border-radius: 18px;
   overflow: hidden;
   background-clip: padding-box;
 }
@@ -214,9 +255,24 @@
   border-top: none;
 }
 
+.block-language-tikz img.tikzjax-hebrew-local-image,
+.block-language-luatikz img.tikzjax-hebrew-local-image,
+.block-language-tikz .luatikz-tikzjax-host,
+.block-language-luatikz .luatikz-tikzjax-host {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
+}
+
 .luatikz-tikzjax-host svg {
   max-width: 100%;
   height: auto;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 .luatikz-rtl {
@@ -232,6 +288,11 @@
 .tikzjax-hebrew-local-block {
   margin: 1em 0;
   position: relative;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
 }
 
 .tikzjax-hebrew-local-toolbar {
@@ -277,16 +338,22 @@
   text-align: center;
 }
 
-/* Standalone output (outside block wrapper) uses card styling via .luatikz-glass-card. */
-.tikzjax-hebrew-local-output:not(.luatikz-glass-card) {
-  background: transparent;
-  border: none;
-  box-shadow: none;
+/* Finished output only; loading uses .luatikz-glass-card styling above. */
+.tikzjax-hebrew-local-output:not(.luatikz-glass-card):not(.luatikz-error-card) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
 }
 
 .tikzjax-hebrew-local-image {
   max-width: 100%;
   height: auto;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 .tikzjax-hebrew-local-error {

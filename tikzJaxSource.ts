@@ -119,6 +119,29 @@ function normalizeOhmCommands(source: string): string {
 	return source.replace(/\\ohm\b/g, '\\Omega ');
 }
 
+/** Disable TeX ligatures in plain \\node{...} labels for TikZJax text output. */
+export function disableTikzJaxLigaturesInPlainText(source: string): string {
+	return source.replace(
+		/\\node(?:\[[^\]]*\])?(?:\s+at\s*\([^)]*\))?\s*\{([^{}]*)\}/g,
+		(match, text: string) => {
+			if (/\\/.test(text) || /\$/.test(text)) {
+				return match;
+			}
+			let sanitized = text;
+			sanitized = sanitized.replace(/ffl/g, 'f{}f{}l');
+			sanitized = sanitized.replace(/ffi/g, 'f{}f{}i');
+			sanitized = sanitized.replace(/ff/g, 'f{}f');
+			sanitized = sanitized.replace(/Fl/g, 'F{}l');
+			sanitized = sanitized.replace(/fi/g, 'f{}i');
+			sanitized = sanitized.replace(/fl/g, 'f{}l');
+			if (sanitized === text) {
+				return match;
+			}
+			return match.replace(text, sanitized);
+		},
+	);
+}
+
 export function sanitizeTikzJaxPreamble(preamble: string): string {
 	const trimmed = preamble.trim();
 	if (!trimmed) {
@@ -420,17 +443,18 @@ export function normalizeForTikzJax(source: string, extraPreamble = ''): TikzJax
 	const tidied = tidyTikzSource(source);
 	const unicodeNormalized = normalizeUnicodeForTikzJax(tidied);
 	const withOhm = normalizeOhmCommands(unicodeNormalized);
-	const usesRtlMacros = sourceUsesRtlMacros(withOhm);
+	const ligatureSafe = disableTikzJaxLigaturesInPlainText(withOhm);
+	const usesRtlMacros = sourceUsesRtlMacros(ligatureSafe);
 
-	const usesPgfplots = sourceUsesPgfplots(withOhm);
-	const isAdvancedPgfplots = isAdvancedPgfplotsDiagram(withOhm);
+	const usesPgfplots = sourceUsesPgfplots(ligatureSafe);
+	const isAdvancedPgfplots = isAdvancedPgfplotsDiagram(ligatureSafe);
 
 	let mode: TikzJaxInputMode;
 	let payload: Pick<TikzJaxNormalizedInput, 'tex' | 'renderTex' | 'texPackages' | 'tikzLibraries' | 'addToPreamble'>;
 
 	if (/\\documentclass/.test(tidied) && /\\begin\{document\}/.test(tidied)) {
 		mode = 'full-document';
-		const processed = processFullDocument(withOhm, extraPreamble);
+		const processed = processFullDocument(ligatureSafe, extraPreamble);
 		const renderPayload = buildRenderPayload(processed.body, {
 			usesPgfplots: processed.usesPgfplots,
 			usetikzlibraryLines: processed.usetikzlibraryLines,
@@ -443,7 +467,7 @@ export function normalizeForTikzJax(source: string, extraPreamble = ''): TikzJax
 			tex: processed.displayTex,
 		};
 	} else {
-		const prepared = prepareBody(withOhm);
+		const prepared = prepareBody(ligatureSafe);
 		mode = prepared.mode;
 		payload = buildRenderPayload(prepared.body, {
 			usesPgfplots: usesPgfplots || sourceUsesPgfplots(prepared.body),

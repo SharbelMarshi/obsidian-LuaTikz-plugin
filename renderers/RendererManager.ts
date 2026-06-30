@@ -4,6 +4,7 @@ import type { RenderErrorContext, RenderImageResult, RenderRequest, RenderResult
 import { renderResultToImageResult } from '../types';
 import { LuaLatexRenderer } from './LuaLatexRenderer';
 import { TikzJaxRenderer } from './TikzJaxRenderer';
+import { ARABIC_REQUIRES_LUALATEX_ERROR, resolveTikzJaxDispatch } from '../utils/renderRouting';
 
 export class RendererManager {
 	private luaLatexRenderer: LuaLatexRenderer;
@@ -81,6 +82,17 @@ export class RendererManager {
 
 	private dispatch(request: RenderRequest): Promise<RenderResult> {
 		if (request.settings.renderEngine === 'tikzjax') {
+			const route = resolveTikzJaxDispatch(request.normalizedSource, request.settings);
+			if (route === 'lualatex-fallback') {
+				return this.luaLatexRenderer.render(request);
+			}
+			if (route === 'arabic-error') {
+				return Promise.resolve({
+					ok: false,
+					engine: 'tikzjax',
+					error: ARABIC_REQUIRES_LUALATEX_ERROR,
+				});
+			}
 			return this.tikzJaxRenderer.render(request);
 		}
 		return this.luaLatexRenderer.render(request);

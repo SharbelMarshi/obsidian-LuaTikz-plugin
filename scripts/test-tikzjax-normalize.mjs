@@ -109,16 +109,24 @@ assert(normB.tex.includes('\\usepackage{pgfplots}'), 'Test B must include pgfplo
 assert(normB.usesPgfplots, 'Test B must flag pgfplots usage');
 assert(!normB.isAdvancedPgfplots, 'Test B must not flag advanced pgfplots');
 
+const englishNorm = normalizeForTikzJax(String.raw`\begin{tikzpicture}
+\node {Flow};
+\node at (0,-1) {Anatomy};
+\node at (0,-2) {Airflow Path};
+\node at (0,-3) {Signal Flow};
+\end{tikzpicture}`);
+assert(englishNorm.tex.includes('Airf{}low'), 'English test must disable fl ligature in Airflow');
+assert(englishNorm.tex.includes('F{}low'), 'English test must disable Fl ligature in Flow');
+assert(englishNorm.tex.includes('Signal F{}low'), 'English test must preserve Signal Flow label with Fl fix');
+
 const rtlInput = String.raw`\begin{tikzpicture}
 \node at (0,0) {\he{עברית}};
-\node at (0,-1) {\ar{العربية}};
 \end{tikzpicture}`;
 
 const rtlNorm = normalizeForTikzJax(rtlInput);
 assert(rtlNorm.addToPreamble.includes('\\newcommand{\\he}[1]{#1}'), 'RTL test must include \\he fallback macro');
 assert(rtlNorm.addToPreamble.includes('\\newcommand{\\ar}[1]{#1}'), 'RTL test must include \\ar fallback macro');
 assert(rtlNorm.tex.includes('\\he{עברית}'), 'RTL test must preserve \\he macro in body');
-assert(rtlNorm.tex.includes('\\ar{العربية}'), 'RTL test must preserve \\ar macro in body');
 assert(rtlNorm.hebrewNote, 'RTL test must set fallback note');
 
 console.log('TikZJax normalization tests passed.');

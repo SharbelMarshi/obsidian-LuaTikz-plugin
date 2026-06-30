@@ -68,10 +68,6 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 		new Setting(rendererSection)
 			.setName('Renderer')
 			.setHeading();
-		rendererSection.createEl('p', {
-			cls: 'luatikz-muted',
-			text: 'Local LuaLaTeX is recommended for full package support. TikZJax avoids shell execution but supports fewer packages.',
-		});
 		this.rendererChoicesContainer = rendererSection;
 		this.renderRendererChoices(rendererSection);
 

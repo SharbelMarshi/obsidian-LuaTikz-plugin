@@ -18,10 +18,10 @@ export function asNumber(value: unknown, fallback: number): number {
 	return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+import { containsRtl } from './rtlDetection';
+
 export function containsRtlText(text: string): boolean {
-	const hebrew = /[\u0590-\u05FF]/;
-	const arabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
-	return hebrew.test(text) || arabic.test(text);
+	return containsRtl(text);
 }
 
 export function getStringProperty(

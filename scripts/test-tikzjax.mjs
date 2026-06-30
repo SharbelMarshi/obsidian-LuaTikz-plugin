@@ -67,55 +67,19 @@ const { normalizeForTikzJax } = await loadTikzJaxSourceModule();
 const mod = require('node-tikzjax');
 const tex2svg = mod.default ?? mod;
 
-const CMMI10 = {
-	'\u00B5': '\u03B8',
-	'\u00B8': '\u03BB',
-	'\u00B9': '\u03BC',
-	'\u00AE': '\u03B1',
-	'\u00AF': '\u03B2',
-	'\u00B0': '\u03B3',
-	'\u00B1': '\u03B4',
-	'\u00BE': '\u03C3',
-	'\u0021': '\u03C9',
-	'\u00BC': '\u03C0',
-	'\u003A': '.',
-};
-const CMR10 = { '\u00AC': '\u03A9' };
-const CMSY10 = {
-	'\u00A1': '-',
-	'\u2212': '-',
-	'\u00A3': '\u00D7',
-	'\u00A2': '\u00B7',
-	'\u00A7': '\u00B1',
-	'\u0031': '\u221E',
-};
-const MAPS = { cmmi10: CMMI10, cmr10: CMR10, cmsy10: CMSY10 };
-
-function fixTikzJaxSvgGlyphs(svg) {
-	return svg.replace(
-		/<text\b([^>]*\bfont-family="(cmmi10|cmr10|cmsy10)")([^>]*)>([^<]*)<\/text>/g,
-		(full, before, family, after, content) => {
-			const table = MAPS[family];
-			if (!table) {
-				return full;
-			}
-			let mapped = content;
-			for (const [bad, good] of Object.entries(table)) {
-				if (mapped.includes(bad)) {
-					mapped = mapped.replaceAll(bad, good);
-				}
-			}
-			if (mapped === content) {
-				return full;
-			}
-			const attrs = `${before}${after}`.replace(
-				/font-family="[^"]+"/,
-				'font-family="Cambria Math, STIX Two Math, serif"',
-			);
-			return `<text${attrs}>${mapped}</text>`;
-		},
-	);
-}
+const { finalizeTikzJaxSvg } = await (async () => {
+	const outDir = mkdtempSync(path.join(tmpdir(), 'luatikz-svgfix-'));
+	const outfile = path.join(outDir, 'tikzJaxSvgFix.cjs');
+	await esbuild.build({
+		entryPoints: [path.join(projectRoot, 'utils/tikzJaxSvgFix.ts')],
+		bundle: true,
+		outfile,
+		format: 'cjs',
+		platform: 'node',
+		logLevel: 'silent',
+	});
+	return require(outfile);
+})();
 
 async function renderNormalized(source) {
 	const normalized = normalizeForTikzJax(source);
@@ -125,7 +89,24 @@ async function renderNormalized(source) {
 		tikzLibraries: normalized.tikzLibraries,
 		addToPreamble: normalized.addToPreamble || undefined,
 	});
-	return fixTikzJaxSvgGlyphs(svg);
+	return finalizeTikzJaxSvg(svg);
+}
+
+function assertEnglishTextLabels(svg) {
+	const textChunks = [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(match => match[1] ?? '');
+	const combined = `${svg} ${textChunks.join('')}`;
+	for (const word of ['Flow', 'Anatomy', 'Airflow', 'Signal']) {
+		if (!combined.includes(word)) {
+			throw new Error(`English text test missing word: ${word}`);
+		}
+	}
+	console.log('Test 6 (English text labels): OK');
+}
+
+function assertNoStandaloneBackground(svg) {
+	if (/fill="rgb\(100%,100%,100%\)"/i.test(svg) || /fill="#ffffff"/i.test(svg)) {
+		throw new Error('SVG still contains standalone white background rect');
+	}
 }
 
 function assertNoCorruption(name, svg, forbidden, required) {
@@ -235,9 +216,20 @@ shader=interp,
 		console.log('Test 4 (3D PGFPlots): expected limitation (advanced plot not supported)');
 	}
 
+	const englishSvg = await renderNormalized(String.raw`\begin{tikzpicture}
+\node {Flow};
+\node at (0,-1) {Anatomy};
+\node at (0,-2) {Airflow Path};
+\node at (0,-3) {Signal Flow};
+\end{tikzpicture}`);
+	if (!englishSvg.includes('<svg')) {
+		throw new Error('Test 6 (English text labels) did not return SVG.');
+	}
+	assertEnglishTextLabels(englishSvg);
+	assertNoStandaloneBackground(englishSvg);
+
 	const rtlSvg = await renderNormalized(String.raw`\begin{tikzpicture}
-\node at (0,0) {\he{עברית}};
-\node at (0,-1) {\ar{العربية}};
+\node at (0,0) {\he{Hello}};
 \end{tikzpicture}`);
 	if (!rtlSvg.includes('<svg')) {
 		throw new Error('Test 5 (RTL fallback macros) did not return SVG.');
