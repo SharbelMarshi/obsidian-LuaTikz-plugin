@@ -44,44 +44,60 @@ const tikzjaxBootstrapPatch = {
 
 const externalBuiltins = builtinModules.filter(name => name !== 'punycode');
 
-esbuild.build({
-	banner: {
-		js: banner,
-	},
-	entryPoints: ['main.ts'],
+const obsidianExternals = [
+	'obsidian',
+	'electron',
+	'@codemirror/autocomplete',
+	'@codemirror/closebrackets',
+	'@codemirror/collab',
+	'@codemirror/commands',
+	'@codemirror/comment',
+	'@codemirror/fold',
+	'@codemirror/gutter',
+	'@codemirror/highlight',
+	'@codemirror/history',
+	'@codemirror/language',
+	'@codemirror/lint',
+	'@codemirror/matchbrackets',
+	'@codemirror/panel',
+	'@codemirror/rangeset',
+	'@codemirror/rectangular-selection',
+	'@codemirror/search',
+	'@codemirror/state',
+	'@codemirror/stream-parser',
+	'@codemirror/text',
+	'@codemirror/tooltip',
+	'@codemirror/view',
+	...externalBuiltins,
+];
+
+const buildOptions = {
+	banner: { js: banner },
 	bundle: true,
 	plugins: [punycodeAliasPlugin, tikzjaxBootstrapPatch],
-	external: [
-		'obsidian',
-		'electron',
-		'@codemirror/autocomplete',
-		'@codemirror/closebrackets',
-		'@codemirror/collab',
-		'@codemirror/commands',
-		'@codemirror/comment',
-		'@codemirror/fold',
-		'@codemirror/gutter',
-		'@codemirror/highlight',
-		'@codemirror/history',
-		'@codemirror/language',
-		'@codemirror/lint',
-		'@codemirror/matchbrackets',
-		'@codemirror/panel',
-		'@codemirror/rangeset',
-		'@codemirror/rectangular-selection',
-		'@codemirror/search',
-		'@codemirror/state',
-		'@codemirror/stream-parser',
-		'@codemirror/text',
-		'@codemirror/tooltip',
-		'@codemirror/view',
-		...externalBuiltins],
 	format: 'cjs',
-	watch: !prod,
 	target: 'es2020',
 	logLevel: "info",
-	sourcemap: prod ? false : 'inline',
 	treeShaking: true,
-	outfile: 'main.js',
 	platform: 'node',
-}).catch(() => process.exit(1));
+};
+
+async function buildAll() {
+	await esbuild.build({
+		...buildOptions,
+		entryPoints: ['main.ts'],
+		external: [...obsidianExternals, 'node-tikzjax'],
+		sourcemap: prod ? false : 'inline',
+		outfile: 'main.js',
+	});
+
+	await esbuild.build({
+		...buildOptions,
+		entryPoints: ['node_modules/node-tikzjax/dist/index.js'],
+		minify: prod,
+		sourcemap: false,
+		outfile: 'tikzjax.js',
+	});
+}
+
+buildAll().catch(() => process.exit(1));

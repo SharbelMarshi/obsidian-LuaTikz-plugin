@@ -4,14 +4,24 @@ import * as path from 'path';
 import type { App } from 'obsidian';
 import {
 	TIKZJAX_TEX_ASSET_HASH,
-	TIKZJAX_TEX_ASSETS_BASE64,
+	TIKZJAX_TEX_RUNTIME_DIR,
+	TIKZJAX_TEX_RUNTIME_FILES,
+	type TikzJaxTexRuntimeFile,
 } from '../generated/tikzjaxTexAssets';
-import { getDesktopFsPath, getPluginTempDir, ensureAdapterFolderExists } from '../pluginPaths';
+import {
+	getDesktopFsPath,
+	getPluginFsDir,
+	getPluginTempDir,
+	ensureAdapterFolderExists,
+} from '../pluginPaths';
 import { setTikzJaxTexDir } from './tikzJaxGlobal';
 
 const TEX_SUBDIR = 'tikzjax-tex';
 const HASH_FILE = '.luatikz-tex-hash';
-const TIKZJAX_TEX_ASSETS: Record<string, string> = TIKZJAX_TEX_ASSETS_BASE64;
+
+function isTikzJaxTexRuntimeFile(value: string): value is TikzJaxTexRuntimeFile {
+	return (TIKZJAX_TEX_RUNTIME_FILES as readonly string[]).includes(value);
+}
 
 function safeJoin(baseDir: string, relativePath: string): string {
 	const normalized = relativePath.replace(/\\/g, '/');
@@ -26,21 +36,74 @@ function safeJoin(baseDir: string, relativePath: string): string {
 	return path.join(baseDir, normalized);
 }
 
-export function getTikzJaxTexFileNames(): string[] {
-	return Object.keys(TIKZJAX_TEX_ASSETS);
+function readAssetHashFile(hashPath: string): string | null {
+	if (!fs.existsSync(hashPath)) {
+		return null;
+	}
+
+	try {
+		const storedHash = fs.readFileSync(hashPath, 'utf8').trim();
+		return storedHash.length > 0 ? storedHash : null;
+	} catch {
+		return null;
+	}
 }
 
-export function writeBundledTikzJaxTexToDir(texDir: string): void {
-	fs.mkdirSync(texDir, { recursive: true });
+export function getTikzJaxTexFileNames(): readonly TikzJaxTexRuntimeFile[] {
+	return TIKZJAX_TEX_RUNTIME_FILES;
+}
 
-	for (const fileName of Object.keys(TIKZJAX_TEX_ASSETS)) {
-		const encoded = TIKZJAX_TEX_ASSETS[fileName];
-		if (typeof encoded !== 'string') {
+function resolveBundledRuntimeDir(expectedHash: string): string | null {
+	const candidate = path.join(process.cwd(), TIKZJAX_TEX_RUNTIME_DIR);
+	if (hasRuntimeFilesAt(candidate, expectedHash)) {
+		return candidate;
+	}
+
+	return null;
+}
+
+function hasRuntimeFilesAt(runtimeDir: string, expectedHash: string): boolean {
+	return runtimeDirIsCurrent(runtimeDir, expectedHash);
+}
+
+function resolveInstalledRuntimeDir(app: App, pluginId: string, expectedHash: string): string | null {
+	const pluginDir = getPluginFsDir(app, pluginId);
+	if (!pluginDir) {
+		return null;
+	}
+
+	const packagedDir = path.join(pluginDir, TIKZJAX_TEX_RUNTIME_DIR);
+	if (hasRuntimeFilesAt(packagedDir, expectedHash)) {
+		return packagedDir;
+	}
+
+	if (hasRuntimeFilesAt(pluginDir, expectedHash)) {
+		return pluginDir;
+	}
+
+	return null;
+}
+
+function runtimeDirIsCurrent(runtimeDir: string, expectedHash: string): boolean {
+	const storedHash = readAssetHashFile(path.join(runtimeDir, HASH_FILE));
+	if (storedHash !== expectedHash) {
+		return false;
+	}
+
+	return TIKZJAX_TEX_RUNTIME_FILES.every(fileName => fs.existsSync(path.join(runtimeDir, fileName)));
+}
+
+function copyRuntimeDir(sourceDir: string, targetDir: string, expectedHash: string): void {
+	fs.mkdirSync(targetDir, { recursive: true });
+
+	for (const fileName of TIKZJAX_TEX_RUNTIME_FILES) {
+		if (!isTikzJaxTexRuntimeFile(fileName)) {
 			continue;
 		}
 
-		const targetPath = safeJoin(texDir, fileName);
-		const nextBytes = Buffer.from(encoded, 'base64');
+		const sourcePath = safeJoin(sourceDir, fileName);
+		const targetPath = safeJoin(targetDir, fileName);
+		const nextBytes = fs.readFileSync(sourcePath);
 		if (fs.existsSync(targetPath)) {
 			const currentBytes = fs.readFileSync(targetPath);
 			if (currentBytes.equals(nextBytes)) {
@@ -50,31 +113,15 @@ export function writeBundledTikzJaxTexToDir(texDir: string): void {
 		fs.writeFileSync(targetPath, nextBytes);
 	}
 
-	fs.writeFileSync(path.join(texDir, HASH_FILE), TIKZJAX_TEX_ASSET_HASH, 'utf8');
-}
-
-function texDirIsCurrent(texDir: string): boolean {
-	const hashPath = path.join(texDir, HASH_FILE);
-	if (!fs.existsSync(hashPath)) {
-		return false;
-	}
-
-	try {
-		const storedHash = fs.readFileSync(hashPath, 'utf8').trim();
-		if (storedHash !== TIKZJAX_TEX_ASSET_HASH) {
-			return false;
-		}
-	} catch {
-		return false;
-	}
-
-	return getTikzJaxTexFileNames().every(fileName => fs.existsSync(path.join(texDir, fileName)));
+	const hashPath = safeJoin(targetDir, HASH_FILE);
+	fs.writeFileSync(hashPath, `${expectedHash}\n`, 'utf8');
 }
 
 export async function ensureTikzJaxTexExtracted(
 	app: App,
 	pluginId: string,
 ): Promise<{ ok: true; texDir: string } | { ok: false; error: string }> {
+	const expectedHash = TIKZJAX_TEX_ASSET_HASH;
 	const tempAdapterDir = getPluginTempDir(app, pluginId);
 	const texAdapterDir = `${tempAdapterDir}/${TEX_SUBDIR}`;
 
@@ -97,9 +144,18 @@ export async function ensureTikzJaxTexExtracted(
 		};
 	}
 
+	const sourceDir = resolveInstalledRuntimeDir(app, pluginId, expectedHash)
+		?? resolveBundledRuntimeDir(expectedHash);
+	if (!sourceDir) {
+		return {
+			ok: false,
+			error: 'TikZJax runtime files are missing from the installed plugin folder.',
+		};
+	}
+
 	try {
-		if (!texDirIsCurrent(texDir)) {
-			writeBundledTikzJaxTexToDir(texDir);
+		if (!runtimeDirIsCurrent(texDir, expectedHash)) {
+			copyRuntimeDir(sourceDir, texDir, expectedHash);
 		}
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -118,9 +174,8 @@ export async function ensureTikzJaxTexExtracted(
 }
 
 export function bundledTikzJaxTexAssetFingerprint(): string {
-	const assetHash: string = TIKZJAX_TEX_ASSET_HASH;
 	return createHash('sha256')
-		.update(assetHash)
+		.update(TIKZJAX_TEX_ASSET_HASH)
 		.digest('hex')
 		.slice(0, 16);
 }

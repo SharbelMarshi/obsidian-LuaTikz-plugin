@@ -28,6 +28,7 @@ export function spawnWithTimeout(
 
 		const child = spawn(file, args, {
 			cwd: options.cwd,
+			// Opt-in Local LuaLaTeX uses shell:false with argv arrays; user source is never interpolated into a shell command.
 			shell: false,
 			windowsHide: true,
 		});

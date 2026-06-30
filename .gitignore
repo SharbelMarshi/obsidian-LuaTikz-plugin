@@ -11,8 +11,8 @@ tex/
 .luatikz-temp/
 .luatikz-test-tex/
 generated/
+tikzjax-tex/
 release/
 luatikz-*.zip
 vendor/
 .vendor-staging/
-vendor/

@@ -21,7 +21,7 @@ import {
 import type { LuaTikzSettings } from '../settingsModel';
 import { getUserSourceLineOffsetForExtraPreamble, wrapLatexSource } from '../tikzSource';
 import type { RenderRequest, RenderResult } from '../types';
-import { sanitizeCacheFilename, validateLualatexPath, firstMapKey } from '../utils/guards';
+import { sanitizeCacheFilename, validateLualatexPath, firstMapKey, asString } from '../utils/guards';
 
 const CACHE_MAX = 32;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -208,14 +208,14 @@ export class LuaLatexRenderer {
 	): Promise<RenderResult> {
 		const tempDirResult = await ensurePluginTempFsDir(this.app, this.pluginId);
 		if (!tempDirResult.ok) {
-			const errorMessage: string = tempDirResult.error;
 			return {
 				ok: false,
 				engine: 'lualatex',
-				error: errorMessage,
+				error: asString(tempDirResult.error, 'Could not create LuaTikz temp directory.'),
 			};
 		}
 
+		// Local LuaLaTeX requires Node fs to write per-render .tex/.pdf files inside the plugin temp dir.
 		const workRoot = tempDirResult.workDir;
 		fs.mkdirSync(workRoot, { recursive: true });
 
@@ -249,6 +249,7 @@ export class LuaLatexRenderer {
 		try {
 			fs.writeFileSync(texPath, wrapLatexSource(source, settings.extraPreamble), 'utf8');
 
+/** Writes TikZ source to disk only inside the plugin temp directory for Local LuaLaTeX. */
 			try {
 				await spawnWithTimeout(lualatex, [
 					'-interaction=nonstopmode',

@@ -9,8 +9,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const generatedAssetsPath = path.join(projectRoot, 'generated/tikzjaxTexAssets.ts');
-const sourceTexDir = path.join(projectRoot, 'node_modules/node-tikzjax/tex');
+const runtimeDir = path.join(projectRoot, 'tikzjax-tex');
 
 async function loadTikzJaxSourceModule() {
 	const outDir = mkdtempSync(path.join(tmpdir(), 'luatikz-render-'));
@@ -26,41 +25,12 @@ async function loadTikzJaxSourceModule() {
 	return require(outfile);
 }
 
-if (!fs.existsSync(generatedAssetsPath)) {
-	console.error('Generated TikZJax tex assets missing. Run npm run build first.');
+if (!fs.existsSync(runtimeDir)) {
+	console.error('TikZJax runtime folder missing. Run npm run build first.');
 	process.exit(1);
 }
 
-const generatedSource = fs.readFileSync(generatedAssetsPath, 'utf8');
-const assetEntries = [...generatedSource.matchAll(/'([^']+\.gz)': '([^']+)'/g)];
-
-if (assetEntries.length < 3) {
-	console.error('Could not parse generated/tikzjaxTexAssets.ts.');
-	process.exit(1);
-}
-
-for (const match of assetEntries) {
-	const fileName = match[1];
-	const encoded = match[2];
-	if (!fileName || !encoded) {
-		continue;
-	}
-
-	const sourcePath = path.join(sourceTexDir, fileName);
-	if (!fs.existsSync(sourcePath)) {
-		console.error(`Missing source tex file: ${sourcePath}`);
-		process.exit(1);
-	}
-
-	const decoded = Buffer.from(encoded, 'base64');
-	const sourceBytes = fs.readFileSync(sourcePath);
-	if (!decoded.equals(sourceBytes)) {
-		console.error(`Bundled asset mismatch for ${fileName}.`);
-		process.exit(1);
-	}
-}
-
-console.log('Bundled TikZJax tex assets verified against node-tikzjax source files.');
+process.env.__LUATIKZ_TEX_DIR = runtimeDir;
 
 const { normalizeForTikzJax } = await loadTikzJaxSourceModule();
 

@@ -1,6 +1,7 @@
 import { Notice } from 'obsidian';
 import type { LuaTikzSettings } from '../settings';
 
+/** Clipboard writes happen only from explicit user copy actions. */
 export async function writeClipboardText(
 	text: string,
 	settings: LuaTikzSettings,
