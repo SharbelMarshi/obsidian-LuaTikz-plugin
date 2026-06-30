@@ -52,6 +52,7 @@ export function parseSettings(data: unknown): Partial<LuaTikzSettings> {
 
 export class LuaTikzSettingTab extends PluginSettingTab {
 	plugin: LuaTikzPlugin;
+	private rendererChoicesContainer: HTMLElement | null = null;
 
 	constructor(app: App, plugin: LuaTikzPlugin) {
 		super(app, plugin);
@@ -64,15 +65,20 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 		containerEl.addClass('luatikz-settings');
 
 		const rendererSection = containerEl.createDiv({ cls: 'luatikz-glass-section luatikz-glass-card' });
-		rendererSection.createEl('h3', { text: 'Renderer' });
+		new Setting(rendererSection)
+			.setName('Renderer')
+			.setHeading();
 		rendererSection.createEl('p', {
 			cls: 'luatikz-muted',
 			text: 'Local LuaLaTeX is recommended for full package support. TikZJax avoids shell execution but supports fewer packages.',
 		});
+		this.rendererChoicesContainer = rendererSection;
 		this.renderRendererChoices(rendererSection);
 
 		const lualatexSection = containerEl.createDiv({ cls: 'luatikz-glass-section luatikz-glass-card' });
-		lualatexSection.createEl('h3', { text: 'Local LuaLaTeX' });
+		new Setting(lualatexSection)
+			.setName('Local LuaLaTeX')
+			.setHeading();
 
 		new Setting(lualatexSection)
 			.setName('Allow local LuaLaTeX execution')
@@ -114,7 +120,9 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 				}));
 
 		const cacheSection = containerEl.createDiv({ cls: 'luatikz-glass-section luatikz-glass-card' });
-		cacheSection.createEl('h3', { text: 'Cache' });
+		new Setting(cacheSection)
+			.setName('Cache')
+			.setHeading();
 
 		new Setting(cacheSection)
 			.setName('Enable cache')
@@ -136,7 +144,9 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 				}));
 
 		const clipboardSection = containerEl.createDiv({ cls: 'luatikz-glass-section luatikz-glass-card' });
-		clipboardSection.createEl('h3', { text: 'Clipboard' });
+		new Setting(clipboardSection)
+			.setName('Clipboard')
+			.setHeading();
 
 		new Setting(clipboardSection)
 			.setName('Enable clipboard copy actions')
@@ -181,6 +191,15 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 		await this.plugin.saveSettings();
 	}
 
+	private refreshRendererChoices(): void {
+		if (!this.rendererChoicesContainer) {
+			return;
+		}
+
+		this.rendererChoicesContainer.querySelector('.luatikz-renderer-choices')?.remove();
+		this.renderRendererChoices(this.rendererChoicesContainer);
+	}
+
 	private renderRendererChoices(container: HTMLElement): void {
 		const choices = container.createDiv({ cls: 'luatikz-renderer-choices' });
 		const engines: Array<{ id: LuaTikzRenderEngine; title: string; desc: string }> = [
@@ -205,7 +224,7 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 			card.createEl('p', { cls: 'luatikz-muted', text: engine.desc });
 			card.addEventListener('click', () => {
 				void this.persistSetting('renderEngine', engine.id).then(() => {
-					this.display();
+					this.refreshRendererChoices();
 				});
 			});
 		}

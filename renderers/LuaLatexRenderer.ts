@@ -208,10 +208,11 @@ export class LuaLatexRenderer {
 	): Promise<RenderResult> {
 		const tempDirResult = await ensurePluginTempFsDir(this.app, this.pluginId);
 		if (!tempDirResult.ok) {
+			const errorMessage: string = tempDirResult.error;
 			return {
 				ok: false,
 				engine: 'lualatex',
-				error: tempDirResult.error,
+				error: errorMessage,
 			};
 		}
 

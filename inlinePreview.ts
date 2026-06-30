@@ -303,7 +303,7 @@ export class InlinePreviewManager {
 	private previewBody(view: MarkdownView): HTMLElement {
 		const shell = this.ensureContainer(view);
 		const body = shell.querySelector('.tikzjax-hebrew-local-inline-preview-body');
-		if (body instanceof HTMLElement) {
+		if (body?.instanceOf(HTMLElement)) {
 			return body;
 		}
 

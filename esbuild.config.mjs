@@ -35,7 +35,7 @@ const tikzjaxBootstrapPatch = {
 			let contents = await fs.promises.readFile(args.path, 'utf8');
 			contents = contents.replace(
 				"(0, path_1.join)(__dirname, '../tex')",
-				"((typeof window !== 'undefined' && window.__LUATIKZ_TEX_DIR) || (typeof globalThis !== 'undefined' && globalThis.__LUATIKZ_TEX_DIR) || (0, path_1.join)(__dirname, '../tex'))",
+				"((typeof window !== 'undefined' && window.__LUATIKZ_TEX_DIR) || (0, path_1.join)(__dirname, '../tex'))",
 			);
 			return { contents, loader: 'js' };
 		});

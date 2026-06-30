@@ -134,3 +134,6 @@ Live preview is available from the command palette: *Toggle inline live preview*
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## TikZJax limitation
+TikZJax is a limited renderer. It supports many standard TikZ diagrams and basic PGFPlots, but advanced PGFPlots features such as interpolated 3D surface shading may require Local LuaLaTeX.

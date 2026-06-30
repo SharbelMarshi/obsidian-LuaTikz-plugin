@@ -22,9 +22,50 @@ export function containsRtlText(text: string): boolean {
 	return /[\u0590-\u05FF\u0600-\u06FF]/.test(text);
 }
 
-export function firstMapKey<K, V>(map: Map<K, V>): K | undefined {
+export function getStringProperty(
+	value: unknown,
+	key: string,
+): string | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+
+	const property = value[key];
+	return typeof property === 'string' ? property : undefined;
+}
+
+export function getNumberProperty(
+	value: unknown,
+	key: string,
+): number | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+
+	const property = value[key];
+	return typeof property === 'number' ? property : undefined;
+}
+
+export function getBooleanProperty(
+	value: unknown,
+	key: string,
+): boolean | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+
+	const property = value[key];
+	return typeof property === 'boolean' ? property : undefined;
+}
+
+export function firstMapKey<K extends string, V>(map: Map<K, V>): K | undefined {
 	const next = map.keys().next();
-	return next.done ? undefined : next.value;
+	if (next.done) {
+		return undefined;
+	}
+
+	const key: unknown = next.value;
+	return typeof key === 'string' ? (key as K) : undefined;
 }
 
 const SHELL_METACHAR_RE = /[;&|`$(){}[\]<>'"\\!\n\r\0]/;

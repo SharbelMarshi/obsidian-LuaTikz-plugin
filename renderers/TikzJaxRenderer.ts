@@ -95,26 +95,48 @@ function formatTikzJaxDebugLog(
 	].join('\n');
 }
 
+function stringifyConsoleArgs(args: readonly unknown[]): string {
+	return args
+		.map((arg) => {
+			if (typeof arg === 'string') {
+				return arg;
+			}
+			if (arg instanceof Error) {
+				return arg.stack ?? arg.message;
+			}
+			try {
+				return JSON.stringify(arg);
+			} catch {
+				return String(arg);
+			}
+		})
+		.join(' ');
+}
+
 async function captureConsoleOutput<T>(
 	task: () => Promise<T>,
 ): Promise<{ result: T; logs: string }> {
-	const lines: string[] = [];
-	const originalLog = console.log.bind(console);
-	const originalWarn = console.warn.bind(console);
-	const originalError = console.error.bind(console);
+	const captured: string[] = [];
+	const originalLog: typeof console.log = console.log.bind(console);
+	const originalWarn: typeof console.warn = console.warn.bind(console);
+	const originalError: typeof console.error = console.error.bind(console);
 
-	const capture = (prefix: string, original: (...args: unknown[]) => void) => (...args: unknown[]) => {
-		lines.push(`${prefix}${args.map(arg => String(arg)).join(' ')}`);
-		Reflect.apply(original, console, args);
+	console.log = (...args: unknown[]): void => {
+		captured.push(stringifyConsoleArgs(args));
+		originalLog(...args);
 	};
-
-	console.log = capture('', originalLog);
-	console.warn = capture('[warn] ', originalWarn);
-	console.error = capture('[error] ', originalError);
+	console.warn = (...args: unknown[]): void => {
+		captured.push(stringifyConsoleArgs(args));
+		originalWarn(...args);
+	};
+	console.error = (...args: unknown[]): void => {
+		captured.push(stringifyConsoleArgs(args));
+		originalError(...args);
+	};
 
 	try {
 		const result = await task();
-		return { result, logs: lines.join('\n') };
+		return { result, logs: captured.join('\n') };
 	} finally {
 		console.log = originalLog;
 		console.warn = originalWarn;
@@ -170,15 +192,19 @@ export class TikzJaxRenderer {
 			const texResult = await ensureTikzJaxTexExtracted(this.app, this.pluginId);
 			if (!texResult.ok) {
 				this.loadError = 'TikZJax failed to initialize.';
-				this.loadErrorLog = texResult.error;
+				const errorMessage: string = texResult.error;
+				this.loadErrorLog = errorMessage;
 				return null;
 			}
 
 			this.texDir = texResult.texDir;
 
 			const moduleValue = await loadTikzJaxModule();
-			if (isRecord(moduleValue) && isCallable(moduleValue.load)) {
-				await moduleValue.load();
+			if (isRecord(moduleValue)) {
+				const load = moduleValue.load;
+				if (isCallable(load)) {
+					await load();
+				}
 			}
 
 			const exportValue = isRecord(moduleValue)

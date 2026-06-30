@@ -11,16 +11,35 @@ import { setTikzJaxTexDir } from './tikzJaxGlobal';
 
 const TEX_SUBDIR = 'tikzjax-tex';
 const HASH_FILE = '.luatikz-tex-hash';
+const TIKZJAX_TEX_ASSETS: Record<string, string> = TIKZJAX_TEX_ASSETS_BASE64;
+
+function safeJoin(baseDir: string, relativePath: string): string {
+	const normalized = relativePath.replace(/\\/g, '/');
+	if (
+		normalized.startsWith('/')
+		|| normalized.includes('../')
+		|| normalized === '..'
+	) {
+		throw new Error(`Unsafe TikZJax asset path: ${relativePath}`);
+	}
+
+	return path.join(baseDir, normalized);
+}
 
 export function getTikzJaxTexFileNames(): string[] {
-	return Object.keys(TIKZJAX_TEX_ASSETS_BASE64);
+	return Object.keys(TIKZJAX_TEX_ASSETS);
 }
 
 export function writeBundledTikzJaxTexToDir(texDir: string): void {
 	fs.mkdirSync(texDir, { recursive: true });
 
-	for (const [fileName, encoded] of Object.entries(TIKZJAX_TEX_ASSETS_BASE64) as [string, string][]) {
-		const targetPath = path.join(texDir, fileName);
+	for (const fileName of Object.keys(TIKZJAX_TEX_ASSETS)) {
+		const encoded = TIKZJAX_TEX_ASSETS[fileName];
+		if (typeof encoded !== 'string') {
+			continue;
+		}
+
+		const targetPath = safeJoin(texDir, fileName);
 		const nextBytes = Buffer.from(encoded, 'base64');
 		if (fs.existsSync(targetPath)) {
 			const currentBytes = fs.readFileSync(targetPath);
@@ -90,13 +109,18 @@ export async function ensureTikzJaxTexExtracted(
 		};
 	}
 
-	setTikzJaxTexDir(texDir);
+	const activeWindow = typeof window !== 'undefined' ? window : undefined;
+	if (activeWindow) {
+		setTikzJaxTexDir(texDir, activeWindow);
+	}
+
 	return { ok: true, texDir };
 }
 
 export function bundledTikzJaxTexAssetFingerprint(): string {
+	const assetHash: string = TIKZJAX_TEX_ASSET_HASH;
 	return createHash('sha256')
-		.update(TIKZJAX_TEX_ASSET_HASH)
+		.update(assetHash)
 		.digest('hex')
 		.slice(0, 16);
 }
