@@ -139,7 +139,7 @@ function logMentionsMissingMathDelimiter(text: string): boolean {
 
 function logMentionsMissingEndTikzpicture(text: string): boolean {
 	const lower = text.toLowerCase();
-	return (lower.includes('ended by \\end{document}') || lower.includes('ended by \end{document}'))
+	return lower.includes('ended by \\end{document}')
 		&& lower.includes('tikzpicture');
 }
 

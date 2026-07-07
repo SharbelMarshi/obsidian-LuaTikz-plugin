@@ -437,21 +437,21 @@
   margin-bottom: 8px;
 }
 
-.cm-line.luatikz-error-line-highlight {
-  background-color: rgba(255, 80, 80, 0.18) !important;
+.cm-editor .cm-content .cm-line.luatikz-error-line-highlight {
+  background-color: rgba(255, 80, 80, 0.18);
 }
 
-.luatikz-error-mark-highlight {
-  background-color: rgba(255, 80, 80, 0.42) !important;
+.cm-editor .cm-content .luatikz-error-mark-highlight {
+  background-color: rgba(255, 80, 80, 0.42);
   border-radius: 2px;
 }
 
-.theme-dark .cm-line.luatikz-error-line-highlight {
-  background-color: rgba(255, 120, 120, 0.22) !important;
+.theme-dark .cm-editor .cm-content .cm-line.luatikz-error-line-highlight {
+  background-color: rgba(255, 120, 120, 0.22);
 }
 
-.theme-dark .luatikz-error-mark-highlight {
-  background-color: rgba(255, 120, 120, 0.48) !important;
+.theme-dark .cm-editor .cm-content .luatikz-error-mark-highlight {
+  background-color: rgba(255, 120, 120, 0.48);
 }
 
 .luatikz-environment-list {
@@ -521,7 +521,7 @@
   box-shadow: none;
 }
 
-.tikzjax-hebrew-local-inline-preview-body:has(.luatikz-pick-surface) {
+.tikzjax-hebrew-local-inline-preview-body.luatikz-pick-mode {
   padding: 0;
   overflow: hidden;
 }

@@ -1,6 +1,3 @@
-import { createHash } from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
 import type { App } from 'obsidian';
 import {
 	clearPluginTempFsDir,
@@ -22,6 +19,7 @@ import {
 import type { LuaTikzSettings } from '../settings/settingsModel';
 import { getUserSourceLineOffsetForExtraPreamble, wrapLatexSource } from '../core/tikzSource';
 import type { RenderRequest, RenderResult } from '../core/types';
+import { nodeCrypto, encodeUtf8Base64, encodeBytesBase64, nodeFs, nodePath } from '../utils/desktopNode';
 import { sanitizeCacheFilename, validateLualatexPath, firstMapKey, asString } from '../utils/guards';
 import { invertSvgForDarkMode } from '../utils/darkMode';
 
@@ -40,7 +38,7 @@ interface CompileDebugInfo {
 }
 
 function cacheKey(source: string, invertDark: boolean, settings: LuaTikzSettings): string {
-	return createHash('sha256')
+	return nodeCrypto().createHash('sha256')
 		.update(source)
 		.update(invertDark ? ':dark' : ':light')
 		.update(settings.lualatexPath)
@@ -51,7 +49,7 @@ function cacheKey(source: string, invertDark: boolean, settings: LuaTikzSettings
 }
 
 function svgDataUrl(svgText: string): string {
-	return `data:image/svg+xml;base64,${Buffer.from(svgText, 'utf8').toString('base64')}`;
+	return `data:image/svg+xml;base64,${encodeUtf8Base64(svgText)}`;
 }
 
 function formatCompileDebugLog(debug: CompileDebugInfo, body: string): string {
@@ -67,11 +65,11 @@ function formatCompileDebugLog(debug: CompileDebugInfo, body: string): string {
 
 function resolvePngOutputPath(workDir: string, jobId: string): string | null {
 	const candidates = [
-		path.join(workDir, `${jobId}.png`),
-		path.join(workDir, `${jobId}-1.png`),
+		nodePath().join(workDir, `${jobId}.png`),
+		nodePath().join(workDir, `${jobId}-1.png`),
 	];
 	for (const candidate of candidates) {
-		if (fs.existsSync(candidate)) {
+		if (nodeFs().existsSync(candidate)) {
 			return candidate;
 		}
 	}
@@ -204,18 +202,18 @@ export class LuaLatexRenderer {
 
 		// Local LuaLaTeX requires Node fs to write per-render .tex/.pdf files inside the plugin temp dir.
 		const workRoot = tempDirResult.workDir;
-		fs.mkdirSync(workRoot, { recursive: true });
+		nodeFs().mkdirSync(workRoot, { recursive: true });
 
 		const safeId = sanitizeCacheFilename(key.slice(0, 16));
 		const jobId = `luatikz-${safeId}`;
-		const workDir = fs.mkdtempSync(path.join(workRoot, `${jobId}-`));
+		const workDir = nodeFs().mkdtempSync(nodePath().join(workRoot, `${jobId}-`));
 		const texFileName = `${jobId}.tex`;
 		const pdfFileName = `${jobId}.pdf`;
 		const svgFileName = `${jobId}.svg`;
-		const logPath = path.join(workDir, `${jobId}.log`);
-		const texPath = path.join(workDir, texFileName);
-		const pdfPath = path.join(workDir, pdfFileName);
-		const svgPath = path.join(workDir, svgFileName);
+		const logPath = nodePath().join(workDir, `${jobId}.log`);
+		const texPath = nodePath().join(workDir, texFileName);
+		const pdfPath = nodePath().join(workDir, pdfFileName);
+		const svgPath = nodePath().join(workDir, svgFileName);
 
 		const lualatex = await resolveLuaLatex(settings.lualatexPath);
 		if (!lualatex) {
@@ -234,9 +232,8 @@ export class LuaLatexRenderer {
 		};
 
 		try {
-			fs.writeFileSync(texPath, wrapLatexSource(source, settings.extraPreamble), 'utf8');
+			nodeFs().writeFileSync(texPath, wrapLatexSource(source, settings.extraPreamble), 'utf8');
 
-/** Writes TikZ source to disk only inside the plugin temp directory for Local LuaLaTeX. */
 			try {
 				await spawnWithTimeout(lualatex, [
 					'-interaction=nonstopmode',
@@ -251,7 +248,7 @@ export class LuaLatexRenderer {
 				return this.latexError(raw, source, settings, errorContext, err instanceof RenderTimeoutError, debugInfo);
 			}
 
-			if (!fs.existsSync(pdfPath)) {
+			if (!nodeFs().existsSync(pdfPath)) {
 				const logTail = readLogTail(logPath);
 				const raw = logTail
 					? `No PDF produced.\n--- log ---\n${logTail}`
@@ -298,8 +295,8 @@ export class LuaLatexRenderer {
 					);
 				}
 
-				const pngData = fs.readFileSync(pngPath);
-				const dataUrl = `data:image/png;base64,${pngData.toString('base64')}`;
+				const pngData = nodeFs().readFileSync(pngPath);
+				const dataUrl = `data:image/png;base64,${encodeBytesBase64(pngData)}`;
 				return { ok: true, engine: 'lualatex', pngPath, dataUrl };
 			}
 
@@ -329,7 +326,7 @@ export class LuaLatexRenderer {
 				);
 			}
 
-			if (!fs.existsSync(svgPath)) {
+			if (!nodeFs().existsSync(svgPath)) {
 				return this.latexError(
 					'No SVG produced.',
 					source,
@@ -340,7 +337,7 @@ export class LuaLatexRenderer {
 				);
 			}
 
-			let svgText = fs.readFileSync(svgPath, 'utf8');
+			let svgText = nodeFs().readFileSync(svgPath, 'utf8');
 			if (invertDark) {
 				svgText = invertSvgForDarkMode(svgText);
 			}
@@ -358,7 +355,7 @@ export class LuaLatexRenderer {
 			};
 		} finally {
 			try {
-				fs.rmSync(workDir, { recursive: true, force: true });
+				nodeFs().rmSync(workDir, { recursive: true, force: true });
 			} catch {
 				// ignore
 			}

@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import type { App } from 'obsidian';
 import type { LuaTikzSettings } from '../settings/settingsModel';
 import {
@@ -11,6 +10,7 @@ import { splitExtraPreamble } from '../utils/extraPreamble';
 import type { RenderRequest, RenderResult } from '../core/types';
 import { firstMapKey, isCallable, isRecord, asString } from '../utils/guards';
 import { finalizeTikzJaxSvg } from '../utils/tikzJaxSvgFix';
+import { nodeCrypto, encodeUtf8Base64 } from '../utils/desktopNode';
 import { ensureTikzJaxTexExtracted } from '../utils/tikzJaxTexRuntime';
 
 const CACHE_MAX = 32;
@@ -48,14 +48,14 @@ function runExclusive<T>(task: () => Promise<T>): Promise<T> {
 }
 
 function cacheKey(source: string, settings: LuaTikzSettings): string {
-	return createHash('sha256')
+	return nodeCrypto().createHash('sha256')
 		.update(source)
 		.update(settings.extraPreamble)
 		.digest('hex');
 }
 
 function svgDataUrl(svgText: string): string {
-	return `data:image/svg+xml;base64,${Buffer.from(svgText, 'utf8').toString('base64')}`;
+	return `data:image/svg+xml;base64,${encodeUtf8Base64(svgText)}`;
 }
 
 function formatTikzJaxDebugLog(

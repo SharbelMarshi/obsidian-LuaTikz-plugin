@@ -59,7 +59,7 @@ function getCodeMirror(): { modeInfo: CodeMirrorModeInfo[] } | null {
 }
 
 function migrateLegacySettings(raw: unknown, parsed: Partial<LuaTikzSettings>): LuaTikzSettings {
-	const merged = Object.assign({}, DEFAULT_SETTINGS, parsed) as LuaTikzSettings;
+	const merged: LuaTikzSettings = { ...DEFAULT_SETTINGS, ...parsed };
 	if (isRecord(raw) && !('enableLocalShellRenderer' in raw) && !('renderEngine' in raw)) {
 		merged.enableLocalShellRenderer = true;
 		merged.showInstallNotice = false;
@@ -76,11 +76,13 @@ function migrateLegacySettings(raw: unknown, parsed: Partial<LuaTikzSettings>): 
 	return merged;
 }
 
-function flattenExtensions(...extensions: Extension[]): Extension[] {
+function flattenExtensions(...extensions: (Extension | readonly Extension[])[]): Extension[] {
 	const flat: Extension[] = [];
 	for (const extension of extensions) {
 		if (Array.isArray(extension)) {
-			flat.push(...extension);
+			for (const item of extension) {
+				flat.push(item);
+			}
 			continue;
 		}
 		flat.push(extension);

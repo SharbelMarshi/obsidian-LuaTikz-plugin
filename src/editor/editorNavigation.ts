@@ -1,4 +1,4 @@
-import { type App, MarkdownView, Notice, TFile, type Editor, type EditorPosition } from 'obsidian';
+import { type App, MarkdownView, Notice, TFile, type Editor } from 'obsidian';
 import type { RenderImageResult } from '../core/types';
 import {
 	clearTikzErrorHighlight,
@@ -19,7 +19,7 @@ function applyAutofixAtNoteLine(editor: Editor, noteLine: number, autofix: Latex
 	const currentLine = editor.getLine(lineIndex);
 
 	if (autofix.kind === 'insert-end-tikzpicture') {
-		const insertAt = { line: lineIndex, ch: currentLine.length } as EditorPosition;
+		const insertAt = { line: lineIndex, ch: currentLine.length };
 		editor.replaceRange('\n\\end{tikzpicture}', insertAt, insertAt);
 		return true;
 	}
@@ -52,8 +52,8 @@ async function openMarkdownEditor(
 	});
 
 	const leaf = existingLeaf ?? app.workspace.getLeaf(false);
-	await leaf.openFile(file, { active: true });
-	app.workspace.revealLeaf(leaf);
+	await leaf.openFile(file);
+	app.workspace.setActiveLeaf(leaf, { focus: true });
 
 	const view = leaf.view;
 	if (!(view instanceof MarkdownView)) {
@@ -199,13 +199,13 @@ export function showTikzErrorHighlightFromResult(
 
 	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
 	if (activeView?.file?.path === sourcePath) {
-		requestAnimationFrame(() => {
+		activeWindow.requestAnimationFrame(() => {
 			void showTikzErrorInEditor(app, sourcePath, location, { focus: false });
 		});
 		return;
 	}
 
-	requestAnimationFrame(() => {
+	activeWindow.requestAnimationFrame(() => {
 		void showTikzErrorInEditor(app, sourcePath, location, { focus: false });
 	});
 }

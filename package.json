@@ -1,6 +1,6 @@
 {
 	"name": "luatikz",
-	"version": "1.6.0",
+	"version": "1.6.1",
 	"description": "Fast LuaLaTeX TikZ rendering with full library support, live preview, RTL support, and simple diagram helpers.",
 	"main": "main.js",
 	"scripts": {
@@ -20,7 +20,9 @@
 	},
 	"dependencies": {
 		"@codemirror/autocomplete": "^6.20.3",
+		"@codemirror/lint": "^6.8.4",
 		"@codemirror/state": "6.5.0",
+		"@codemirror/view": "6.38.6",
 		"node-tikzjax": "^1.0.5",
 		"punycode": "^2.3.1"
 	}

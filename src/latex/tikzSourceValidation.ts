@@ -26,7 +26,7 @@ export function findOptionEqualIssues(line: string): OptionEqualIssue[] {
 		const columnStart = match.index ?? 0;
 		const eqEnd = columnStart + match[0].length;
 		const rest = codePart.slice(eqEnd);
-		const valueMatch = rest.match(/^\s*([^,\]\}\)]*)/);
+		const valueMatch = rest.match(/^\s*([^,\]\})]*)/);
 		const rawValue = valueMatch?.[1] ?? '';
 		const value = rawValue.trim();
 		const columnEnd = value ? eqEnd + (valueMatch?.[0].length ?? 0) : eqEnd;

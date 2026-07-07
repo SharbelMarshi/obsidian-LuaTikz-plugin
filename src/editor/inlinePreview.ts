@@ -440,8 +440,8 @@ export class InlinePreviewManager {
 	}
 
 	private ensureContainer(view: MarkdownView): HTMLElement {
-		const activeDocument = view.containerEl.ownerDocument;
-		if (this.container && activeDocument.body.contains(this.container)) {
+		const ownerDoc = view.containerEl.ownerDocument;
+		if (this.container && ownerDoc.body.contains(this.container)) {
 			return this.container;
 		}
 
@@ -536,6 +536,7 @@ export class InlinePreviewManager {
 		const settings = this.getSettings();
 		const body = this.previewBody(view);
 		body.empty();
+		body.removeClass('luatikz-pick-mode');
 		const output = body.createDiv({
 			cls: 'tikzjax-hebrew-local-output tikzjax-hebrew-local-inline-preview-output',
 		});
@@ -551,6 +552,7 @@ export class InlinePreviewManager {
 		const settings = this.getSettings();
 		const body = this.previewBody(view);
 		body.empty();
+		body.addClass('luatikz-pick-mode');
 		const output = body.createDiv({
 			cls: 'tikzjax-hebrew-local-output tikzjax-hebrew-local-inline-preview-output luatikz-pick-surface',
 		});

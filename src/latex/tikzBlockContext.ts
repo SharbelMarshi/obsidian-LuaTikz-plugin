@@ -12,7 +12,6 @@ const BEGIN_ENV_RE = /\\begin\{([^}]+)\}/g;
 const END_ENV_RE = /\\end\{([^}]+)\}/g;
 const NODE_NAME_RE = /\\node\s*(?:\[[^\]]*\])?\s*\(([^)]+)\)/g;
 const LIBRARY_RE = /\\usetikzlibrary\{([^}]+)\}/g;
-const COMMAND_RE = /\\([A-Za-z]+)/g;
 
 export function parseTikzBlockContext(source: string): TikzBlockContext {
 	const environmentStack: string[] = [];

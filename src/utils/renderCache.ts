@@ -1,11 +1,9 @@
-import { createHash } from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
 import { normalizePath, type App } from 'obsidian';
 import type { LuaTikzRenderEngine, LuaTikzSettings } from '../settings/settingsModel';
 import type { RenderResult } from '../core/types';
 import { getPluginCacheDir, getPluginDir } from '../core/pluginPaths';
 import { isMobileApp } from './platform';
+import { encodeBytesBase64, encodeUtf8Base64, nodeCrypto, nodeFs, nodePath } from './desktopNode';
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 128;
@@ -24,11 +22,11 @@ interface CacheIndexFile {
 }
 
 function svgDataUrl(svgText: string): string {
-	return `data:image/svg+xml;base64,${Buffer.from(svgText, 'utf8').toString('base64')}`;
+	return `data:image/svg+xml;base64,${encodeUtf8Base64(svgText)}`;
 }
 
 function pngDataUrl(pngBytes: ArrayBuffer): string {
-	return `data:image/png;base64,${Buffer.from(pngBytes).toString('base64')}`;
+	return `data:image/png;base64,${encodeBytesBase64(pngBytes)}`;
 }
 
 export function buildRenderCacheKey(
@@ -37,7 +35,7 @@ export function buildRenderCacheKey(
 	settings: LuaTikzSettings,
 	invertDark: boolean,
 ): string {
-	return createHash('sha256')
+	return nodeCrypto().createHash('sha256')
 		.update(engine)
 		.update(':')
 		.update(source)
@@ -70,9 +68,9 @@ export class RenderDiskCache {
 	clear(): void {
 		this.memory.clear();
 		this.index = { version: 2, entries: {} };
-		if (this.cacheDir && fs.existsSync(this.cacheDir)) {
+		if (this.cacheDir && nodeFs().existsSync(this.cacheDir)) {
 			try {
-				fs.rmSync(this.cacheDir, { recursive: true, force: true });
+				nodeFs().rmSync(this.cacheDir, { recursive: true, force: true });
 			} catch {
 				// ignore
 			}
@@ -91,7 +89,7 @@ export class RenderDiskCache {
 		this.cacheDir = getPluginCacheDir(this.app, this.pluginId);
 
 		if (this.cacheDir) {
-			fs.mkdirSync(this.cacheDir, { recursive: true });
+			nodeFs().mkdirSync(this.cacheDir, { recursive: true });
 		} else if (isMobileApp) {
 			const parts = this.cacheAdapterDir.split('/').filter(Boolean);
 			let current = '';
@@ -116,15 +114,15 @@ export class RenderDiskCache {
 	}
 
 	private indexFsPath(): string | null {
-		return this.cacheDir ? path.join(this.cacheDir, 'index.json') : null;
+		return this.cacheDir ? nodePath().join(this.cacheDir, 'index.json') : null;
 	}
 
 	private async loadIndex(): Promise<void> {
 		try {
 			if (this.cacheDir) {
 				const indexPath = this.indexFsPath();
-				if (indexPath && fs.existsSync(indexPath)) {
-					const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8')) as CacheIndexFile;
+				if (indexPath && nodeFs().existsSync(indexPath)) {
+					const parsed = JSON.parse(nodeFs().readFileSync(indexPath, 'utf8')) as CacheIndexFile;
 					if (parsed?.version === 2 && parsed.entries) {
 						this.index = parsed;
 						return;
@@ -149,7 +147,7 @@ export class RenderDiskCache {
 		if (this.cacheDir) {
 			const indexPath = this.indexFsPath();
 			if (indexPath) {
-				fs.writeFileSync(indexPath, payload, 'utf8');
+				nodeFs().writeFileSync(indexPath, payload, 'utf8');
 			}
 		}
 		if (this.cacheAdapterDir) {
@@ -163,10 +161,10 @@ export class RenderDiskCache {
 
 	private async deleteAsset(fileName: string): Promise<void> {
 		if (this.cacheDir) {
-			const filePath = path.join(this.cacheDir, fileName);
-			if (fs.existsSync(filePath)) {
+			const filePath = nodePath().join(this.cacheDir, fileName);
+			if (nodeFs().existsSync(filePath)) {
 				try {
-					fs.rmSync(filePath);
+					nodeFs().rmSync(filePath);
 				} catch {
 					// ignore
 				}
@@ -216,9 +214,9 @@ export class RenderDiskCache {
 		if (entry.kind === 'svg') {
 			let svgText: string | null = null;
 			if (this.cacheDir) {
-				const filePath = path.join(this.cacheDir, entry.assetFile);
-				if (fs.existsSync(filePath)) {
-					svgText = fs.readFileSync(filePath, 'utf8');
+				const filePath = nodePath().join(this.cacheDir, entry.assetFile);
+				if (nodeFs().existsSync(filePath)) {
+					svgText = nodeFs().readFileSync(filePath, 'utf8');
 				}
 			}
 			if (!svgText && this.cacheAdapterDir) {
@@ -241,9 +239,9 @@ export class RenderDiskCache {
 
 		let pngBytes: ArrayBuffer | null = null;
 		if (this.cacheDir) {
-			const filePath = path.join(this.cacheDir, entry.assetFile);
-			if (fs.existsSync(filePath)) {
-				pngBytes = Uint8Array.from(fs.readFileSync(filePath)).buffer;
+			const filePath = nodePath().join(this.cacheDir, entry.assetFile);
+			if (nodeFs().existsSync(filePath)) {
+				pngBytes = Uint8Array.from(nodeFs().readFileSync(filePath)).buffer;
 			}
 		}
 		if (!pngBytes && this.cacheAdapterDir) {
@@ -265,11 +263,11 @@ export class RenderDiskCache {
 
 	async get(key: string): Promise<RenderResult | null> {
 		const memoryHit = this.memory.get(key);
-		if (memoryHit && Date.now() - memoryHit.createdAt <= CACHE_TTL_MS) {
-			const { createdAt: _createdAt, ...result } = memoryHit;
-			return result;
-		}
 		if (memoryHit) {
+			const { createdAt, ...result } = memoryHit;
+			if (Date.now() - createdAt <= CACHE_TTL_MS) {
+				return result;
+			}
 			this.memory.delete(key);
 		}
 
@@ -312,12 +310,12 @@ export class RenderDiskCache {
 		let assetFile = '';
 		let kind: CacheIndexEntry['kind'] = 'svg';
 
-		if (settings.outputFormat === 'png' && result.pngPath && this.cacheDir && fs.existsSync(result.pngPath)) {
+		if (settings.outputFormat === 'png' && result.pngPath && this.cacheDir && nodeFs().existsSync(result.pngPath)) {
 			assetFile = `${key}.png`;
 			kind = 'png';
-			const bytes = fs.readFileSync(result.pngPath);
+			const bytes = nodeFs().readFileSync(result.pngPath);
 			if (this.cacheDir) {
-				fs.writeFileSync(path.join(this.cacheDir, assetFile), bytes);
+				nodeFs().writeFileSync(nodePath().join(this.cacheDir, assetFile), bytes);
 			}
 			if (this.cacheAdapterDir) {
 				await this.app.vault.adapter.writeBinary(this.assetAdapterPath(assetFile), Uint8Array.from(bytes).buffer);
@@ -326,7 +324,7 @@ export class RenderDiskCache {
 			assetFile = `${key}.svg`;
 			kind = 'svg';
 			if (this.cacheDir) {
-				fs.writeFileSync(path.join(this.cacheDir, assetFile), svgText, 'utf8');
+				nodeFs().writeFileSync(nodePath().join(this.cacheDir, assetFile), svgText, 'utf8');
 			}
 			if (this.cacheAdapterDir) {
 				await this.app.vault.adapter.write(this.assetAdapterPath(assetFile), svgText);

@@ -1,6 +1,5 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import { normalizePath, type App } from 'obsidian';
+import { nodeFs, nodePath } from '../utils/desktopNode';
 
 export function getPluginDir(app: App, pluginId: string): string {
 	return normalizePath(`${app.vault.configDir}/plugins/${pluginId}`);
@@ -41,7 +40,7 @@ export function getPluginFsDir(app: App, pluginId: string): string | null {
 		return null;
 	}
 
-	return path.join(basePath, app.vault.configDir, 'plugins', pluginId);
+	return nodePath().join(basePath, app.vault.configDir, 'plugins', pluginId);
 }
 
 export function getDesktopFsPath(app: App, adapterPath: string): string | null {
@@ -50,7 +49,7 @@ export function getDesktopFsPath(app: App, adapterPath: string): string | null {
 		return null;
 	}
 
-	return path.join(basePath, normalizePath(adapterPath));
+	return nodePath().join(basePath, normalizePath(adapterPath));
 }
 
 export async function ensureAdapterFolderExists(app: App, folderPath: string): Promise<void> {
@@ -99,6 +98,7 @@ export async function ensurePluginTempFsDir(
 }
 
 export async function clearPluginTempFsDir(app: App, pluginId: string): Promise<void> {
+	const fs = nodeFs();
 	const tempAdapterDir = getPluginTempDir(app, pluginId);
 	const workDir = getDesktopFsPath(app, tempAdapterDir);
 	if (!workDir) {

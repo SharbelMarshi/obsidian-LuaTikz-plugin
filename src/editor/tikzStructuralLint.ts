@@ -55,16 +55,18 @@ function lintBlockSource(source: string, blockFrom: number): Diagnostic[] {
 		}
 
 		for (const match of line.matchAll(BEGIN_ENV_RE)) {
-			envStack.push({ env: match[1], line: i, from: lineFrom + match.index! });
+			const matchIndex = match.index ?? 0;
+			envStack.push({ env: match[1], line: i, from: lineFrom + matchIndex });
 		}
 
 		for (const match of line.matchAll(END_ENV_RE)) {
 			const env = match[1];
+			const matchIndex = match.index ?? 0;
 			const idx = envStack.map(entry => entry.env).lastIndexOf(env);
 			if (idx === -1) {
 				diagnostics.push({
-					from: lineFrom + match.index!,
-					to: lineFrom + match.index! + match[0].length,
+					from: lineFrom + matchIndex,
+					to: lineFrom + matchIndex + match[0].length,
 					severity: 'warning',
 					message: `Unmatched \\end{${env}}`,
 				});
@@ -106,9 +108,10 @@ function lintBlockSource(source: string, blockFrom: number): Diagnostic[] {
 		}
 
 		for (const match of line.matchAll(EMPTY_KEY_RE)) {
+			const matchIndex = match.index ?? 0;
 			diagnostics.push({
-				from: lineFrom + match.index!,
-				to: lineFrom + match.index! + match[0].length,
+				from: lineFrom + matchIndex,
+				to: lineFrom + matchIndex + match[0].length,
 				severity: 'warning',
 				message: `Empty option key "${match[1]}"`,
 			});

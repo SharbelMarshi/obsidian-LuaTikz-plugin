@@ -1,4 +1,4 @@
-import { editorEditorField, type Editor, type EditorPosition } from 'obsidian';
+import { editorEditorField, type Editor } from 'obsidian';
 import { RangeSetBuilder, StateEffect, StateField, type Extension } from '@codemirror/state';
 import {
 	Decoration,
@@ -47,22 +47,22 @@ class TikzAutofixPopupWidget extends WidgetType {
 	}
 
 	override toDOM(): HTMLElement {
-		const popup = document.createElement('div');
+		const popup = activeDocument.createElement('div');
 		popup.className = 'luatikz-autofix-popup';
 
-		const label = document.createElement('span');
+		const label = activeDocument.createElement('span');
 		label.className = 'luatikz-autofix-popup-label';
 		label.textContent = 'LuaTikZ';
 
-		const button = document.createElement('button');
+		const button = activeDocument.createElement('button');
 		button.type = 'button';
 		button.className = 'luatikz-autofix-popup-fix';
 		button.textContent = 'Fix';
 		button.title = this.title;
-		button.addEventListener('mousedown', event => {
+		button.addEventListener('mousedown', (event: MouseEvent) => {
 			event.preventDefault();
 		});
-		button.addEventListener('click', event => {
+		button.addEventListener('click', (event: MouseEvent) => {
 			event.preventDefault();
 			event.stopPropagation();
 			autofixHandlers.get(this.view)?.();
@@ -292,7 +292,7 @@ export function highlightTikzErrorInEditor(
 	cm.dispatch(dispatchSpec);
 
 	// Rebuild widget decorations after handler registration.
-	requestAnimationFrame(() => {
+	activeWindow.requestAnimationFrame(() => {
 		if (!editorHasHighlightExtension(cm)) {
 			return;
 		}
@@ -318,21 +318,21 @@ export function replaceEditorLine(editor: Editor, noteLine: number, nextLine: st
 	const current = editor.getLine(line);
 	editor.replaceRange(
 		nextLine,
-		{ line, ch: 0 } as EditorPosition,
-		{ line, ch: current.length } as EditorPosition,
+		{ line, ch: 0 },
+		{ line, ch: current.length },
 	);
 }
 
 const tikzErrorHighlightTheme = EditorView.baseTheme({
-	'.cm-line.luatikz-error-line-highlight': {
-		backgroundColor: 'rgba(255, 80, 80, 0.18) !important',
+	'.cm-editor .cm-line.luatikz-error-line-highlight': {
+		backgroundColor: 'rgba(255, 80, 80, 0.18)',
 	},
-	'.luatikz-error-mark-highlight': {
-		backgroundColor: 'rgba(255, 80, 80, 0.42) !important',
+	'.cm-editor .luatikz-error-mark-highlight': {
+		backgroundColor: 'rgba(255, 80, 80, 0.42)',
 		borderRadius: '2px',
 	},
-	'&.cm-focused .cm-line.luatikz-error-line-highlight': {
-		backgroundColor: 'rgba(255, 80, 80, 0.22) !important',
+	'&.cm-focused .cm-editor .cm-line.luatikz-error-line-highlight': {
+		backgroundColor: 'rgba(255, 80, 80, 0.22)',
 	},
 	'.luatikz-autofix-popup': {
 		position: 'absolute',

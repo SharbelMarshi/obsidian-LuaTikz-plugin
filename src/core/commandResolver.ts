@@ -1,6 +1,5 @@
-import { spawn } from 'child_process';
-import * as fs from 'fs';
 import { validateLualatexPath } from '../utils/guards';
+import { nodeChildProcess, nodeFs } from '../utils/desktopNode';
 
 export class RenderTimeoutError extends Error {
 	constructor(timeoutMs: number) {
@@ -25,6 +24,7 @@ export function spawnWithTimeout(
 		let stdout = '';
 		let stderr = '';
 		const maxBuffer = options.maxBuffer ?? 10 * 1024 * 1024;
+		const { spawn } = nodeChildProcess();
 
 		const child = spawn(file, args, {
 			cwd: options.cwd,
@@ -78,6 +78,7 @@ export function spawnWithTimeout(
 }
 
 async function resolveCommand(candidates: string[]): Promise<string | null> {
+	const fs = nodeFs();
 	for (const candidate of candidates) {
 		if (candidate.includes('/')) {
 			if (fs.existsSync(candidate)) {
@@ -100,6 +101,7 @@ async function resolveCommand(candidates: string[]): Promise<string | null> {
 }
 
 export async function resolveLuaLatex(customPath?: string): Promise<string | null> {
+	const fs = nodeFs();
 	if (customPath?.trim()) {
 		const validationError = validateLualatexPath(customPath);
 		if (validationError) {
@@ -128,6 +130,7 @@ export async function resolvePdfToCairo(): Promise<string | null> {
 }
 
 export function readLogTail(logPath: string, maxChars = 8000): string {
+	const fs = nodeFs();
 	if (!fs.existsSync(logPath)) {
 		return '';
 	}
