@@ -8,7 +8,9 @@ build/
 *.save
 data.json
 tex/
+tikzjax-runtime.js
 .luatikz-temp/
+.luatikz-cache/
 .luatikz-test-tex/
 generated/
 tikzjax-tex/

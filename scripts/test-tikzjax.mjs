@@ -16,7 +16,7 @@ async function loadTikzJaxSourceModule() {
 	const outDir = mkdtempSync(path.join(tmpdir(), 'luatikz-render-'));
 	const outfile = path.join(outDir, 'tikzJaxSource.cjs');
 	await esbuild.build({
-		entryPoints: [path.join(projectRoot, 'tikzJaxSource.ts')],
+		entryPoints: [path.join(projectRoot, 'src/latex/tikzJaxSource.ts')],
 		bundle: true,
 		outfile,
 		format: 'cjs',
@@ -71,7 +71,7 @@ const { finalizeTikzJaxSvg } = await (async () => {
 	const outDir = mkdtempSync(path.join(tmpdir(), 'luatikz-svgfix-'));
 	const outfile = path.join(outDir, 'tikzJaxSvgFix.cjs');
 	await esbuild.build({
-		entryPoints: [path.join(projectRoot, 'utils/tikzJaxSvgFix.ts')],
+		entryPoints: [path.join(projectRoot, 'src/utils/tikzJaxSvgFix.ts')],
 		bundle: true,
 		outfile,
 		format: 'cjs',
@@ -191,12 +191,12 @@ shader=interp,
 \draw[->] (0,0) -- (3,0) node[right] {$x$};
 \draw[->] (0,0) -- (0,2) node[above] {$y$};
 \draw[blue, thick] (0,0) circle (1cm);
-\node at (1.5,1.5) {TikZJax bundled};
+\node at (1.5,1.5) {TikZJax};
 \end{tikzpicture}`).then(svg => {
 		if (!svg.includes('<svg')) {
-			throw new Error('Bundled TikZJax smoke test did not return SVG.');
+			throw new Error('TikZJax smoke test did not return SVG.');
 		}
-		console.log('Test 2 (bundled smoke): OK');
+		console.log('Test 2 (TikZJax smoke): OK');
 	});
 
 	try {

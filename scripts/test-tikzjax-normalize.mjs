@@ -13,7 +13,7 @@ async function loadTikzJaxSourceModule() {
 	const outDir = mkdtempSync(path.join(tmpdir(), 'luatikz-norm-'));
 	const outfile = path.join(outDir, 'tikzJaxSource.cjs');
 	await esbuild.build({
-		entryPoints: [path.join(projectRoot, 'tikzJaxSource.ts')],
+		entryPoints: [path.join(projectRoot, 'src/latex/tikzJaxSource.ts')],
 		bundle: true,
 		outfile,
 		format: 'cjs',

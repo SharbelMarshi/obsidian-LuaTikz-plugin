@@ -25,19 +25,18 @@ for (const item of requiredFiles) {
 const mainJsPath = path.join(projectRoot, 'main.js');
 if (fs.existsSync(mainJsPath)) {
 	const mainJs = fs.readFileSync(mainJsPath, 'utf8');
-	const markers = [
-		'TIKZJAX_TEX_ASSETS_BASE64',
-		'__LUATIKZ_TEX_DIR',
-		'tex2svg',
-	];
-	for (const marker of markers) {
-		if (!mainJs.includes(marker)) {
-			console.error(`main.js is missing bundled TikZJax marker: ${marker}`);
-			failed = true;
-		}
+	const sizeMb = fs.statSync(mainJsPath).size / (1024 * 1024);
+
+	if (!mainJs.includes('__LUATIKZ_TEX_DIR')) {
+		console.error('main.js is missing bundled TikZJax tex-dir hook marker: __LUATIKZ_TEX_DIR');
+		failed = true;
 	}
 
-	const sizeMb = fs.statSync(mainJsPath).size / (1024 * 1024);
+	if (!mainJs.includes('tex2svg')) {
+		console.error('main.js is missing bundled TikZJax marker: tex2svg');
+		failed = true;
+	}
+
 	if (sizeMb < 5) {
 		console.error(`main.js looks too small for bundled TikZJax (${sizeMb.toFixed(2)} MB).`);
 		failed = true;

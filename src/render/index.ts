@@ -1,0 +1,1 @@
+export { TikzRenderer } from './RendererManager';

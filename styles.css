@@ -70,7 +70,8 @@
   box-shadow: none;
   backdrop-filter: none;
   padding: 16px;
-  text-align: center;
+  display: flex;
+  justify-content: center;
   color: var(--text-muted);
   font-size: 0.9em;
 }
@@ -130,7 +131,7 @@
   outline: none;
   border-radius: 0;
   overflow-x: auto;
-  text-align: center;
+  display: flex;
   padding: 0;
   box-sizing: border-box;
 }
@@ -317,6 +318,34 @@
   text-align: left;
 }
 
+.luatikz-diagram-align-left,
+.markdown-reading-view .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output.luatikz-diagram-align-left,
+.markdown-preview-view .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output.luatikz-diagram-align-left,
+.markdown-rendered .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output.luatikz-diagram-align-left {
+  justify-content: flex-start;
+}
+
+.luatikz-diagram-align-center,
+.markdown-reading-view .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output.luatikz-diagram-align-center,
+.markdown-preview-view .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output.luatikz-diagram-align-center,
+.markdown-rendered .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output.luatikz-diagram-align-center {
+  justify-content: center;
+}
+
+.luatikz-diagram-align-right,
+.markdown-reading-view .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output.luatikz-diagram-align-right,
+.markdown-preview-view .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output.luatikz-diagram-align-right,
+.markdown-rendered .tikzjax-hebrew-local-block .tikzjax-hebrew-local-output.luatikz-diagram-align-right {
+  justify-content: flex-end;
+}
+
+.tikzjax-hebrew-local-output .tikzjax-hebrew-local-image,
+.tikzjax-hebrew-local-output .luatikz-tikzjax-host {
+  width: auto;
+  max-width: 100%;
+  flex: 0 0 auto;
+}
+
 .markdown-reading-view .tikzjax-hebrew-local-block,
 .markdown-preview-view .tikzjax-hebrew-local-block,
 .markdown-rendered .tikzjax-hebrew-local-block {
@@ -369,7 +398,8 @@
 
 .tikzjax-hebrew-local-output {
   overflow-x: auto;
-  text-align: center;
+  display: flex;
+  justify-content: center;
 }
 
 /* Finished output only; loading uses .luatikz-glass-card styling above. */
@@ -405,6 +435,39 @@
   color: var(--text-error);
   font-weight: 600;
   margin-bottom: 8px;
+}
+
+.cm-line.luatikz-error-line-highlight {
+  background-color: rgba(255, 80, 80, 0.18) !important;
+}
+
+.luatikz-error-mark-highlight {
+  background-color: rgba(255, 80, 80, 0.42) !important;
+  border-radius: 2px;
+}
+
+.theme-dark .cm-line.luatikz-error-line-highlight {
+  background-color: rgba(255, 120, 120, 0.22) !important;
+}
+
+.theme-dark .luatikz-error-mark-highlight {
+  background-color: rgba(255, 120, 120, 0.48) !important;
+}
+
+.luatikz-environment-list {
+  margin: 8px 0 0;
+  padding-left: 1.2em;
+}
+
+.luatikz-environment-hint {
+  margin-top: 4px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.luatikz-dark-brightness-boost .tikzjax-hebrew-local-image,
+.luatikz-dark-brightness-boost .luatikz-tikzjax-host svg {
+  filter: brightness(1.28) contrast(1.06);
 }
 
 .tikzjax-hebrew-local-error-details {
@@ -458,6 +521,11 @@
   box-shadow: none;
 }
 
+.tikzjax-hebrew-local-inline-preview-body:has(.luatikz-pick-surface) {
+  padding: 0;
+  overflow: hidden;
+}
+
 .tikzjax-hebrew-local-inline-preview-body > * {
   background: transparent;
   border: none;
@@ -467,9 +535,26 @@
 .tikzjax-hebrew-local-inline-preview-output {
   width: 100%;
   height: 100%;
+  min-height: 100%;
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.tikzjax-hebrew-local-inline-preview-output.luatikz-pick-surface {
+  cursor: crosshair;
+}
+
+.tikzjax-hebrew-local-inline-preview-output.luatikz-diagram-align-left {
+  justify-content: flex-start;
+}
+
+.tikzjax-hebrew-local-inline-preview-output.luatikz-diagram-align-center {
   justify-content: center;
+}
+
+.tikzjax-hebrew-local-inline-preview-output.luatikz-diagram-align-right {
+  justify-content: flex-end;
 }
 
 .tikzjax-hebrew-local-inline-preview-image {
@@ -574,4 +659,52 @@
   flex-wrap: wrap;
   margin-top: 4px;
   margin-bottom: 8px;
+}
+
+.luatikz-cheatsheet-row,
+.luatikz-template-row,
+.luatikz-category-row,
+.luatikz-snippet-row {
+  padding: 0.6em 0.4em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+
+.luatikz-cheatsheet-row:hover,
+.luatikz-template-row:hover,
+.luatikz-category-row:hover,
+.luatikz-snippet-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.luatikz-cheatsheet-snippet {
+  display: block;
+  font-size: 0.85em;
+  margin-top: 0.25em;
+}
+
+.tikzjax-hebrew-local-inline-preview img {
+  max-width: 100%;
+  height: auto;
+}
+
+.luatikz-inline-svg-host {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.luatikz-inline-svg-host svg {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.luatikz-inline-svg-host.luatikz-pick-mode {
+  cursor: crosshair;
 }

@@ -13,6 +13,19 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === 'production');
+const EXPORT_STUB = '0&&(module.exports={});';
+
+function trimBundledMainJs(bundlePath) {
+	let source = fs.readFileSync(bundlePath, 'utf8');
+	const exportIdx = source.lastIndexOf(EXPORT_STUB);
+	if (exportIdx !== -1) {
+		source = source.slice(0, exportIdx + EXPORT_STUB.length);
+	}
+	if (!source.endsWith('\n')) {
+		source += '\n';
+	}
+	fs.writeFileSync(bundlePath, source, 'utf8');
+}
 
 const punycodePath = require.resolve("punycode/");
 
@@ -48,7 +61,8 @@ esbuild.build({
 	banner: {
 		js: banner,
 	},
-	entryPoints: ['main.ts'],
+	entryPoints: ['src/main.ts'],
+	outfile: 'main.js',
 	bundle: true,
 	plugins: [punycodeAliasPlugin, tikzjaxBootstrapPatch],
 	external: [
@@ -82,6 +96,10 @@ esbuild.build({
 	logLevel: "info",
 	sourcemap: prod ? false : 'inline',
 	treeShaking: true,
-	outfile: 'main.js',
+	minify: prod,
 	platform: 'node',
+}).then(() => {
+	if (prod) {
+		trimBundledMainJs('main.js');
+	}
 }).catch(() => process.exit(1));

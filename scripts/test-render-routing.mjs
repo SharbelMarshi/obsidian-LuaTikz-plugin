@@ -29,8 +29,8 @@ function assert(condition, message) {
 	}
 }
 
-const { resolveTikzJaxDispatch, ARABIC_REQUIRES_LUALATEX_ERROR } = await loadModule('utils/renderRouting.ts');
-const { containsArabic, containsArabicContent, containsHebrew, containsRtl } = await loadModule('utils/rtlDetection.ts');
+const { resolveTikzJaxDispatch, ARABIC_REQUIRES_LUALATEX_ERROR } = await loadModule('src/utils/renderRouting.ts');
+const { containsArabic, containsArabicContent, containsHebrew, containsRtl } = await loadModule('src/utils/rtlDetection.ts');
 
 assert(containsHebrew('עברית'), 'Hebrew detection failed');
 assert(containsArabic('العربية'), 'Arabic detection failed');
