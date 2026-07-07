@@ -18,9 +18,52 @@ interface ChildProcessModule {
 }
 
 const CHILD_PROCESS_MODULE = ['child', '_', 'process'].join('');
+const FS_MODULE = 'fs';
+
+interface DesktopFs {
+	existsSync(path: string): boolean;
+	readFileSync(path: string, encoding: 'utf8'): string;
+	readFileSync(path: string): Buffer;
+}
+
+function tryLoadFs(): DesktopFs | null {
+	const req = electronRequire();
+	if (!req) {
+		return null;
+	}
+	try {
+		return req(FS_MODULE) as DesktopFs;
+	} catch {
+		return null;
+	}
+}
+
+export function desktopFsExists(fsPath: string): boolean {
+	const fs = tryLoadFs();
+	return fs?.existsSync(fsPath) ?? false;
+}
+
+export function desktopFsReadText(fsPath: string, maxChars = 8000): string {
+	const fs = tryLoadFs();
+	if (!fs?.existsSync(fsPath)) {
+		return '';
+	}
+	const text = fs.readFileSync(fsPath, 'utf8');
+	return text.length <= maxChars ? text : `...(truncated)...\n${text.slice(-maxChars)}`;
+}
+
+export function desktopFsReadBinary(fsPath: string): Uint8Array | null {
+	const fs = tryLoadFs();
+	if (!fs?.existsSync(fsPath)) {
+		return null;
+	}
+	const data = fs.readFileSync(fsPath);
+	return data instanceof Uint8Array ? data : new Uint8Array(data);
+}
 
 function electronRequire(): NodeRequire | null {
-	const req = (globalThis as { require?: NodeRequire }).require;
+	const win = window as Window & { require?: NodeRequire };
+	const req = win.require;
 	return typeof req === 'function' ? req : null;
 }
 
@@ -55,9 +98,9 @@ export function spawnWithTimeout(
 		let stdout = '';
 		let stderr = '';
 		const maxBuffer = options.maxBuffer ?? 10 * 1024 * 1024;
-		const { spawn } = loadChildProcess();
+		const childProcess = loadChildProcess();
 
-		const child = spawn(file, args, {
+		const child = childProcess.spawn(file, args, {
 			cwd: options.cwd,
 			shell: false,
 			windowsHide: true,
@@ -107,19 +150,22 @@ export function spawnWithTimeout(
 	});
 }
 
-async function commandIsRunnable(command: string): Promise<boolean> {
+async function commandIsRunnable(command: string, probeArgs: readonly string[] = ['--version']): Promise<boolean> {
 	try {
-		await spawnWithTimeout(command, ['--version'], {}, 5_000);
+		await spawnWithTimeout(command, [...probeArgs], {}, 5_000);
 		return true;
 	} catch {
 		return false;
 	}
 }
 
-async function resolveCommand(candidates: string[]): Promise<string | null> {
+async function resolveCommand(
+	candidates: readonly string[],
+	probeArgs: readonly string[] = ['--version'],
+): Promise<string | null> {
 	for (const candidate of candidates) {
 		if (candidate.includes('/')) {
-			if (await commandIsRunnable(candidate)) {
+			if (await commandIsRunnable(candidate, probeArgs)) {
 				return candidate;
 			}
 			continue;
@@ -128,7 +174,7 @@ async function resolveCommand(candidates: string[]): Promise<string | null> {
 		try {
 			const { stdout } = await spawnWithTimeout('/usr/bin/which', [candidate], {}, 5_000);
 			const resolved = stdout.trim();
-			if (resolved && await commandIsRunnable(resolved)) {
+			if (resolved && await commandIsRunnable(resolved, probeArgs)) {
 				return resolved;
 			}
 		} catch {
@@ -158,12 +204,13 @@ export async function resolveLuaLatex(customPath?: string): Promise<string | nul
 }
 
 export async function resolvePdfToCairo(): Promise<string | null> {
+	// pdftocairo rejects --version; it requires -v or an output-format flag.
 	return resolveCommand([
 		'/opt/homebrew/bin/pdftocairo',
 		'/usr/local/bin/pdftocairo',
 		'/usr/bin/pdftocairo',
 		'pdftocairo',
-	]);
+	], ['-v']);
 }
 
 export function formatExecError(err: unknown): string {

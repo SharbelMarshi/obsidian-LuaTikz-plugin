@@ -1,6 +1,7 @@
 import { normalizePath, type App } from 'obsidian';
 import {
 	clearPluginTempFsDir,
+	adapterOrDesktopExists,
 	ensureAdapterFolderExists,
 	ensurePluginTempFsDir,
 	getDesktopFsPath,
@@ -10,6 +11,8 @@ import {
 } from '../core/pluginPaths';
 import {
 	RenderTimeoutError,
+	desktopFsReadBinary,
+	desktopFsReadText,
 	formatExecError,
 	resolveLuaLatex,
 	resolvePdfToCairo,
@@ -78,11 +81,35 @@ async function resolvePngAdapterPath(
 		normalizePath(`${jobAdapterDir}/${jobId}-1.png`),
 	];
 	for (const candidate of candidates) {
-		if (await app.vault.adapter.exists(candidate)) {
+		if (await adapterOrDesktopExists(app, candidate)) {
 			return candidate;
 		}
 	}
 	return null;
+}
+
+async function readArtifactText(app: App, adapterPath: string): Promise<string> {
+	if (await app.vault.adapter.exists(adapterPath)) {
+		return app.vault.adapter.read(adapterPath);
+	}
+	const fsPath = getDesktopFsPath(app, adapterPath);
+	return fsPath ? desktopFsReadText(fsPath, Number.POSITIVE_INFINITY) : '';
+}
+
+async function readArtifactBinary(app: App, adapterPath: string): Promise<ArrayBuffer | null> {
+	if (await app.vault.adapter.exists(adapterPath)) {
+		return app.vault.adapter.readBinary(adapterPath);
+	}
+	const fsPath = getDesktopFsPath(app, adapterPath);
+	const bytes = fsPath ? desktopFsReadBinary(fsPath) : null;
+	if (!bytes) {
+		return null;
+	}
+	return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function isSvgOutput(text: string): boolean {
+	return text.includes('<svg');
 }
 
 export class LuaLatexRenderer {
@@ -267,7 +294,7 @@ export class LuaLatexRenderer {
 				return this.latexError(raw, source, settings, errorContext, err instanceof RenderTimeoutError, debugInfo);
 			}
 
-			if (!(await this.app.vault.adapter.exists(pdfAdapterPath))) {
+			if (!(await adapterOrDesktopExists(this.app, pdfAdapterPath))) {
 				const logTail = await readAdapterLogTail(this.app, logAdapterPath);
 				const raw = logTail
 					? `No PDF produced.\n--- log ---\n${logTail}`
@@ -314,7 +341,17 @@ export class LuaLatexRenderer {
 					);
 				}
 
-				const pngBytes = await this.app.vault.adapter.readBinary(pngAdapterPath);
+				const pngBytes = await readArtifactBinary(this.app, pngAdapterPath);
+				if (!pngBytes) {
+					return this.latexError(
+						'No PNG produced.',
+						source,
+						settings,
+						errorContext,
+						false,
+						debugInfo,
+					);
+				}
 				const dataUrl = `data:image/png;base64,${encodeBytesBase64(pngBytes)}`;
 				return { ok: true, engine: 'lualatex', dataUrl };
 			}
@@ -329,11 +366,17 @@ export class LuaLatexRenderer {
 				};
 			}
 
+			let svgText = '';
+			let pdftocairoStderr = '';
 			try {
-				await spawnWithTimeout(pdftocairo, ['-svg', pdfFileName, svgFileName], {
-					cwd: workDir,
-					maxBuffer: 30 * 1024 * 1024,
-				}, settings.timeoutMs);
+				const { stdout, stderr } = await spawnWithTimeout(
+					pdftocairo,
+					['-svg', pdfFileName, '-'],
+					{ cwd: workDir, maxBuffer: 30 * 1024 * 1024 },
+					settings.timeoutMs,
+				);
+				svgText = stdout;
+				pdftocairoStderr = stderr;
 			} catch (err) {
 				return this.latexError(
 					formatExecError(err),
@@ -345,9 +388,14 @@ export class LuaLatexRenderer {
 				);
 			}
 
-			if (!(await this.app.vault.adapter.exists(svgAdapterPath))) {
+			if (!isSvgOutput(svgText)) {
+				svgText = await readArtifactText(this.app, svgAdapterPath);
+			}
+
+			if (!isSvgOutput(svgText)) {
+				const details = [pdftocairoStderr, 'No SVG produced.'].filter(Boolean).join('\n');
 				return this.latexError(
-					'No SVG produced.',
+					details,
 					source,
 					settings,
 					errorContext,
@@ -355,8 +403,6 @@ export class LuaLatexRenderer {
 					debugInfo,
 				);
 			}
-
-			let svgText = await this.app.vault.adapter.read(svgAdapterPath);
 			if (invertDark) {
 				svgText = invertSvgForDarkMode(svgText);
 			}

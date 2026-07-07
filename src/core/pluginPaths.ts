@@ -1,4 +1,5 @@
 import { normalizePath, type App } from 'obsidian';
+import { desktopFsExists, desktopFsReadText } from '../desktop/lualatexShell';
 
 export function getPluginDir(app: App, pluginId: string): string {
 	return normalizePath(`${app.vault.configDir}/plugins/${pluginId}`);
@@ -43,12 +44,30 @@ export function getPluginFsDir(app: App, pluginId: string): string | null {
 }
 
 export function getDesktopFsPath(app: App, adapterPath: string): string | null {
+	const normalized = normalizePath(adapterPath);
+	const adapter = app.vault.adapter as {
+		getFullPath?: (path: string) => string;
+	};
+
+	if (typeof adapter.getFullPath === 'function') {
+		try {
+			return adapter.getFullPath(normalized);
+		} catch {
+			// fall through
+		}
+	}
+
 	const basePath = getVaultBasePath(app);
 	if (!basePath) {
 		return null;
 	}
 
-	return normalizePath(`${basePath}/${adapterPath}`);
+	const posix = `${basePath.replace(/\\/g, '/').replace(/\/+$/, '')}/${normalized}`;
+	// Obsidian normalizePath is vault-relative and strips a leading slash; preserve absolute paths.
+	if (posix.startsWith('/')) {
+		return posix.replace(/\/+/g, '/');
+	}
+	return posix.replace(/\/+/g, '/');
 }
 
 export async function ensureAdapterFolderExists(app: App, folderPath: string): Promise<void> {
@@ -96,16 +115,29 @@ export async function ensurePluginTempFsDir(
 	return { ok: true, workDir };
 }
 
+export async function adapterOrDesktopExists(app: App, adapterPath: string): Promise<boolean> {
+	if (await app.vault.adapter.exists(adapterPath)) {
+		return true;
+	}
+	const fsPath = getDesktopFsPath(app, adapterPath);
+	return fsPath ? desktopFsExists(fsPath) : false;
+}
+
 export async function readAdapterLogTail(
 	app: App,
 	adapterPath: string,
 	maxChars = 8000,
 ): Promise<string> {
-	if (!(await app.vault.adapter.exists(adapterPath))) {
-		return '';
+	if (await app.vault.adapter.exists(adapterPath)) {
+		const log = await app.vault.adapter.read(adapterPath);
+		return log.length <= maxChars ? log : `...(truncated)...\n${log.slice(-maxChars)}`;
 	}
-	const log = await app.vault.adapter.read(adapterPath);
-	return log.length <= maxChars ? log : `...(truncated)...\n${log.slice(-maxChars)}`;
+
+	const fsPath = getDesktopFsPath(app, adapterPath);
+	if (fsPath) {
+		return desktopFsReadText(fsPath, maxChars);
+	}
+	return '';
 }
 
 export async function removeAdapterFolder(app: App, folderPath: string): Promise<void> {

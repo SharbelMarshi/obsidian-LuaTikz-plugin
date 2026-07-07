@@ -6,7 +6,7 @@ import { parseTikzBlockContext, allLibrariesNeeded } from '../latex/tikzBlockCon
 const OPEN_FENCE_RE = /^```(?:tikz|luatikz)\b.*$/;
 const BEGIN_ENV_RE = /\\begin\{([^}]+)\}/g;
 const END_ENV_RE = /\\end\{([^}]+)\}/g;
-const EMPTY_KEY_RE = /(?:^|[\s,{])([A-Za-z!-]+)=\s*(?=[,\]]|$)/;
+const EMPTY_KEY_RE = /(?:^|[\s,{])([A-Za-z!-]+)=\s*(?=[,\]]|$)/g;
 
 function findTikzBlocks(doc: Text): { from: number; to: number; source: string }[] {
 	const blocks: { from: number; to: number; source: string }[] = [];

@@ -24,8 +24,8 @@ function sha256Bytes(message: Uint8Array): Uint8Array {
 	const padLength = (message.length + 9) % 64 === 0
 		? message.length + 9
 		: message.length + 9 + (64 - ((message.length + 9) % 64));
-	const padded = new Uint8Array(padLength + 8);
-	padded.set(withOne.subarray(0, withOne.length));
+	const padded = new Uint8Array(padLength);
+	padded.set(withOne);
 	const view = new DataView(padded.buffer);
 	view.setUint32(padded.length - 4, bitLength, false);
 
