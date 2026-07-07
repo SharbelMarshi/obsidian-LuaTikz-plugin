@@ -1,7 +1,6 @@
 export {
 	RenderTimeoutError,
 	formatExecError,
-	readLogTail,
 	resolveLuaLatex,
 	resolvePdfToCairo,
 	spawnWithTimeout,

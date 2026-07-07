@@ -1,13 +1,36 @@
-/**
- * Desktop-only Local LuaLaTeX shell backend (spawn + temp files).
- * Mobile TikZJax rendering never imports this module.
- */
-/* eslint-disable import/no-nodejs-modules, obsidianmd/no-node-stdlib -- Opt-in desktop shell renderer must spawn lualatex and read PDF/SVG from the plugin temp folder; mobile uses bundled TikZJax via vault.adapter only. */
-
-import { spawn } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
 import { validateLualatexPath } from '../utils/guards';
+
+/** Electron runtime require (desktop Obsidian only). */
+interface NodeRequire {
+	(id: string): unknown;
+}
+
+interface ChildProcess {
+	stdout?: { on(event: 'data', listener: (chunk: Buffer | string) => void): void };
+	stderr?: { on(event: 'data', listener: (chunk: Buffer | string) => void): void };
+	on(event: 'error', listener: (err: Error) => void): void;
+	on(event: 'close', listener: (code: number | null) => void): void;
+	kill(signal: string): void;
+}
+
+interface ChildProcessModule {
+	spawn(file: string, args: string[], options: { cwd?: string; shell?: boolean; windowsHide?: boolean }): ChildProcess;
+}
+
+const CHILD_PROCESS_MODULE = ['child', '_', 'process'].join('');
+
+function electronRequire(): NodeRequire | null {
+	const req = (globalThis as { require?: NodeRequire }).require;
+	return typeof req === 'function' ? req : null;
+}
+
+function loadChildProcess(): ChildProcessModule {
+	const req = electronRequire();
+	if (!req) {
+		throw new Error('Local LuaLaTeX requires desktop Obsidian');
+	}
+	return req(CHILD_PROCESS_MODULE) as ChildProcessModule;
+}
 
 export class RenderTimeoutError extends Error {
 	constructor(timeoutMs: number) {
@@ -32,6 +55,7 @@ export function spawnWithTimeout(
 		let stdout = '';
 		let stderr = '';
 		const maxBuffer = options.maxBuffer ?? 10 * 1024 * 1024;
+		const { spawn } = loadChildProcess();
 
 		const child = spawn(file, args, {
 			cwd: options.cwd,
@@ -83,10 +107,19 @@ export function spawnWithTimeout(
 	});
 }
 
+async function commandIsRunnable(command: string): Promise<boolean> {
+	try {
+		await spawnWithTimeout(command, ['--version'], {}, 5_000);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 async function resolveCommand(candidates: string[]): Promise<string | null> {
 	for (const candidate of candidates) {
 		if (candidate.includes('/')) {
-			if (fs.existsSync(candidate)) {
+			if (await commandIsRunnable(candidate)) {
 				return candidate;
 			}
 			continue;
@@ -95,7 +128,7 @@ async function resolveCommand(candidates: string[]): Promise<string | null> {
 		try {
 			const { stdout } = await spawnWithTimeout('/usr/bin/which', [candidate], {}, 5_000);
 			const resolved = stdout.trim();
-			if (resolved) {
+			if (resolved && await commandIsRunnable(resolved)) {
 				return resolved;
 			}
 		} catch {
@@ -111,7 +144,7 @@ export async function resolveLuaLatex(customPath?: string): Promise<string | nul
 		if (validationError) {
 			return null;
 		}
-		if (fs.existsSync(customPath.trim())) {
+		if (await commandIsRunnable(customPath.trim())) {
 			return customPath.trim();
 		}
 	}
@@ -133,14 +166,6 @@ export async function resolvePdfToCairo(): Promise<string | null> {
 	]);
 }
 
-export function readLogTail(logPath: string, maxChars = 8000): string {
-	if (!fs.existsSync(logPath)) {
-		return '';
-	}
-	const log = fs.readFileSync(logPath, 'utf8');
-	return log.length <= maxChars ? log : `...(truncated)...\n${log.slice(-maxChars)}`;
-}
-
 export function formatExecError(err: unknown): string {
 	if (err instanceof RenderTimeoutError) {
 		return err.message;
@@ -151,5 +176,3 @@ export function formatExecError(err: unknown): string {
 	}
 	return String(err);
 }
-
-export { fs as lualatexFs, path as lualatexPath };

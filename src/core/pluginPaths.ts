@@ -96,7 +96,19 @@ export async function ensurePluginTempFsDir(
 	return { ok: true, workDir };
 }
 
-async function removeAdapterTree(app: App, folderPath: string): Promise<void> {
+export async function readAdapterLogTail(
+	app: App,
+	adapterPath: string,
+	maxChars = 8000,
+): Promise<string> {
+	if (!(await app.vault.adapter.exists(adapterPath))) {
+		return '';
+	}
+	const log = await app.vault.adapter.read(adapterPath);
+	return log.length <= maxChars ? log : `...(truncated)...\n${log.slice(-maxChars)}`;
+}
+
+export async function removeAdapterFolder(app: App, folderPath: string): Promise<void> {
 	const adapter = app.vault.adapter;
 	if (!(await adapter.exists(folderPath))) {
 		return;
@@ -121,7 +133,7 @@ async function removeAdapterTree(app: App, folderPath: string): Promise<void> {
 
 export async function clearPluginTempFsDir(app: App, pluginId: string): Promise<void> {
 	const tempAdapterDir = getPluginTempDir(app, pluginId);
-	await removeAdapterTree(app, tempAdapterDir);
+	await removeAdapterFolder(app, tempAdapterDir);
 
 	try {
 		await ensureAdapterFolderExists(app, tempAdapterDir);

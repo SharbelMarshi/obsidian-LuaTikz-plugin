@@ -1,17 +1,19 @@
-import type { App } from 'obsidian';
+import { normalizePath, type App } from 'obsidian';
 import {
 	clearPluginTempFsDir,
+	ensureAdapterFolderExists,
 	ensurePluginTempFsDir,
+	getDesktopFsPath,
+	getPluginTempDir,
+	readAdapterLogTail,
+	removeAdapterFolder,
 } from '../core/pluginPaths';
 import {
 	RenderTimeoutError,
 	formatExecError,
-	readLogTail,
 	resolveLuaLatex,
 	resolvePdfToCairo,
 	spawnWithTimeout,
-	lualatexFs,
-	lualatexPath,
 } from '../desktop/lualatexShell';
 import {
 	formatLatexErrorWithLineMapping,
@@ -66,13 +68,17 @@ function formatCompileDebugLog(debug: CompileDebugInfo, body: string): string {
 	].join('\n');
 }
 
-function resolvePngOutputPath(workDir: string, jobId: string): string | null {
+async function resolvePngAdapterPath(
+	app: App,
+	jobAdapterDir: string,
+	jobId: string,
+): Promise<string | null> {
 	const candidates = [
-		lualatexPath.join(workDir, `${jobId}.png`),
-		lualatexPath.join(workDir, `${jobId}-1.png`),
+		normalizePath(`${jobAdapterDir}/${jobId}.png`),
+		normalizePath(`${jobAdapterDir}/${jobId}-1.png`),
 	];
 	for (const candidate of candidates) {
-		if (lualatexFs.existsSync(candidate)) {
+		if (await app.vault.adapter.exists(candidate)) {
 			return candidate;
 		}
 	}
@@ -203,20 +209,27 @@ export class LuaLatexRenderer {
 			};
 		}
 
-		// Local LuaLaTeX requires Node fs to write per-render .tex/.pdf files inside the plugin temp dir.
-		const workRoot = tempDirResult.workDir;
-		lualatexFs.mkdirSync(workRoot, { recursive: true });
-
 		const safeId = sanitizeCacheFilename(key.slice(0, 16));
 		const jobId = `luatikz-${safeId}`;
-		const workDir = lualatexFs.mkdtempSync(lualatexPath.join(workRoot, `${jobId}-`));
+		const jobAdapterDir = normalizePath(`${getPluginTempDir(this.app, this.pluginId)}/${jobId}`);
+		await ensureAdapterFolderExists(this.app, jobAdapterDir);
+
+		const workDir = getDesktopFsPath(this.app, jobAdapterDir);
+		if (!workDir) {
+			return {
+				ok: false,
+				engine: 'lualatex',
+				error: 'Local LuaLaTeX rendering requires desktop filesystem access.',
+			};
+		}
+
 		const texFileName = `${jobId}.tex`;
 		const pdfFileName = `${jobId}.pdf`;
 		const svgFileName = `${jobId}.svg`;
-		const logPath = lualatexPath.join(workDir, `${jobId}.log`);
-		const texPath = lualatexPath.join(workDir, texFileName);
-		const pdfPath = lualatexPath.join(workDir, pdfFileName);
-		const svgPath = lualatexPath.join(workDir, svgFileName);
+		const logAdapterPath = normalizePath(`${jobAdapterDir}/${jobId}.log`);
+		const texAdapterPath = normalizePath(`${jobAdapterDir}/${texFileName}`);
+		const pdfAdapterPath = normalizePath(`${jobAdapterDir}/${pdfFileName}`);
+		const svgAdapterPath = normalizePath(`${jobAdapterDir}/${svgFileName}`);
 
 		const lualatex = await resolveLuaLatex(settings.lualatexPath);
 		if (!lualatex) {
@@ -235,7 +248,10 @@ export class LuaLatexRenderer {
 		};
 
 		try {
-			lualatexFs.writeFileSync(texPath, wrapLatexSource(source, settings.extraPreamble), 'utf8');
+			await this.app.vault.adapter.write(
+				texAdapterPath,
+				wrapLatexSource(source, settings.extraPreamble),
+			);
 
 			try {
 				await spawnWithTimeout(lualatex, [
@@ -244,15 +260,15 @@ export class LuaLatexRenderer {
 					texFileName,
 				], { cwd: workDir, maxBuffer: 10 * 1024 * 1024 }, settings.timeoutMs);
 			} catch (err) {
-				const logTail = readLogTail(logPath);
+				const logTail = await readAdapterLogTail(this.app, logAdapterPath);
 				const raw = [formatExecError(err), logTail && `\n--- log ---\n${logTail}`]
 					.filter(Boolean)
 					.join('\n');
 				return this.latexError(raw, source, settings, errorContext, err instanceof RenderTimeoutError, debugInfo);
 			}
 
-			if (!lualatexFs.existsSync(pdfPath)) {
-				const logTail = readLogTail(logPath);
+			if (!(await this.app.vault.adapter.exists(pdfAdapterPath))) {
+				const logTail = await readAdapterLogTail(this.app, logAdapterPath);
 				const raw = logTail
 					? `No PDF produced.\n--- log ---\n${logTail}`
 					: 'No PDF produced.';
@@ -286,8 +302,8 @@ export class LuaLatexRenderer {
 					);
 				}
 
-				const pngPath = resolvePngOutputPath(workDir, jobId);
-				if (!pngPath) {
+				const pngAdapterPath = await resolvePngAdapterPath(this.app, jobAdapterDir, jobId);
+				if (!pngAdapterPath) {
 					return this.latexError(
 						'No PNG produced.',
 						source,
@@ -298,9 +314,9 @@ export class LuaLatexRenderer {
 					);
 				}
 
-				const pngData = lualatexFs.readFileSync(pngPath);
-				const dataUrl = `data:image/png;base64,${encodeBytesBase64(pngData)}`;
-				return { ok: true, engine: 'lualatex', pngPath, dataUrl };
+				const pngBytes = await this.app.vault.adapter.readBinary(pngAdapterPath);
+				const dataUrl = `data:image/png;base64,${encodeBytesBase64(pngBytes)}`;
+				return { ok: true, engine: 'lualatex', dataUrl };
 			}
 
 			const pdftocairo = await resolvePdfToCairo();
@@ -329,7 +345,7 @@ export class LuaLatexRenderer {
 				);
 			}
 
-			if (!lualatexFs.existsSync(svgPath)) {
+			if (!(await this.app.vault.adapter.exists(svgAdapterPath))) {
 				return this.latexError(
 					'No SVG produced.',
 					source,
@@ -340,7 +356,7 @@ export class LuaLatexRenderer {
 				);
 			}
 
-			let svgText = lualatexFs.readFileSync(svgPath, 'utf8');
+			let svgText = await this.app.vault.adapter.read(svgAdapterPath);
 			if (invertDark) {
 				svgText = invertSvgForDarkMode(svgText);
 			}
@@ -358,7 +374,7 @@ export class LuaLatexRenderer {
 			};
 		} finally {
 			try {
-				lualatexFs.rmSync(workDir, { recursive: true, force: true });
+				await removeAdapterFolder(this.app, jobAdapterDir);
 			} catch {
 				// ignore
 			}

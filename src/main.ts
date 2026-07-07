@@ -76,21 +76,11 @@ function migrateLegacySettings(raw: unknown, parsed: Partial<LuaTikzSettings>): 
 	return merged;
 }
 
-function flattenExtensions(...extensions: readonly (Extension | readonly Extension[])[]): Extension[] {
-	const flat: Extension[] = [];
-	for (const extension of extensions) {
-		if (Array.isArray(extension)) {
-			for (let index = 0; index < extension.length; index++) {
-				const item = extension[index];
-				if (item !== undefined) {
-					flat.push(item);
-				}
-			}
-			continue;
-		}
-		flat.push(extension);
+function extensionList(extension: Extension): Extension[] {
+	if (Array.isArray(extension)) {
+		return extension as Extension[];
 	}
-	return flat;
+	return [extension];
 }
 
 class TikzBlockRefresherCleanup extends MarkdownRenderChild {
@@ -145,17 +135,17 @@ export default class LuaTikzPlugin extends Plugin {
 				this.app,
 			);
 
-			this.registerEditorExtension(flattenExtensions(
-				latexAutocompleteExtension(),
-				tikzIdeExtension(),
-				tikzErrorHighlightExtension(),
-				tikzFenceStarterExtension(() => this.settings.starterBlockOnNewFence),
-				tikzStructuralLintExtension(() => this.settings.enableStructuralLint),
-				tikzSemicolonReminderExtension(() => this.settings.semicolonReminderMode),
-				tikzAutoCloseExtension(() => this.settings.autoCloseBrackets),
-				tikzDrawStarterSemicolonExtension(),
-				tikzCcycleExtension(),
-			));
+			this.registerEditorExtension([
+				...extensionList(latexAutocompleteExtension()),
+				...extensionList(tikzIdeExtension()),
+				...tikzErrorHighlightExtension(),
+				...extensionList(tikzFenceStarterExtension(() => this.settings.starterBlockOnNewFence)),
+				...extensionList(tikzStructuralLintExtension(() => this.settings.enableStructuralLint)),
+				...extensionList(tikzSemicolonReminderExtension(() => this.settings.semicolonReminderMode)),
+				...extensionList(tikzAutoCloseExtension(() => this.settings.autoCloseBrackets)),
+				...extensionList(tikzDrawStarterSemicolonExtension()),
+				...extensionList(tikzCcycleExtension()),
+			]);
 
 			this.addCommand({
 				id: 'toggle-tikz-inline-live-preview',
