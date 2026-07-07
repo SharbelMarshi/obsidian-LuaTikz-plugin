@@ -10,7 +10,9 @@ import {
 	resolveLuaLatex,
 	resolvePdfToCairo,
 	spawnWithTimeout,
-} from '../core/commandResolver';
+	lualatexFs,
+	lualatexPath,
+} from '../desktop/lualatexShell';
 import {
 	formatLatexErrorWithLineMapping,
 	createNoteLineMapper,
@@ -19,7 +21,8 @@ import {
 import type { LuaTikzSettings } from '../settings/settingsModel';
 import { getUserSourceLineOffsetForExtraPreamble, wrapLatexSource } from '../core/tikzSource';
 import type { RenderRequest, RenderResult } from '../core/types';
-import { nodeCrypto, encodeUtf8Base64, encodeBytesBase64, nodeFs, nodePath } from '../utils/desktopNode';
+import { encodeUtf8Base64, encodeBytesBase64 } from '../utils/base64Utils';
+import { sha256Hex } from '../utils/sha256Hex';
 import { sanitizeCacheFilename, validateLualatexPath, firstMapKey, asString } from '../utils/guards';
 import { invertSvgForDarkMode } from '../utils/darkMode';
 
@@ -38,14 +41,14 @@ interface CompileDebugInfo {
 }
 
 function cacheKey(source: string, invertDark: boolean, settings: LuaTikzSettings): string {
-	return nodeCrypto().createHash('sha256')
-		.update(source)
-		.update(invertDark ? ':dark' : ':light')
-		.update(settings.lualatexPath)
-		.update(settings.extraPreamble)
-		.update(settings.darkModeStyle)
-		.update(String(settings.timeoutMs))
-		.digest('hex');
+	return sha256Hex([
+		source,
+		invertDark ? ':dark' : ':light',
+		settings.lualatexPath,
+		settings.extraPreamble,
+		settings.darkModeStyle,
+		String(settings.timeoutMs),
+	]);
 }
 
 function svgDataUrl(svgText: string): string {
@@ -65,11 +68,11 @@ function formatCompileDebugLog(debug: CompileDebugInfo, body: string): string {
 
 function resolvePngOutputPath(workDir: string, jobId: string): string | null {
 	const candidates = [
-		nodePath().join(workDir, `${jobId}.png`),
-		nodePath().join(workDir, `${jobId}-1.png`),
+		lualatexPath.join(workDir, `${jobId}.png`),
+		lualatexPath.join(workDir, `${jobId}-1.png`),
 	];
 	for (const candidate of candidates) {
-		if (nodeFs().existsSync(candidate)) {
+		if (lualatexFs.existsSync(candidate)) {
 			return candidate;
 		}
 	}
@@ -202,18 +205,18 @@ export class LuaLatexRenderer {
 
 		// Local LuaLaTeX requires Node fs to write per-render .tex/.pdf files inside the plugin temp dir.
 		const workRoot = tempDirResult.workDir;
-		nodeFs().mkdirSync(workRoot, { recursive: true });
+		lualatexFs.mkdirSync(workRoot, { recursive: true });
 
 		const safeId = sanitizeCacheFilename(key.slice(0, 16));
 		const jobId = `luatikz-${safeId}`;
-		const workDir = nodeFs().mkdtempSync(nodePath().join(workRoot, `${jobId}-`));
+		const workDir = lualatexFs.mkdtempSync(lualatexPath.join(workRoot, `${jobId}-`));
 		const texFileName = `${jobId}.tex`;
 		const pdfFileName = `${jobId}.pdf`;
 		const svgFileName = `${jobId}.svg`;
-		const logPath = nodePath().join(workDir, `${jobId}.log`);
-		const texPath = nodePath().join(workDir, texFileName);
-		const pdfPath = nodePath().join(workDir, pdfFileName);
-		const svgPath = nodePath().join(workDir, svgFileName);
+		const logPath = lualatexPath.join(workDir, `${jobId}.log`);
+		const texPath = lualatexPath.join(workDir, texFileName);
+		const pdfPath = lualatexPath.join(workDir, pdfFileName);
+		const svgPath = lualatexPath.join(workDir, svgFileName);
 
 		const lualatex = await resolveLuaLatex(settings.lualatexPath);
 		if (!lualatex) {
@@ -232,7 +235,7 @@ export class LuaLatexRenderer {
 		};
 
 		try {
-			nodeFs().writeFileSync(texPath, wrapLatexSource(source, settings.extraPreamble), 'utf8');
+			lualatexFs.writeFileSync(texPath, wrapLatexSource(source, settings.extraPreamble), 'utf8');
 
 			try {
 				await spawnWithTimeout(lualatex, [
@@ -248,7 +251,7 @@ export class LuaLatexRenderer {
 				return this.latexError(raw, source, settings, errorContext, err instanceof RenderTimeoutError, debugInfo);
 			}
 
-			if (!nodeFs().existsSync(pdfPath)) {
+			if (!lualatexFs.existsSync(pdfPath)) {
 				const logTail = readLogTail(logPath);
 				const raw = logTail
 					? `No PDF produced.\n--- log ---\n${logTail}`
@@ -295,7 +298,7 @@ export class LuaLatexRenderer {
 					);
 				}
 
-				const pngData = nodeFs().readFileSync(pngPath);
+				const pngData = lualatexFs.readFileSync(pngPath);
 				const dataUrl = `data:image/png;base64,${encodeBytesBase64(pngData)}`;
 				return { ok: true, engine: 'lualatex', pngPath, dataUrl };
 			}
@@ -326,7 +329,7 @@ export class LuaLatexRenderer {
 				);
 			}
 
-			if (!nodeFs().existsSync(svgPath)) {
+			if (!lualatexFs.existsSync(svgPath)) {
 				return this.latexError(
 					'No SVG produced.',
 					source,
@@ -337,7 +340,7 @@ export class LuaLatexRenderer {
 				);
 			}
 
-			let svgText = nodeFs().readFileSync(svgPath, 'utf8');
+			let svgText = lualatexFs.readFileSync(svgPath, 'utf8');
 			if (invertDark) {
 				svgText = invertSvgForDarkMode(svgText);
 			}
@@ -355,7 +358,7 @@ export class LuaLatexRenderer {
 			};
 		} finally {
 			try {
-				nodeFs().rmSync(workDir, { recursive: true, force: true });
+				lualatexFs.rmSync(workDir, { recursive: true, force: true });
 			} catch {
 				// ignore
 			}

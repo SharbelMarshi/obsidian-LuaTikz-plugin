@@ -9,7 +9,7 @@ import {
 } from '../core/pluginPaths';
 import { isMobileApp } from './platform';
 import { setTikzJaxTexDir } from './tikzJaxGlobal';
-import { decodeBase64, nodeFs, nodePath } from './desktopNode';
+import { decodeBase64 } from './base64Utils';
 import {
 	readBundledAssetBase64,
 	TIKZJAX_BUNDLED_ASSET_NAMES,
@@ -21,20 +21,6 @@ const HASH_FILE = '.luatikz-tex-hash';
 
 function getCacheTexAdapterDir(app: App, pluginId: string): string {
 	return normalizePath(`${getPluginDir(app, pluginId)}/${CACHE_TEX_SUBDIR}`);
-}
-
-function readHashFromFs(texDir: string): string | null {
-	const fs = nodeFs();
-	const hashPath = nodePath().join(texDir, HASH_FILE);
-	if (!fs.existsSync(hashPath)) {
-		return null;
-	}
-
-	try {
-		return fs.readFileSync(hashPath, 'utf8').trim();
-	} catch {
-		return null;
-	}
 }
 
 async function readHashFromAdapter(adapter: DataAdapter, texAdapterDir: string): Promise<string | null> {
@@ -50,12 +36,6 @@ async function readHashFromAdapter(adapter: DataAdapter, texAdapterDir: string):
 	}
 }
 
-function texDirHasAssetsFs(texDir: string): boolean {
-	const fs = nodeFs();
-	const path = nodePath();
-	return TIKZJAX_BUNDLED_ASSET_NAMES.every(fileName => fs.existsSync(path.join(texDir, fileName)));
-}
-
 async function texDirHasAssetsAdapter(adapter: DataAdapter, texAdapterDir: string): Promise<boolean> {
 	for (const fileName of TIKZJAX_BUNDLED_ASSET_NAMES) {
 		if (!(await adapter.exists(`${texAdapterDir}/${fileName}`))) {
@@ -67,16 +47,6 @@ async function texDirHasAssetsAdapter(adapter: DataAdapter, texAdapterDir: strin
 
 function bundledAssetBytes(fileName: TikzJaxBundledAssetName): Uint8Array {
 	return decodeBase64(readBundledAssetBase64(fileName));
-}
-
-function writeTexDirFs(targetDir: string): void {
-	const fs = nodeFs();
-	const path = nodePath();
-	fs.mkdirSync(targetDir, { recursive: true });
-	for (const fileName of TIKZJAX_BUNDLED_ASSET_NAMES) {
-		fs.writeFileSync(path.join(targetDir, fileName), bundledAssetBytes(fileName));
-	}
-	fs.writeFileSync(path.join(targetDir, HASH_FILE), `${TIKZJAX_TEX_ASSET_HASH}\n`, 'utf8');
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -119,7 +89,7 @@ function resolveTexDirFromAdapter(app: App, texAdapterDir: string): string | nul
 	if (typeof adapter.getBasePath === 'function') {
 		const basePath = adapter.getBasePath();
 		if (basePath) {
-			return nodePath().join(basePath, texAdapterDir);
+			return normalizePath(`${basePath}/${texAdapterDir}`);
 		}
 	}
 
@@ -143,22 +113,13 @@ export async function ensureTikzJaxTexExtracted(
 	}
 
 	const adapter = app.vault.adapter;
-	const desktopCacheDir = getDesktopFsPath(app, cacheTexAdapterDir);
-	const cacheHash = desktopCacheDir
-		? readHashFromFs(desktopCacheDir)
-		: await readHashFromAdapter(adapter, cacheTexAdapterDir);
-	const cacheHasAssets = desktopCacheDir
-		? texDirHasAssetsFs(desktopCacheDir)
-		: await texDirHasAssetsAdapter(adapter, cacheTexAdapterDir);
+	const cacheHash = await readHashFromAdapter(adapter, cacheTexAdapterDir);
+	const cacheHasAssets = await texDirHasAssetsAdapter(adapter, cacheTexAdapterDir);
 	const cacheReady = cacheHasAssets && cacheHash === TIKZJAX_TEX_ASSET_HASH;
 
 	if (!cacheReady) {
 		try {
-			if (desktopCacheDir) {
-				writeTexDirFs(desktopCacheDir);
-			} else {
-				await writeTexDirAdapter(app, cacheTexAdapterDir);
-			}
+			await writeTexDirAdapter(app, cacheTexAdapterDir);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return {
@@ -168,7 +129,8 @@ export async function ensureTikzJaxTexExtracted(
 		}
 	}
 
-	const texDir = desktopCacheDir ?? resolveTexDirFromAdapter(app, cacheTexAdapterDir);
+	const texDir = getDesktopFsPath(app, cacheTexAdapterDir)
+		?? resolveTexDirFromAdapter(app, cacheTexAdapterDir);
 	if (!texDir) {
 		return {
 			ok: false,

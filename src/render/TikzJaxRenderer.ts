@@ -10,7 +10,8 @@ import { splitExtraPreamble } from '../utils/extraPreamble';
 import type { RenderRequest, RenderResult } from '../core/types';
 import { firstMapKey, isCallable, isRecord, asString } from '../utils/guards';
 import { finalizeTikzJaxSvg } from '../utils/tikzJaxSvgFix';
-import { nodeCrypto, encodeUtf8Base64 } from '../utils/desktopNode';
+import { encodeUtf8Base64 } from '../utils/base64Utils';
+import { sha256Hex } from '../utils/sha256Hex';
 import { ensureTikzJaxTexExtracted } from '../utils/tikzJaxTexRuntime';
 
 const CACHE_MAX = 32;
@@ -48,10 +49,7 @@ function runExclusive<T>(task: () => Promise<T>): Promise<T> {
 }
 
 function cacheKey(source: string, settings: LuaTikzSettings): string {
-	return nodeCrypto().createHash('sha256')
-		.update(source)
-		.update(settings.extraPreamble)
-		.digest('hex');
+	return sha256Hex([source, settings.extraPreamble]);
 }
 
 function svgDataUrl(svgText: string): string {

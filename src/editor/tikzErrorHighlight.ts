@@ -292,7 +292,7 @@ export function highlightTikzErrorInEditor(
 	cm.dispatch(dispatchSpec);
 
 	// Rebuild widget decorations after handler registration.
-	activeWindow.requestAnimationFrame(() => {
+	window.requestAnimationFrame(() => {
 		if (!editorHasHighlightExtension(cm)) {
 			return;
 		}

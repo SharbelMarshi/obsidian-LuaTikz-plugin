@@ -199,13 +199,13 @@ export function showTikzErrorHighlightFromResult(
 
 	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
 	if (activeView?.file?.path === sourcePath) {
-		activeWindow.requestAnimationFrame(() => {
+		window.requestAnimationFrame(() => {
 			void showTikzErrorInEditor(app, sourcePath, location, { focus: false });
 		});
 		return;
 	}
 
-	activeWindow.requestAnimationFrame(() => {
+	window.requestAnimationFrame(() => {
 		void showTikzErrorInEditor(app, sourcePath, location, { focus: false });
 	});
 }

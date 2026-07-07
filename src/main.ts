@@ -76,12 +76,15 @@ function migrateLegacySettings(raw: unknown, parsed: Partial<LuaTikzSettings>): 
 	return merged;
 }
 
-function flattenExtensions(...extensions: (Extension | readonly Extension[])[]): Extension[] {
+function flattenExtensions(...extensions: readonly (Extension | readonly Extension[])[]): Extension[] {
 	const flat: Extension[] = [];
 	for (const extension of extensions) {
 		if (Array.isArray(extension)) {
-			for (const item of extension) {
-				flat.push(item);
+			for (let index = 0; index < extension.length; index++) {
+				const item = extension[index];
+				if (item !== undefined) {
+					flat.push(item);
+				}
 			}
 			continue;
 		}

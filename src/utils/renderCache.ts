@@ -1,9 +1,9 @@
-import { normalizePath, type App } from 'obsidian';
+import type { App } from 'obsidian';
 import type { LuaTikzRenderEngine, LuaTikzSettings } from '../settings/settingsModel';
 import type { RenderResult } from '../core/types';
-import { getPluginCacheDir, getPluginDir } from '../core/pluginPaths';
-import { isMobileApp } from './platform';
-import { encodeBytesBase64, encodeUtf8Base64, nodeCrypto, nodeFs, nodePath } from './desktopNode';
+import { ensureAdapterFolderExists, getPluginCacheDir } from '../core/pluginPaths';
+import { encodeBytesBase64, encodeUtf8Base64, decodeBase64 } from './base64Utils';
+import { sha256Hex } from './sha256Hex';
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 128;
@@ -29,34 +29,37 @@ function pngDataUrl(pngBytes: ArrayBuffer): string {
 	return `data:image/png;base64,${encodeBytesBase64(pngBytes)}`;
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+	return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 export function buildRenderCacheKey(
 	engine: LuaTikzRenderEngine,
 	source: string,
 	settings: LuaTikzSettings,
 	invertDark: boolean,
 ): string {
-	return nodeCrypto().createHash('sha256')
-		.update(engine)
-		.update(':')
-		.update(source)
-		.update(invertDark ? ':dark' : ':light')
-		.update(':')
-		.update(settings.lualatexPath)
-		.update(':')
-		.update(settings.extraPreamble)
-		.update(':')
-		.update(String(settings.timeoutMs))
-		.update(':')
-		.update(settings.outputFormat)
-		.update(':')
-		.update(settings.darkModeStyle)
-		.digest('hex');
+	return sha256Hex([
+		engine,
+		':',
+		source,
+		invertDark ? ':dark' : ':light',
+		':',
+		settings.lualatexPath,
+		':',
+		settings.extraPreamble,
+		':',
+		String(settings.timeoutMs),
+		':',
+		settings.outputFormat,
+		':',
+		settings.darkModeStyle,
+	]);
 }
 
 export class RenderDiskCache {
 	private memory = new Map<string, RenderResult & { createdAt: number }>();
 	private index: CacheIndexFile = { version: 2, entries: {} };
-	private cacheDir: string | null = null;
 	private cacheAdapterDir: string | null = null;
 	private loaded = false;
 
@@ -68,68 +71,28 @@ export class RenderDiskCache {
 	clear(): void {
 		this.memory.clear();
 		this.index = { version: 2, entries: {} };
-		if (this.cacheDir && nodeFs().existsSync(this.cacheDir)) {
-			try {
-				nodeFs().rmSync(this.cacheDir, { recursive: true, force: true });
-			} catch {
-				// ignore
-			}
-		}
 		this.loaded = false;
-		this.cacheDir = null;
 		this.cacheAdapterDir = null;
 	}
 
-	private async ensureLoaded(): Promise<string | null> {
-		if (this.loaded && (this.cacheDir || this.cacheAdapterDir)) {
-			return this.cacheDir;
+	private async ensureLoaded(): Promise<void> {
+		if (this.loaded && this.cacheAdapterDir) {
+			return;
 		}
 
-		this.cacheAdapterDir = normalizePath(`${getPluginDir(this.app, this.pluginId)}/.luatikz-cache`);
-		this.cacheDir = getPluginCacheDir(this.app, this.pluginId);
-
-		if (this.cacheDir) {
-			nodeFs().mkdirSync(this.cacheDir, { recursive: true });
-		} else if (isMobileApp) {
-			const parts = this.cacheAdapterDir.split('/').filter(Boolean);
-			let current = '';
-			for (const part of parts) {
-				current = current ? `${current}/${part}` : part;
-				if (!(await this.app.vault.adapter.exists(current))) {
-					await this.app.vault.adapter.mkdir(current);
-				}
-			}
-		} else {
-			return null;
-		}
-
+		this.cacheAdapterDir = getPluginCacheDir(this.app, this.pluginId);
+		await ensureAdapterFolderExists(this.app, this.cacheAdapterDir);
 		this.loaded = true;
 		await this.loadIndex();
 		this.pruneExpired();
-		return this.cacheDir;
 	}
 
 	private indexAdapterPath(): string {
 		return `${this.cacheAdapterDir}/index.json`;
 	}
 
-	private indexFsPath(): string | null {
-		return this.cacheDir ? nodePath().join(this.cacheDir, 'index.json') : null;
-	}
-
 	private async loadIndex(): Promise<void> {
 		try {
-			if (this.cacheDir) {
-				const indexPath = this.indexFsPath();
-				if (indexPath && nodeFs().existsSync(indexPath)) {
-					const parsed = JSON.parse(nodeFs().readFileSync(indexPath, 'utf8')) as CacheIndexFile;
-					if (parsed?.version === 2 && parsed.entries) {
-						this.index = parsed;
-						return;
-					}
-				}
-			}
-
 			if (this.cacheAdapterDir && await this.app.vault.adapter.exists(this.indexAdapterPath())) {
 				const raw = await this.app.vault.adapter.read(this.indexAdapterPath());
 				const parsed = JSON.parse(raw) as CacheIndexFile;
@@ -143,16 +106,11 @@ export class RenderDiskCache {
 	}
 
 	private async saveIndex(): Promise<void> {
+		if (!this.cacheAdapterDir) {
+			return;
+		}
 		const payload = JSON.stringify(this.index, null, 2);
-		if (this.cacheDir) {
-			const indexPath = this.indexFsPath();
-			if (indexPath) {
-				nodeFs().writeFileSync(indexPath, payload, 'utf8');
-			}
-		}
-		if (this.cacheAdapterDir) {
-			await this.app.vault.adapter.write(this.indexAdapterPath(), payload);
-		}
+		await this.app.vault.adapter.write(this.indexAdapterPath(), payload);
 	}
 
 	private assetAdapterPath(fileName: string): string {
@@ -160,19 +118,13 @@ export class RenderDiskCache {
 	}
 
 	private async deleteAsset(fileName: string): Promise<void> {
-		if (this.cacheDir) {
-			const filePath = nodePath().join(this.cacheDir, fileName);
-			if (nodeFs().existsSync(filePath)) {
-				try {
-					nodeFs().rmSync(filePath);
-				} catch {
-					// ignore
-				}
-			}
+		if (!this.cacheAdapterDir) {
+			return;
 		}
-		if (this.cacheAdapterDir && await this.app.vault.adapter.exists(this.assetAdapterPath(fileName))) {
+		const adapterPath = this.assetAdapterPath(fileName);
+		if (await this.app.vault.adapter.exists(adapterPath)) {
 			try {
-				await this.app.vault.adapter.remove(this.assetAdapterPath(fileName));
+				await this.app.vault.adapter.remove(adapterPath);
 			} catch {
 				// ignore
 			}
@@ -211,23 +163,17 @@ export class RenderDiskCache {
 	}
 
 	private async readAsset(entry: CacheIndexEntry): Promise<RenderResult | null> {
+		if (!this.cacheAdapterDir) {
+			return null;
+		}
+
+		const adapterPath = this.assetAdapterPath(entry.assetFile);
+		if (!(await this.app.vault.adapter.exists(adapterPath))) {
+			return null;
+		}
+
 		if (entry.kind === 'svg') {
-			let svgText: string | null = null;
-			if (this.cacheDir) {
-				const filePath = nodePath().join(this.cacheDir, entry.assetFile);
-				if (nodeFs().existsSync(filePath)) {
-					svgText = nodeFs().readFileSync(filePath, 'utf8');
-				}
-			}
-			if (!svgText && this.cacheAdapterDir) {
-				const adapterPath = this.assetAdapterPath(entry.assetFile);
-				if (await this.app.vault.adapter.exists(adapterPath)) {
-					svgText = await this.app.vault.adapter.read(adapterPath);
-				}
-			}
-			if (!svgText) {
-				return null;
-			}
+			const svgText = await this.app.vault.adapter.read(adapterPath);
 			return {
 				ok: true,
 				engine: entry.engine,
@@ -237,23 +183,7 @@ export class RenderDiskCache {
 			};
 		}
 
-		let pngBytes: ArrayBuffer | null = null;
-		if (this.cacheDir) {
-			const filePath = nodePath().join(this.cacheDir, entry.assetFile);
-			if (nodeFs().existsSync(filePath)) {
-				pngBytes = Uint8Array.from(nodeFs().readFileSync(filePath)).buffer;
-			}
-		}
-		if (!pngBytes && this.cacheAdapterDir) {
-			const adapterPath = this.assetAdapterPath(entry.assetFile);
-			if (await this.app.vault.adapter.exists(adapterPath)) {
-				pngBytes = await this.app.vault.adapter.readBinary(adapterPath);
-			}
-		}
-		if (!pngBytes) {
-			return null;
-		}
-
+		const pngBytes = await this.app.vault.adapter.readBinary(adapterPath);
 		return {
 			ok: true,
 			engine: entry.engine,
@@ -310,25 +240,18 @@ export class RenderDiskCache {
 		let assetFile = '';
 		let kind: CacheIndexEntry['kind'] = 'svg';
 
-		if (settings.outputFormat === 'png' && result.pngPath && this.cacheDir && nodeFs().existsSync(result.pngPath)) {
+		if (settings.outputFormat === 'png' && result.dataUrl.startsWith('data:image/png;base64,')) {
 			assetFile = `${key}.png`;
 			kind = 'png';
-			const bytes = nodeFs().readFileSync(result.pngPath);
-			if (this.cacheDir) {
-				nodeFs().writeFileSync(nodePath().join(this.cacheDir, assetFile), bytes);
-			}
-			if (this.cacheAdapterDir) {
-				await this.app.vault.adapter.writeBinary(this.assetAdapterPath(assetFile), Uint8Array.from(bytes).buffer);
-			}
+			const base64 = result.dataUrl.slice('data:image/png;base64,'.length);
+			await this.app.vault.adapter.writeBinary(
+				this.assetAdapterPath(assetFile),
+				toArrayBuffer(decodeBase64(base64)),
+			);
 		} else if (svgText) {
 			assetFile = `${key}.svg`;
 			kind = 'svg';
-			if (this.cacheDir) {
-				nodeFs().writeFileSync(nodePath().join(this.cacheDir, assetFile), svgText, 'utf8');
-			}
-			if (this.cacheAdapterDir) {
-				await this.app.vault.adapter.write(this.assetAdapterPath(assetFile), svgText);
-			}
+			await this.app.vault.adapter.write(this.assetAdapterPath(assetFile), svgText);
 		} else {
 			return;
 		}

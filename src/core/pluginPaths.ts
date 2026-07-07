@@ -1,5 +1,4 @@
 import { normalizePath, type App } from 'obsidian';
-import { nodeFs, nodePath } from '../utils/desktopNode';
 
 export function getPluginDir(app: App, pluginId: string): string {
 	return normalizePath(`${app.vault.configDir}/plugins/${pluginId}`);
@@ -9,8 +8,8 @@ export function getPluginTempDir(app: App, pluginId: string): string {
 	return normalizePath(`${getPluginDir(app, pluginId)}/.luatikz-temp`);
 }
 
-export function getPluginCacheDir(app: App, pluginId: string): string | null {
-	return getDesktopFsPath(app, normalizePath(`${getPluginDir(app, pluginId)}/.luatikz-cache`));
+export function getPluginCacheDir(app: App, pluginId: string): string {
+	return normalizePath(`${getPluginDir(app, pluginId)}/.luatikz-cache`);
 }
 
 export function getVaultBasePath(app: App): string | null {
@@ -40,7 +39,7 @@ export function getPluginFsDir(app: App, pluginId: string): string | null {
 		return null;
 	}
 
-	return nodePath().join(basePath, app.vault.configDir, 'plugins', pluginId);
+	return normalizePath(`${basePath}/${app.vault.configDir}/plugins/${pluginId}`);
 }
 
 export function getDesktopFsPath(app: App, adapterPath: string): string | null {
@@ -49,7 +48,7 @@ export function getDesktopFsPath(app: App, adapterPath: string): string | null {
 		return null;
 	}
 
-	return nodePath().join(basePath, normalizePath(adapterPath));
+	return normalizePath(`${basePath}/${adapterPath}`);
 }
 
 export async function ensureAdapterFolderExists(app: App, folderPath: string): Promise<void> {
@@ -97,21 +96,32 @@ export async function ensurePluginTempFsDir(
 	return { ok: true, workDir };
 }
 
-export async function clearPluginTempFsDir(app: App, pluginId: string): Promise<void> {
-	const fs = nodeFs();
-	const tempAdapterDir = getPluginTempDir(app, pluginId);
-	const workDir = getDesktopFsPath(app, tempAdapterDir);
-	if (!workDir) {
+async function removeAdapterTree(app: App, folderPath: string): Promise<void> {
+	const adapter = app.vault.adapter;
+	if (!(await adapter.exists(folderPath))) {
 		return;
 	}
 
-	if (fs.existsSync(workDir)) {
+	const listing = await adapter.list(folderPath);
+	for (const file of listing.files) {
 		try {
-			fs.rmSync(workDir, { recursive: true, force: true });
+			await adapter.remove(file);
 		} catch {
 			// ignore cleanup errors
 		}
 	}
+	for (const folder of [...listing.folders].reverse()) {
+		try {
+			await adapter.remove(folder);
+		} catch {
+			// ignore cleanup errors
+		}
+	}
+}
+
+export async function clearPluginTempFsDir(app: App, pluginId: string): Promise<void> {
+	const tempAdapterDir = getPluginTempDir(app, pluginId);
+	await removeAdapterTree(app, tempAdapterDir);
 
 	try {
 		await ensureAdapterFolderExists(app, tempAdapterDir);
