@@ -4,9 +4,9 @@ Fast LuaLaTeX TikZ rendering with full library support, live preview, RTL suppor
 
 Render `tikz` and `luatikz` fenced code blocks in Obsidian. Desktop can use local LuaLaTeX or TikZJax; mobile uses TikZJax.
 
-## Install
-
 Enable **LuaTikZ** under Settings → Community plugins. The release ships as `main.js`, `manifest.json`, and `styles.css`. TikZJax is bundled into `main.js` (~11 MB).
+
+![Floating live preview](<floating preview feature.png>)
 
 ### Mobile (iOS / Android)
 
@@ -94,8 +94,6 @@ To close an orthogonal shape (rectangle, L-shape, …) without nudging the last 
 becomes `(0.54,-0.96)--cycle` on the last segment.
 
 While you edit, the preview keeps the last good diagram visible so a half-finished `\draw` line does not blank the surface.
-
-![Floating live preview](<floating preview feature.png>)
 
 ### Editor
 
