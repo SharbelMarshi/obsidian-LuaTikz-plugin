@@ -17,7 +17,11 @@ interface ChildProcessModule {
 	spawn(file: string, args: string[], options: { cwd?: string; shell?: boolean; windowsHide?: boolean }): ChildProcess;
 }
 
-const CHILD_PROCESS_MODULE = ['child', '_', 'process'].join('');
+// Desktop-only: child_process is used solely to run the user-configured
+// LuaLaTeX binary and pdftocairo with shell:false (no shell interpretation),
+// and fs only to read compile artifacts under the vault's plugin folder.
+// Both are resolved through Electron's require and are unavailable on mobile.
+const CHILD_PROCESS_MODULE = 'child_process';
 const FS_MODULE = 'fs';
 
 interface DesktopFs {
@@ -164,7 +168,7 @@ async function resolveCommand(
 	probeArgs: readonly string[] = ['--version'],
 ): Promise<string | null> {
 	for (const candidate of candidates) {
-		if (candidate.includes('/')) {
+		if (candidate.includes('/') || candidate.includes('\\')) {
 			if (await commandIsRunnable(candidate, probeArgs)) {
 				return candidate;
 			}
@@ -177,8 +181,18 @@ async function resolveCommand(
 			if (resolved && await commandIsRunnable(resolved, probeArgs)) {
 				return resolved;
 			}
+			continue;
 		} catch {
-			// try next
+			// which unavailable (e.g. Windows) — fall through to a direct probe
+		}
+
+		try {
+			// spawn() searches PATH on every platform, so probe the bare name too.
+			if (await commandIsRunnable(candidate, probeArgs)) {
+				return candidate;
+			}
+		} catch {
+			// try next candidate
 		}
 	}
 	return null;

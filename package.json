@@ -6,7 +6,7 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "node scripts/generate-tikzjax-tex-assets.mjs && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && node scripts/validate-tikzjax-bundle.mjs",
-		"test:tikzjax": "node scripts/test-tikzjax-normalize.mjs && node scripts/test-render-routing.mjs && node scripts/test-tikzjax.mjs && node scripts/test-error-mapping.mjs && node scripts/test-line-mapping.mjs && node scripts/test-source-validation.mjs && node scripts/test-tikz-snippets.mjs && node scripts/test-structural-lint.mjs && node scripts/test-coordinate-pick.mjs"
+		"test:tikzjax": "node scripts/test-tikzjax-normalize.mjs && node scripts/test-render-routing.mjs && node scripts/test-tikzjax.mjs && node scripts/test-tikzjax-mobile-sim.mjs && node scripts/test-error-mapping.mjs && node scripts/test-line-mapping.mjs && node scripts/test-source-validation.mjs && node scripts/test-tikz-snippets.mjs && node scripts/test-structural-lint.mjs && node scripts/test-coordinate-pick.mjs"
 	},
 	"keywords": [],
 	"author": "Sharbel Marshi",
@@ -23,7 +23,18 @@
 		"@codemirror/lint": "^6.8.4",
 		"@codemirror/state": "6.5.0",
 		"@codemirror/view": "6.38.6",
+		"assert": "^2.1.0",
+		"buffer": "^6.0.3",
+		"events": "^3.3.0",
+		"fflate": "^0.8.3",
+		"inherits": "^2.0.4",
 		"node-tikzjax": "^1.0.5",
-		"punycode": "^2.3.1"
+		"os-browserify": "^0.3.0",
+		"path-browserify": "^1.0.1",
+		"process": "^0.11.10",
+		"punycode": "^2.3.1",
+		"stream-browserify": "^3.0.0",
+		"string_decoder": "^1.3.0",
+		"util": "^0.12.5"
 	}
 }

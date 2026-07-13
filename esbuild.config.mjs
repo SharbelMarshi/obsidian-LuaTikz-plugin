@@ -1,9 +1,10 @@
 import esbuild from "esbuild";
 import process from "process";
-import { builtinModules, createRequire } from "node:module";
 import fs from "node:fs";
-
-const require = createRequire(import.meta.url);
+import {
+	externalBuiltins,
+	tikzjaxBundleOptions,
+} from "./scripts/tikzjaxBundle.mjs";
 
 const banner =
 `/*
@@ -27,36 +28,6 @@ function trimBundledMainJs(bundlePath) {
 	fs.writeFileSync(bundlePath, source, 'utf8');
 }
 
-const punycodePath = require.resolve("punycode/");
-
-const punycodeAliasPlugin = {
-	name: "punycode-alias",
-	setup(build) {
-		build.onResolve({ filter: /^punycode\/$/ }, () => ({
-			path: punycodePath,
-		}));
-		build.onResolve({ filter: /^punycode$/ }, () => ({
-			path: punycodePath,
-		}));
-	},
-};
-
-const tikzjaxBootstrapPatch = {
-	name: 'tikzjax-bootstrap-texdir',
-	setup(build) {
-		build.onLoad({ filter: /node-tikzjax[\\/]dist[\\/]bootstrap\.js$/ }, async (args) => {
-			let contents = await fs.promises.readFile(args.path, 'utf8');
-			contents = contents.replace(
-				"(0, path_1.join)(__dirname, '../tex')",
-				"((typeof window !== 'undefined' && window.__LUATIKZ_TEX_DIR) || (0, path_1.join)(__dirname, '../tex'))",
-			);
-			return { contents, loader: 'js' };
-		});
-	},
-};
-
-const externalBuiltins = builtinModules.filter(name => name !== 'punycode');
-
 esbuild.build({
 	banner: {
 		js: banner,
@@ -64,7 +35,7 @@ esbuild.build({
 	entryPoints: ['src/main.ts'],
 	outfile: 'main.js',
 	bundle: true,
-	plugins: [punycodeAliasPlugin, tikzjaxBootstrapPatch],
+	...tikzjaxBundleOptions,
 	external: [
 		'obsidian',
 		'electron',

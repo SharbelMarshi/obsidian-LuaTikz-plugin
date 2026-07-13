@@ -21,7 +21,9 @@ export function getUserSourceLineOffset(wrapperPrefix: string): number {
 		return 0;
 	}
 
-	return wrapperPrefix.split('\n').length;
+	// The prefix ends with '\n', so split() yields a trailing empty element;
+	// the user's first line sits at tex line (offset + 1).
+	return wrapperPrefix.split('\n').length - 1;
 }
 
 export function parseLatexErrorLine(raw: string): number | null {

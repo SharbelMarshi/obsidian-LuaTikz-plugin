@@ -27,9 +27,18 @@ if (fs.existsSync(mainJsPath)) {
 	const mainJs = fs.readFileSync(mainJsPath, 'utf8');
 	const sizeMb = fs.statSync(mainJsPath).size / (1024 * 1024);
 
-	if (!mainJs.includes('__LUATIKZ_TEX_DIR')) {
-		console.error('main.js is missing bundled TikZJax tex-dir hook marker: __LUATIKZ_TEX_DIR');
+	if (!mainJs.includes('__LUATIKZ_TEX_ASSET_BASE64')) {
+		console.error('main.js is missing the bundled TikZJax asset hook marker: __LUATIKZ_TEX_ASSET_BASE64');
 		failed = true;
+	}
+
+	// These would crash mobile Obsidian (no Node runtime) if the TikZJax
+	// pipeline ever pulled them back in via jsdom/tar-fs/memfs.
+	for (const forbidden of ['require("jsdom")', 'require("tar-fs")', 'require("memfs")', 'require("vm")']) {
+		if (mainJs.includes(forbidden)) {
+			console.error(`main.js contains a Node-only dependency that breaks mobile: ${forbidden}`);
+			failed = true;
+		}
 	}
 
 	if (!mainJs.includes('tex2svg')) {

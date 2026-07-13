@@ -9,7 +9,7 @@ import { applyDarkPresentationClass } from '../utils/darkMode';
 import { clearTikzErrorHighlight } from './tikzErrorHighlight';
 import { showTikzErrorHighlightFromResult } from './editorNavigation';
 import { applyRtlToContainer } from '../utils/rtl';
-import { formatTikzCoordinate, screenPointToSvgUserSpace, applyShiftConstraint, INCOMPLETE_DRAW_LINE_RE, parseLastNumericCoordinate, tikzCoordinateToClient } from '../utils/coordinatePick';
+import { formatTikzCoordinate, clientPointToTikzCoordinate, applyShiftConstraint, INCOMPLETE_DRAW_LINE_RE, parseLastNumericCoordinate, tikzCoordinateToClient } from '../utils/coordinatePick';
 import { isMobileApp } from '../utils/platform';
 
 const RENDER_DEBOUNCE_MS = 200;
@@ -578,7 +578,7 @@ export class InlinePreviewManager {
 			event.preventDefault();
 			event.stopPropagation();
 
-			const picked = screenPointToSvgUserSpace(svgEl, event.clientX, event.clientY);
+			const picked = clientPointToTikzCoordinate(svgEl, event.clientX, event.clientY);
 			if (!picked) {
 				return;
 			}

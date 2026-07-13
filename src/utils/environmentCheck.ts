@@ -37,8 +37,18 @@ function windowsInstallHints(): { poppler: string; tex: string } {
 	};
 }
 
+/**
+ * Read the platform from the runtime global rather than the bare `process`
+ * identifier: the bundle injects a browser process shim for mobile, and this
+ * desktop-only check must keep seeing Electron's real process object.
+ */
+function desktopPlatform(): NodeJS.Platform {
+	const runtimeProcess = (globalThis as { process?: { platform?: NodeJS.Platform } }).process;
+	return runtimeProcess?.platform ?? 'darwin';
+}
+
 function hintsForPlatform(): { poppler: string; tex: string } {
-	switch (process.platform) {
+	switch (desktopPlatform()) {
 		case 'darwin':
 			return macInstallHints();
 		case 'win32':
@@ -79,7 +89,7 @@ export async function checkEnvironment(settings: LuaTikzSettings): Promise<Envir
 	return {
 		lualatex,
 		pdftocairo,
-		platform: process.platform,
+		platform: desktopPlatform(),
 		summary,
 		readyForLuaLatex,
 	};

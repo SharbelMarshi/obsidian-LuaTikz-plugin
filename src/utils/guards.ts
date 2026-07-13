@@ -34,7 +34,10 @@ export function firstMapKey<K extends string, V>(map: Map<K, V>): K | undefined 
 	return typeof key === 'string' ? (key as K) : undefined;
 }
 
-const SHELL_METACHAR_RE = /[;&|`$(){}[\]<>'"\\!\n\r\0]/;
+// The binary is spawned directly (shell: false), so path separators, spaces,
+// and Windows-style "C:\Program Files (x86)\..." characters are safe; only
+// reject characters that could smuggle commands if a shell ever got involved.
+const SHELL_METACHAR_RE = /[;&|`$<>'"\n\r\0]/;
 
 export function validateLualatexPath(pathValue: string): string | null {
 	const trimmed = pathValue.trim();

@@ -8,11 +8,11 @@ import {
 } from '../latex/tikzJaxSource';
 import { splitExtraPreamble } from '../utils/extraPreamble';
 import type { RenderRequest, RenderResult } from '../core/types';
-import { firstMapKey, isCallable, isRecord, asString } from '../utils/guards';
+import { firstMapKey, isCallable, isRecord } from '../utils/guards';
 import { finalizeTikzJaxSvg } from '../utils/tikzJaxSvgFix';
 import { encodeUtf8Base64 } from '../utils/base64Utils';
 import { sha256Hex } from '../utils/sha256Hex';
-import { ensureTikzJaxTexExtracted } from '../utils/tikzJaxTexRuntime';
+import { installTikzJaxTexAssets } from '../utils/tikzJaxGlobal';
 
 const CACHE_MAX = 32;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -178,14 +178,10 @@ export class TikzJaxRenderer {
 
 	private async loadModule(): Promise<Tex2SvgFn | null> {
 		try {
-			const texResult = await ensureTikzJaxTexExtracted(this.app, this.pluginId);
-			if (!texResult.ok) {
-				this.loadError = 'TikZJax failed to initialize.';
-				this.loadErrorLog = asString(texResult.error, 'TikZJax runtime files could not be prepared.');
-				return null;
-			}
-
-			this.texDir = texResult.texDir;
+			// The patched bootstrap reads the TeX assets from a window global;
+			// no filesystem extraction, so the same path works on mobile.
+			installTikzJaxTexAssets();
+			this.texDir = 'bundled in-plugin assets';
 
 			const mod = await import('node-tikzjax');
 			if (isCallable(mod.load)) {

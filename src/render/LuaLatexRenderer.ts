@@ -30,6 +30,7 @@ import { encodeUtf8Base64, encodeBytesBase64 } from '../utils/base64Utils';
 import { sha256Hex } from '../utils/sha256Hex';
 import { sanitizeCacheFilename, validateLualatexPath, firstMapKey, asString } from '../utils/guards';
 import { invertSvgForDarkMode } from '../utils/darkMode';
+import { injectTikzBBoxAttribute } from '../utils/coordinatePick';
 
 const CACHE_MAX = 32;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -175,7 +176,7 @@ export class LuaLatexRenderer {
 		debug?: CompileDebugInfo,
 	): RenderResult {
 		const block = errorContext?.block;
-		const lineOffset = getUserSourceLineOffsetForExtraPreamble(settings.extraPreamble);
+		const lineOffset = getUserSourceLineOffsetForExtraPreamble(settings.extraPreamble, source);
 		const noteLineMapper = block
 			? createNoteLineMapper(block, errorContext?.editor)
 			: undefined;
@@ -257,6 +258,7 @@ export class LuaLatexRenderer {
 		const texAdapterPath = normalizePath(`${jobAdapterDir}/${texFileName}`);
 		const pdfAdapterPath = normalizePath(`${jobAdapterDir}/${pdfFileName}`);
 		const svgAdapterPath = normalizePath(`${jobAdapterDir}/${svgFileName}`);
+		const bboxAdapterPath = normalizePath(`${jobAdapterDir}/${jobId}.luatikzbbox`);
 
 		const lualatex = await resolveLuaLatex(settings.lualatexPath);
 		if (!lualatex) {
@@ -405,6 +407,13 @@ export class LuaLatexRenderer {
 			}
 			if (invertDark) {
 				svgText = invertSvgForDarkMode(svgText);
+			}
+
+			try {
+				const bboxSidecar = await readArtifactText(this.app, bboxAdapterPath);
+				svgText = injectTikzBBoxAttribute(svgText, bboxSidecar);
+			} catch {
+				// calibration is best-effort; picking falls back to uncalibrated math
 			}
 
 			if (settings.cacheEnabled) {
