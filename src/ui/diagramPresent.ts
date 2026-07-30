@@ -4,11 +4,9 @@ import type { RenderImageResult } from '../core/types';
 import type { PreparedTikzSource } from '../core/tikzSource';
 import { applyDiagramAlign } from '../utils/diagramAlign';
 import { applyDarkPresentationClass } from '../utils/darkMode';
-import { applyRtlToContainer } from '../utils/rtl';
 import { exportDiagram, type DiagramExportFormat, type ExportableDiagram } from './exportDiagram';
 
 export interface PresentErrorOptions {
-	source?: string;
 	noteLine?: number;
 	blockLine?: number;
 	onJumpToLine?: (noteLine: number) => void;
@@ -80,7 +78,6 @@ export function appendTikzError(
 	const {
 		onRetry,
 		extraCls,
-		source,
 		noteLine,
 		blockLine,
 		onJumpToLine,
@@ -99,10 +96,6 @@ export function appendTikzError(
 		cls: 'tikzjax-hebrew-local-error-title',
 		text: message,
 	});
-
-	if (source) {
-		applyRtlToContainer(errorEl, source);
-	}
 
 	if (hint) {
 		errorEl.createDiv({
@@ -192,14 +185,12 @@ export function presentTikzDiagram(
 
 	el.empty();
 	const block = el.createDiv({ cls: 'tikzjax-hebrew-local-block luatikz-output-card' });
-	applyRtlToContainer(block, renderSource);
 
 	const toolbar = block.createDiv({ cls: 'tikzjax-hebrew-local-toolbar' });
 
 	appendExportControl(toolbar, { svgText, dataUrl }, el.ownerDocument);
 
 	const container = block.createDiv({ cls: 'tikzjax-hebrew-local-output' });
-	applyRtlToContainer(container, renderSource);
 	applyDiagramAlign(container, diagramAlign);
 	applyDarkPresentationClass(container, settings.darkModeStyle, isDarkTheme);
 

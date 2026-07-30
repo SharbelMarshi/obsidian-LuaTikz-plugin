@@ -83,6 +83,23 @@ for (const [label, src, options] of [
 	// The reported bug: on Linux none of the configured fonts exist.
 	['no font available at all', PLAIN, { mainFont: 'No Such Font ZZ' }],
 	['no font available + hebrew', HEBREW, { mainFont: 'No Such Font ZZ', hebrewFont: 'No Such Hebrew ZZ' }],
+	// Reported: a library list spread over several lines was left in the body,
+	// where \usetikzlibrary is illegal.
+	['multi-line \\usetikzlibrary', [
+		'\\usetikzlibrary{',
+		'backgrounds,',
+		'fit, intersections,',
+		'decorations.markings,',
+		'matrix,',
+		'patterns,',
+		'groupplots }',
+		'\\begin{tikzpicture}',
+		'\\node[draw, fill=white] (a) at (0,0) {A};',
+		'\\begin{scope}[on background layer]',
+		'\\node[fit=(a), draw, dashed] {};',
+		'\\end{scope}',
+		'\\end{tikzpicture}',
+	].join('\n'), {}],
 ]) {
 	const result = compile(wrap(src, options).tex);
 	assert.ok(result.ok, `${label} must compile — ${(result.log.split('\n').find(l => l.startsWith('!')) ?? '').slice(0, 120)}`);
@@ -121,4 +138,4 @@ for (const [label, src, expectedLine] of [
 	assert.equal(mapped.userLine, expectedLine, `${label}: reported line ${mapped.userLine}`);
 }
 
-console.log('lualatex-compile: 7 documents compiled, guard control + 3 line mappings OK');
+console.log('lualatex-compile: 8 documents compiled, guard control + 3 line mappings OK');

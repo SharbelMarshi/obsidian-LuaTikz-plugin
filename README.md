@@ -14,6 +14,8 @@ Enable **LuaTikZ** under Settings → Community plugins. The release ships as `m
 - **Hebrew/Arabic load only when used** — and per script, so a Hebrew diagram no longer pulls in the Arabic gloss that minimal TeX installs lack. [Details](#fonts-and-rtl)
 - **Font settings** — override the main, Hebrew and Arabic fonts. [Details](#fonts-and-rtl)
 - **Custom preamble** — replace the generated LuaLaTeX preamble entirely, with buttons to load the current one or reset. [Details](#custom-preamble)
+- **Fixed: a diagram containing Hebrew or Arabic flipped the plugin's own UI.** The Export button, error card and its buttons were laid out right-to-left because the *source* contained RTL characters. Plugin controls now keep their direction; the diagram's own text direction is LaTeX's business.
+- **Fixed: `\usetikzlibrary{...}` spread over several lines was ignored.** It was left in the document body, where the command is illegal, so the whole diagram failed. Multi-line `\usepackage` and `\usetikzlibrary` are now hoisted correctly.
 - **Security:** bundled `svgo` bumped to 3.3.4 ([GHSA-2p49-hgcm-8545](https://github.com/advisories/GHSA-2p49-hgcm-8545)).
 
 ## What's new in 1.8.0

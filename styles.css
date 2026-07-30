@@ -388,6 +388,15 @@
   }
 }
 
+/* Plugin chrome is English and must keep its order regardless of the
+   surrounding direction — an RTL note, or an RTL Obsidian UI, would otherwise
+   mirror the toolbar and the split button's joined edges. */
+.tikzjax-hebrew-local-toolbar,
+.tikzjax-hebrew-local-error-button-row,
+.luatikz-export-split {
+  direction: ltr;
+}
+
 .luatikz-export-split {
   display: inline-flex;
   align-items: stretch;

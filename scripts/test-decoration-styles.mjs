@@ -64,4 +64,46 @@ for (const { className, file, text } of classes) {
 	);
 }
 
-console.log(`decoration-styles: ${classes.length} decoration classes styled OK`);
+/**
+ * Plugin chrome must not mirror inside an RTL note. Without these pins, a
+ * diagram containing Hebrew or Arabic (or simply an RTL note) reverses the
+ * Export split button and the error card's buttons.
+ */
+const LTR_PINNED_SELECTORS = [
+	'.tikzjax-hebrew-local-toolbar',
+	'.tikzjax-hebrew-local-error-button-row',
+	'.luatikz-export-split',
+];
+
+for (const selector of LTR_PINNED_SELECTORS) {
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const rule = new RegExp(`${escaped}[^{]*\\{[^}]*direction:\\s*ltr`, 's');
+	assert.ok(
+		rule.test(styles),
+		`${selector} must pin "direction: ltr" — otherwise an RTL note mirrors the plugin's own buttons`,
+	);
+}
+
+/**
+ * applyRtlToContainer sets direction from the text shown *in that element*.
+ * Passing a TikZ source is the bug this guards: the diagram is an image whose
+ * direction LaTeX already resolved, while the surrounding controls are English.
+ */
+const RTL_SOURCE_ARG_RE = /applyRtlToContainer\([^,)]+,\s*(?:\w*[sS]ource\w*)\s*\)/;
+for (const dir of ['src/ui', 'src/core', 'src/editor', 'src/utils']) {
+	for (const file of readdirSync(dir)) {
+		if (!file.endsWith('.ts')) {
+			continue;
+		}
+		const text = readFileSync(join(dir, file), 'utf8');
+		assert.ok(
+			!RTL_SOURCE_ARG_RE.test(text),
+			`${dir}/${file}: applyRtlToContainer must receive displayed text, not a TikZ source`,
+		);
+	}
+}
+
+console.log(
+	`decoration-styles: ${classes.length} decoration classes styled, `
+	+ `${LTR_PINNED_SELECTORS.length} chrome selectors LTR-pinned OK`,
+);

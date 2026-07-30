@@ -308,7 +308,7 @@ export default class LuaTikzPlugin extends Plugin {
 		this.registerMarkdownCodeBlockProcessor(language, async (source, el, ctx) => {
 			el.addClass('luatikz-render-wrapper');
 			const prepared = prepareTikzBlock(source);
-			presentLoadingState(el, prepared, source);
+			presentLoadingState(el, prepared);
 
 			const section = ctx.getSectionInfo(el);
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -332,7 +332,6 @@ export default class LuaTikzPlugin extends Plugin {
 							ok: false,
 							error: 'Nothing to render.',
 						}, this.settings, {
-							source: prepared.renderSource,
 							isDarkTheme: isDarkThemeNow,
 						});
 						return;
@@ -343,13 +342,12 @@ export default class LuaTikzPlugin extends Plugin {
 					if (!result.ok || !result.dataUrl) {
 						const retry = result.timedOut
 							? () => {
-								presentLoadingState(el, prepared, source);
+								presentLoadingState(el, prepared);
 								void render();
 							}
 							: undefined;
 
 						presentTikzBlock(el, prepared, result, this.settings, {
-							source: prepared.renderSource,
 							...errorHandlers,
 							onRetry: retry,
 							isDarkTheme: isDarkThemeNow,
@@ -370,7 +368,6 @@ export default class LuaTikzPlugin extends Plugin {
 						error: 'Render failed.',
 						rawLog: formatExecError(err),
 					}, this.settings, {
-						source,
 						isDarkTheme: isDarkThemeNow,
 					});
 				}

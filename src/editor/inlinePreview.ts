@@ -750,7 +750,6 @@ export class InlinePreviewManager {
 		const sourcePath = view.file?.path;
 		const errorHandlers = buildErrorHandlers(this.app, sourcePath, result);
 		presentTikzFailure(this.previewBody(view), result, {
-			source: preparedSource,
 			onRetry,
 			extraCls: 'tikzjax-hebrew-local-inline-preview-error',
 			...errorHandlers,

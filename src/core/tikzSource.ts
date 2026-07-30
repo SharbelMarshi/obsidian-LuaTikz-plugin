@@ -390,8 +390,14 @@ export interface ExtractedUserPreamble {
 	body: string;
 }
 
-const USER_PACKAGE_RE = /\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]+\}/g;
-const USER_LIBRARY_RE = /\\(?:usetikzlibrary|usepgfplotslibrary|usegdlibrary)\s*\{[^}]*\}/g;
+const HOISTED_COMMANDS = [
+	'usepackage',
+	'usetikzlibrary',
+	'usepgfplotslibrary',
+	'usegdlibrary',
+] as const;
+
+const HOISTED_COMMAND_RE = new RegExp(`^\\\\(${HOISTED_COMMANDS.join('|')})\\b`);
 
 /**
  * Package names people reach for inside `\usetikzlibrary`. TikZ hard-errors on
@@ -464,44 +470,122 @@ export function normalizeUserLibraryCommand(command: string): string[] {
 	];
 }
 
-/** Code portion of a line, up to the first unescaped %. */
-function codePartOfLine(line: string): string {
-	for (let index = 0; index < line.length; index++) {
-		if (line[index] === '%' && (index === 0 || line[index - 1] !== '\\')) {
-			return line.slice(0, index);
+/** Index just past a balanced `{...}` or `[...]` group starting at `index`, or -1. */
+function scanBalancedGroup(source: string, index: number, open: string, close: string): number {
+	if (source[index] !== open) {
+		return -1;
+	}
+	let depth = 0;
+	for (let cursor = index; cursor < source.length; cursor++) {
+		const char = source[cursor];
+		if (char === '\\') {
+			cursor++;
+			continue;
+		}
+		if (char === open) {
+			depth++;
+		} else if (char === close) {
+			depth--;
+			if (depth === 0) {
+				return cursor + 1;
+			}
 		}
 	}
-	return line;
+	return -1;
+}
+
+function skipWhitespace(source: string, index: number): number {
+	let cursor = index;
+	while (cursor < source.length && /\s/.test(source[cursor])) {
+		cursor++;
+	}
+	return cursor;
+}
+
+/** Same line count, so body line numbers keep matching the user's note. */
+function blankPreservingLines(text: string): string {
+	return '\n'.repeat((text.match(/\n/g) ?? []).length);
 }
 
 /**
  * Pull preamble-only commands out of the user's source so packages such as
  * tikz-cd or tikz-3dplot actually load (they used to be stripped entirely).
- * Commented-out commands are left untouched.
+ *
+ * Scans the whole source rather than line by line, because the argument list is
+ * commonly spread over several lines:
+ *
+ *     \usetikzlibrary{
+ *       backgrounds,
+ *       fit, intersections,
+ *     }
+ *
+ * Commented-out commands are left untouched, and each hoisted command is
+ * replaced by the newlines it spanned so the body's line numbering is intact.
  */
 export function extractUserPreamble(source: string): ExtractedUserPreamble {
 	const packages: string[] = [];
 	const libraries: string[] = [];
+	const out: string[] = [];
 
-	const body = source
-		.split('\n')
-		.map(line => {
-			const code = codePartOfLine(line);
-			if (!code.includes('\\use')) {
-				return line;
+	let cursor = 0;
+	while (cursor < source.length) {
+		const char = source[cursor];
+
+		if (char === '%' && (cursor === 0 || source[cursor - 1] !== '\\')) {
+			const lineEnd = source.indexOf('\n', cursor);
+			const stop = lineEnd === -1 ? source.length : lineEnd;
+			out.push(source.slice(cursor, stop));
+			cursor = stop;
+			continue;
+		}
+
+		if (char !== '\\') {
+			out.push(char);
+			cursor++;
+			continue;
+		}
+
+		const match = HOISTED_COMMAND_RE.exec(source.slice(cursor));
+		if (!match) {
+			// Skip the escaped character so \\% or \{ cannot be misread.
+			out.push(source.slice(cursor, cursor + 2));
+			cursor += 2;
+			continue;
+		}
+
+		let scan = skipWhitespace(source, cursor + match[0].length);
+		if (source[scan] === '[') {
+			const optionsEnd = scanBalancedGroup(source, scan, '[', ']');
+			if (optionsEnd === -1) {
+				out.push(source.slice(cursor, cursor + 2));
+				cursor += 2;
+				continue;
 			}
-			let newCode = code.replace(USER_PACKAGE_RE, match => {
-				packages.push(match);
-				return '';
-			});
-			newCode = newCode.replace(USER_LIBRARY_RE, match => {
-				libraries.push(...normalizeUserLibraryCommand(match));
-				return '';
-			});
-			return newCode === code ? line : newCode + line.slice(code.length);
-		})
-		.join('\n');
+			scan = skipWhitespace(source, optionsEnd);
+		}
 
-	return { packages, libraries, body };
+		const argEnd = scanBalancedGroup(source, scan, '{', '}');
+		if (argEnd === -1) {
+			out.push(source.slice(cursor, cursor + 2));
+			cursor += 2;
+			continue;
+		}
+
+		const command = source.slice(cursor, argEnd);
+		if (match[1] === 'usepackage') {
+			packages.push(collapseCommandWhitespace(command));
+		} else {
+			libraries.push(...normalizeUserLibraryCommand(collapseCommandWhitespace(command)));
+		}
+		out.push(blankPreservingLines(command));
+		cursor = argEnd;
+	}
+
+	return { packages, libraries, body: out.join('') };
+}
+
+/** Fold a hoisted command onto one preamble line; the offset depends on it. */
+function collapseCommandWhitespace(command: string): string {
+	return command.replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
 }
 

@@ -23,6 +23,7 @@ const {
 	buildManagedPreamblePreview,
 	sanitizeFontName,
 	detectRtlUsage,
+	extractUserPreamble,
 } = wrapper;
 const { formatLatexErrorWithLineMapping } = mapping;
 const { DEFAULT_SETTINGS, STRING_SETTING_KEYS, RENDER_IDENTITY_KEYS } = model;
@@ -255,6 +256,86 @@ for (const options of [{}, { customPreamble: '\\usepackage{tikz}' }]) {
 	assert.ok(doc.tex.includes('luatikzcalmin'));
 	assert.equal(doc.tex.split('\\begin{document}').length - 1, 1);
 	assert.ok(doc.tex.includes('TeX Gyre Termes'));
+}
+
+/* ============================================ multi-line hoisted commands */
+
+// Reported: a \usetikzlibrary spread over several lines was not hoisted at all.
+// It stayed in the body, where \usetikzlibrary is illegal, so the whole diagram
+// failed. The old extractor matched line by line and could never see it.
+{
+	const source = [
+		'\\usetikzlibrary{',
+		'backgrounds,',
+		'fit, intersections,',
+		'decorations.markings,',
+		'matrix,',
+		'patterns,',
+		'groupplots }',
+		'\\begin{tikzpicture}',
+		'\\draw (0,0) -- (1,1);',
+		'\\end{tikzpicture}',
+	].join('\n');
+
+	const extracted = extractUserPreamble(source);
+	assert.deepEqual(extracted.libraries, [
+		'\\usetikzlibrary{backgrounds,fit,intersections,decorations.markings,matrix,patterns}',
+		'\\usepgfplotslibrary{groupplots}',
+	], 'multi-line library list is hoisted, and groupplots still redirected');
+
+	// Blanked in place: body line count must be identical or error lines shift.
+	assert.equal(
+		extracted.body.split('\n').length,
+		source.split('\n').length,
+		'hoisting must preserve the body line count',
+	);
+	assert.ok(!extracted.body.includes('\\usetikzlibrary'), 'command removed from the body');
+	assert.ok(extracted.body.includes('\\begin{tikzpicture}'), 'diagram survives');
+
+	const doc = buildLatexDocument(source);
+	assert.ok(doc.tex.includes('\\usetikzlibrary{backgrounds,fit,intersections,decorations.markings,matrix,patterns}'));
+	assert.ok(doc.tex.includes('\\usepgfplotslibrary{groupplots}'));
+}
+
+// Multi-line \usepackage, with options, hoists the same way.
+{
+	const extracted = extractUserPreamble('\\usepackage[\n  utf8\n]{\n  inputenc\n}\n\\draw (0,0);');
+	assert.deepEqual(extracted.packages, ['\\usepackage[ utf8 ]{ inputenc }']);
+	assert.equal(extracted.body.split('\n').length, 6);
+}
+
+// Single-line behaviour is unchanged.
+{
+	const extracted = extractUserPreamble('\\usepackage{tikz-cd}\n\\usetikzlibrary{calc}\n\\draw (0,0);');
+	assert.deepEqual(extracted.packages, ['\\usepackage{tikz-cd}']);
+	assert.deepEqual(extracted.libraries, ['\\usetikzlibrary{calc}']);
+	assert.equal(extracted.body.trim(), '\\draw (0,0);');
+}
+
+// Commented-out commands stay put.
+{
+	const extracted = extractUserPreamble('% \\usetikzlibrary{calc}\n\\draw (0,0);');
+	assert.deepEqual(extracted.libraries, []);
+	assert.ok(extracted.body.includes('% \\usetikzlibrary{calc}'));
+}
+
+// A multi-line command inside a comment block must not be swallowed either.
+{
+	const extracted = extractUserPreamble('% \\usetikzlibrary{\n\\usetikzlibrary{calc}\n\\draw (0,0);');
+	assert.deepEqual(extracted.libraries, ['\\usetikzlibrary{calc}']);
+}
+
+// An unterminated brace must not eat the rest of the document.
+{
+	const extracted = extractUserPreamble('\\usetikzlibrary{calc\n\\begin{tikzpicture}\n\\end{tikzpicture}');
+	assert.deepEqual(extracted.libraries, [], 'unbalanced command is left alone');
+	assert.ok(extracted.body.includes('\\begin{tikzpicture}'), 'diagram not swallowed');
+}
+
+// Nested braces in an argument are balanced correctly.
+{
+	const extracted = extractUserPreamble('\\usepackage[a={b,c}]{geometry}\n\\draw (0,0);');
+	assert.deepEqual(extracted.packages, ['\\usepackage[a={b,c}]{geometry}']);
 }
 
 /* ==================================================== settings plumbing */

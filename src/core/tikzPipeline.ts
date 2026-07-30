@@ -7,7 +7,6 @@ import { presentTikzDiagram, presentTikzFailure, type PresentErrorOptions } from
 import type { LuaTikzSettings } from '../settings/settingsModel';
 import { applyDiagramAlign } from '../utils/diagramAlign';
 import { jumpToTikzError } from '../editor/editorNavigation';
-import { applyRtlToContainer } from '../utils/rtl';
 import {
 	validateTikzRenderSource,
 	validationErrorToRenderResult,
@@ -43,14 +42,12 @@ export async function renderPreparedTikz(
 export function presentLoadingState(
 	el: HTMLElement,
 	prepared: PreparedTikzSource,
-	rawSource: string,
 ): HTMLElement {
 	el.empty();
 	const loading = el.createDiv({
 		cls: 'tikzjax-hebrew-local-output luatikz-glass-card',
 		text: 'Rendering…',
 	});
-	applyRtlToContainer(loading, rawSource);
 	applyDiagramAlign(loading, prepared.diagramAlign);
 	return loading;
 }
@@ -66,7 +63,6 @@ export function presentTikzBlock(
 	if (!result.ok || !result.dataUrl) {
 		presentTikzFailure(el, result, {
 			...options,
-			source: options.source ?? prepared.renderSource,
 		});
 		return;
 	}
