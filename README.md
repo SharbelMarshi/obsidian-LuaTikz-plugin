@@ -8,23 +8,30 @@ Enable **LuaTikZ** under Settings → Community plugins. The release ships as `m
 
 ![Floating live preview](<floating preview feature.png>)
 
-## What's new in 1.8.1
+## What's new in 1.8.2
 
-- **Fixed: LuaLaTeX failed to render on Linux and Windows.** The preamble hardcoded macOS-only fonts (`David CLM`, `Geeza Pro`, `Times New Roman`) and loaded them unconditionally, so *every* diagram failed on a machine missing any of them — even one with no RTL content. Fonts now resolve through fallback chains that skip what isn't installed. [Details](#fonts-and-rtl)
-- **Hebrew/Arabic load only when used** — and per script, so a Hebrew diagram no longer pulls in the Arabic gloss that minimal TeX installs lack. [Details](#fonts-and-rtl)
-- **Font settings** — override the main, Hebrew and Arabic fonts. [Details](#fonts-and-rtl)
-- **Custom preamble** — replace the generated LuaLaTeX preamble entirely, with buttons to load the current one or reset. [Details](#custom-preamble)
-- **Fixed: a diagram containing Hebrew or Arabic flipped the plugin's own UI.** The Export button, error card and its buttons were laid out right-to-left because the *source* contained RTL characters. Plugin controls now keep their direction; the diagram's own text direction is LaTeX's business.
-- **Fixed: `\usetikzlibrary{...}` spread over several lines was ignored.** It was left in the document body, where the command is illegal, so the whole diagram failed. Multi-line `\usepackage` and `\usetikzlibrary` are now hoisted correctly.
-- **Security:** bundled `svgo` bumped to 3.3.4 ([GHSA-2p49-hgcm-8545](https://github.com/advisories/GHSA-2p49-hgcm-8545)).
+### Fixed
 
-## What's new in 1.8.0
+- **LuaLaTeX failed to render on Linux and Windows.** The preamble hardcoded macOS-only fonts (`David CLM`, `Geeza Pro`, `Times New Roman`) and loaded them unconditionally, so *every* diagram failed on a machine missing any of them — even one with no RTL content. Fonts now resolve through fallback chains that skip what isn't installed. [Details](#fonts-and-rtl)
+- **A diagram containing Hebrew or Arabic flipped the plugin's own UI.** The Export button, error card and its buttons were laid out right-to-left because the *source* contained RTL characters. Plugin controls now keep their direction; the diagram's own text direction is LaTeX's business.
+- **`\usetikzlibrary{...}` spread over several lines was ignored.** It was left in the document body, where the command is illegal, so the whole diagram failed. Multi-line `\usepackage` and `\usetikzlibrary` are now hoisted correctly.
+- **`\usetikzlibrary{pgfplots}` aborted the compile.** Package names are dropped (the preamble already loads them) and PGFPlots-only libraries move to `\usepgfplotslibrary`. [Details](#renderers)
+- **The *Starter block on new fence* setting never inserted its `tikzpicture` skeleton.**
+
+### Added
 
 - **Hover-to-locate** — moving the pointer over a shape in the floating preview highlights the statement that drew it. [Details](#live-preview-and-coordinate-picking-desktop)
 - **PNG export** — the toolbar button is now **Export** with a format menu for SVG or PNG. [Details](#export)
 - **Explained errors** — opaque LaTeX failures such as `Dimension too large` now come with a plain-language explanation of the cause and the fixes that work. [Details](#errors-and-editing)
-- **Preamble rewriting** — `\usetikzlibrary{pgfplots}` and similar no longer abort the compile. [Details](#renderers)
-- **Fixed:** the *Starter block on new fence* setting never inserted its `tikzpicture` skeleton.
+- **Font settings** — override the main, Hebrew and Arabic fonts. [Details](#fonts-and-rtl)
+- **Custom preamble** — replace the generated LuaLaTeX preamble entirely, with buttons to load the current one or reset. [Details](#custom-preamble)
+- **Hebrew/Arabic load only when used** — and per script, so a Hebrew diagram no longer pulls in the Arabic gloss that minimal TeX installs lack. [Details](#fonts-and-rtl)
+
+### Security
+
+- Bundled `svgo` bumped to 3.3.4 ([GHSA-2p49-hgcm-8545](https://github.com/advisories/GHSA-2p49-hgcm-8545)).
+
+## Requirements
 
 ### Mobile (iOS / Android)
 
