@@ -1,5 +1,5 @@
 import type { App } from 'obsidian';
-import type { LuaTikzRenderEngine, LuaTikzSettings } from '../settings/settingsModel';
+import { RENDER_IDENTITY_KEYS, type LuaTikzRenderEngine, type LuaTikzSettings } from '../settings/settingsModel';
 import type { RenderResult } from '../core/types';
 import { ensureAdapterFolderExists, getPluginCacheDir } from '../core/pluginPaths';
 import { encodeBytesBase64, encodeUtf8Base64, decodeBase64 } from './base64Utils';
@@ -44,16 +44,9 @@ export function buildRenderCacheKey(
 		':',
 		source,
 		invertDark ? ':dark' : ':light',
-		':',
-		settings.lualatexPath,
-		':',
-		settings.extraPreamble,
-		':',
-		String(settings.timeoutMs),
-		':',
-		settings.outputFormat,
-		':',
-		settings.darkModeStyle,
+		// Driven off RENDER_IDENTITY_KEYS so a new render-affecting setting
+		// cannot be forgotten here and serve a week-old diagram.
+		...RENDER_IDENTITY_KEYS.flatMap(key => [':', String(settings[key])]),
 	]);
 }
 

@@ -23,8 +23,8 @@ import {
 	createNoteLineMapper,
 	buildLatexErrorTitle,
 } from '../latex/latexErrorMapping';
-import type { LuaTikzSettings } from '../settings/settingsModel';
-import { getUserSourceLineOffsetForExtraPreamble, wrapLatexSource } from '../core/tikzSource';
+import { RENDER_IDENTITY_KEYS, type LuaTikzSettings } from '../settings/settingsModel';
+import { buildLatexDocument, latexWrapperOptionsFromSettings } from '../core/tikzSource';
 import type { RenderRequest, RenderResult } from '../core/types';
 import { encodeUtf8Base64, encodeBytesBase64 } from '../utils/base64Utils';
 import { sha256Hex } from '../utils/sha256Hex';
@@ -44,21 +44,34 @@ interface CompileDebugInfo {
 	lualatexPath: string;
 	workDir: string;
 	inputFile: string;
+	features?: { hebrew: boolean; arabic: boolean; customPreamble: boolean };
 }
 
 function cacheKey(source: string, invertDark: boolean, settings: LuaTikzSettings): string {
 	return sha256Hex([
 		source,
 		invertDark ? ':dark' : ':light',
-		settings.lualatexPath,
-		settings.extraPreamble,
-		settings.darkModeStyle,
-		String(settings.timeoutMs),
+		// See renderCache.ts: driven off the shared list so font/preamble
+		// changes always invalidate rather than serving a stale SVG.
+		...RENDER_IDENTITY_KEYS.map(key => String(settings[key])),
 	]);
 }
 
 function svgDataUrl(svgText: string): string {
 	return `data:image/svg+xml;base64,${encodeUtf8Base64(svgText)}`;
+}
+
+/** Which conditional preamble blocks were active — makes the RTL gate visible in bug reports. */
+function formatPreambleFeatures(features: CompileDebugInfo['features']): string | null {
+	if (!features) {
+		return null;
+	}
+	const active = [
+		features.hebrew ? 'hebrew' : null,
+		features.arabic ? 'arabic' : null,
+		features.customPreamble ? 'custom preamble' : null,
+	].filter(Boolean);
+	return `Preamble: ${active.length ? active.join(', ') : 'default (no RTL)'}`;
 }
 
 function formatCompileDebugLog(debug: CompileDebugInfo, body: string): string {
@@ -67,9 +80,10 @@ function formatCompileDebugLog(debug: CompileDebugInfo, body: string): string {
 		`LuaLaTeX path: ${debug.lualatexPath}`,
 		`Working directory: ${debug.workDir}`,
 		`Input file: ${debug.inputFile}`,
+		formatPreambleFeatures(debug.features),
 		'',
 		body,
-	].join('\n');
+	].filter(line => line !== null).join('\n');
 }
 
 async function resolvePngAdapterPath(
@@ -170,13 +184,12 @@ export class LuaLatexRenderer {
 	private latexError(
 		rawError: string,
 		source: string,
-		settings: LuaTikzSettings,
+		userLineOffset: number,
 		errorContext: RenderRequest['errorContext'],
 		timedOut = false,
 		debug?: CompileDebugInfo,
 	): RenderResult {
 		const block = errorContext?.block;
-		const lineOffset = getUserSourceLineOffsetForExtraPreamble(settings.extraPreamble, source);
 		const noteLineMapper = block
 			? createNoteLineMapper(block, errorContext?.editor)
 			: undefined;
@@ -184,7 +197,7 @@ export class LuaLatexRenderer {
 		const mapped = formatLatexErrorWithLineMapping(
 			rawError,
 			source,
-			lineOffset,
+			userLineOffset,
 			noteLineMapper,
 			errorContext?.editor,
 		);
@@ -271,17 +284,19 @@ export class LuaLatexRenderer {
 			};
 		}
 
+		// Built once: every error below reports lines against the tex actually
+		// written to disk, so the offset cannot drift from the document.
+		const doc = buildLatexDocument(source, latexWrapperOptionsFromSettings(settings));
+
 		const debugInfo: CompileDebugInfo = {
 			lualatexPath: lualatex,
 			workDir,
 			inputFile: texFileName,
+			features: doc.features,
 		};
 
 		try {
-			await this.app.vault.adapter.write(
-				texAdapterPath,
-				wrapLatexSource(source, settings.extraPreamble),
-			);
+			await this.app.vault.adapter.write(texAdapterPath, doc.tex);
 
 			try {
 				await spawnWithTimeout(lualatex, [
@@ -294,7 +309,7 @@ export class LuaLatexRenderer {
 				const raw = [formatExecError(err), logTail && `\n--- log ---\n${logTail}`]
 					.filter(Boolean)
 					.join('\n');
-				return this.latexError(raw, source, settings, errorContext, err instanceof RenderTimeoutError, debugInfo);
+				return this.latexError(raw, source, doc.userLineOffset, errorContext, err instanceof RenderTimeoutError, debugInfo);
 			}
 
 			if (!(await adapterOrDesktopExists(this.app, pdfAdapterPath))) {
@@ -302,7 +317,7 @@ export class LuaLatexRenderer {
 				const raw = logTail
 					? `No PDF produced.\n--- log ---\n${logTail}`
 					: 'No PDF produced.';
-				return this.latexError(raw, source, settings, errorContext, false, debugInfo);
+				return this.latexError(raw, source, doc.userLineOffset, errorContext, false, debugInfo);
 			}
 
 			if (settings.outputFormat === 'png') {
@@ -325,7 +340,7 @@ export class LuaLatexRenderer {
 					return this.latexError(
 						formatExecError(err),
 						source,
-						settings,
+						doc.userLineOffset,
 						errorContext,
 						err instanceof RenderTimeoutError,
 						debugInfo,
@@ -337,7 +352,7 @@ export class LuaLatexRenderer {
 					return this.latexError(
 						'No PNG produced.',
 						source,
-						settings,
+						doc.userLineOffset,
 						errorContext,
 						false,
 						debugInfo,
@@ -349,7 +364,7 @@ export class LuaLatexRenderer {
 					return this.latexError(
 						'No PNG produced.',
 						source,
-						settings,
+						doc.userLineOffset,
 						errorContext,
 						false,
 						debugInfo,
@@ -384,7 +399,7 @@ export class LuaLatexRenderer {
 				return this.latexError(
 					formatExecError(err),
 					source,
-					settings,
+					doc.userLineOffset,
 					errorContext,
 					err instanceof RenderTimeoutError,
 					debugInfo,
@@ -400,7 +415,7 @@ export class LuaLatexRenderer {
 				return this.latexError(
 					details,
 					source,
-					settings,
+					doc.userLineOffset,
 					errorContext,
 					false,
 					debugInfo,

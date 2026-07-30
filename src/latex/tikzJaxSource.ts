@@ -1,5 +1,6 @@
 import { tidyTikzSource } from '../core/tikzSource';
 import { containsRtlText } from '../utils/guards';
+import { containsRtlMacro } from '../utils/rtlDetection';
 
 export type TikzJaxInputMode = 'bare-tikzpicture' | 'full-document' | 'raw';
 
@@ -82,13 +83,6 @@ function stripPatterns(source: string, patterns: RegExp[]): string {
 		cleaned = cleaned.replace(pattern, '');
 	}
 	return cleaned;
-}
-
-function sourceUsesRtlMacros(source: string): boolean {
-	return /\\he\{/.test(source)
-		|| /\\ar\{/.test(source)
-		|| /\\texthebrew\{/.test(source)
-		|| /\\textarabic\{/.test(source);
 }
 
 /** TikZJax cannot shape RTL Unicode; keep macros defined but drop RTL glyph content at render time. */
@@ -325,7 +319,7 @@ function processFullDocument(
 	const beginIndex = sanitized.indexOf(beginMarker);
 	if (beginIndex < 0) {
 		const usesPgfplots = sourceUsesPgfplots(sanitized);
-		const usesRtlMacros = sourceUsesRtlMacros(sanitized);
+		const usesRtlMacros = containsRtlMacro(sanitized);
 		const payload = buildRenderPayload(sanitized, {
 			usesPgfplots,
 			usetikzlibraryLines: [],
@@ -377,7 +371,7 @@ function processFullDocument(
 		preamble = `${preamble}\n${extra}`.trim();
 	}
 
-	if (sourceUsesRtlMacros(sanitized)) {
+	if (containsRtlMacro(sanitized)) {
 		preamble = `${preamble}\n${TIKZJAX_RTL_FALLBACK_MACROS}`.trim();
 	}
 
@@ -433,7 +427,7 @@ export function normalizeForTikzJax(source: string, extraPreamble = ''): TikzJax
 	const unicodeNormalized = normalizeUnicodeForTikzJax(tidied);
 	const withOhm = normalizeOhmCommands(unicodeNormalized);
 	const ligatureSafe = disableTikzJaxLigaturesInPlainText(withOhm);
-	const usesRtlMacros = sourceUsesRtlMacros(ligatureSafe);
+	const usesRtlMacros = containsRtlMacro(ligatureSafe);
 
 	const usesPgfplots = sourceUsesPgfplots(ligatureSafe);
 	const isAdvancedPgfplots = isAdvancedPgfplotsDiagram(ligatureSafe);

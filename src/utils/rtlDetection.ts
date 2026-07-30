@@ -17,7 +17,21 @@ export function containsArabicMacro(text: string): boolean {
 	return /\\ar\{/.test(text) || /\\textarabic\{/.test(text);
 }
 
+export function containsHebrewMacro(text: string): boolean {
+	return /\\he\{/.test(text) || /\\texthebrew\{/.test(text);
+}
+
 /** Arabic Unicode or \\ar{...} / \\textarabic{...} in source. */
 export function containsArabicContent(text: string): boolean {
 	return containsArabic(text) || containsArabicMacro(text);
+}
+
+/** Hebrew Unicode or \\he{...} / \\texthebrew{...} in source. */
+export function containsHebrewContent(text: string): boolean {
+	return containsHebrew(text) || containsHebrewMacro(text);
+}
+
+/** Any RTL macro, regardless of whether its content is RTL Unicode. */
+export function containsRtlMacro(text: string): boolean {
+	return containsHebrewMacro(text) || containsArabicMacro(text);
 }

@@ -18,7 +18,7 @@ const hints = await load('src/latex/latexErrorHints.ts', 'latexErrorHints');
 const mapping = await load('src/latex/latexErrorMapping.ts', 'latexErrorMapping');
 rmSync(outDir, { recursive: true, force: true });
 
-const { normalizeUserLibraryCommand, wrapLatexSource } = source;
+const { normalizeUserLibraryCommand, buildLatexDocument } = source;
 const { hintForLatexError } = hints;
 const { extractUsefulLatexError, formatLatexErrorWithLineMapping } = mapping;
 
@@ -62,11 +62,11 @@ assert.deepEqual(
 );
 
 // End to end: the bad line disappears from the compiled document.
-const wrapped = wrapLatexSource(String.raw`\usetikzlibrary{pgfplots}
+const wrapped = buildLatexDocument(String.raw`\usetikzlibrary{pgfplots}
 \usetikzlibrary{groupplots,calc}
 \begin{tikzpicture}
 \draw (0,0) -- (1,1);
-\end{tikzpicture}`);
+\end{tikzpicture}`).tex;
 assert.ok(!/\\usetikzlibrary\{[^}]*\bpgfplots\b[^}]*\}/.test(wrapped), 'no bogus tikz library');
 assert.ok(wrapped.includes('\\usepgfplotslibrary{groupplots}'));
 assert.ok(wrapped.includes('\\usetikzlibrary{calc}'));

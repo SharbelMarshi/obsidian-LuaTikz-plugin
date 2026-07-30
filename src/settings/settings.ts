@@ -1,7 +1,8 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, type TextAreaComponent } from 'obsidian';
 import LuaTikzPlugin from '../main';
 import {
 	DEFAULT_SETTINGS,
+	STRING_SETTING_KEYS,
 	type DarkModeStyle,
 	type LuaTikzRenderEngine,
 	type LuaTikzSettings,
@@ -12,6 +13,7 @@ import { migrateDarkModeStyle } from '../utils/darkMode';
 import { isMobileApp } from '../utils/platform';
 import { shouldClearRenderCacheOnSettingChange } from '../utils/settingsCache';
 import { asBoolean, asNumber, asString, isRecord } from '../utils/guards';
+import { buildManagedPreamblePreview, latexWrapperOptionsFromSettings } from '../core/tikzSource';
 
 function parseRenderEngine(value: unknown): LuaTikzRenderEngine | undefined {
 	return value === 'lualatex' || value === 'tikzjax' ? value : undefined;
@@ -42,7 +44,9 @@ export function parseSettings(data: unknown): Partial<LuaTikzSettings> {
 	if (renderEngine) {
 		parsed.renderEngine = renderEngine;
 	}
-	parsed.lualatexPath = asString(data.lualatexPath, DEFAULT_SETTINGS.lualatexPath);
+	for (const key of STRING_SETTING_KEYS) {
+		parsed[key] = asString(data[key], DEFAULT_SETTINGS[key]);
+	}
 	parsed.enableLocalShellRenderer = asBoolean(
 		data.enableLocalShellRenderer,
 		DEFAULT_SETTINGS.enableLocalShellRenderer,
@@ -54,7 +58,6 @@ export function parseSettings(data: unknown): Partial<LuaTikzSettings> {
 	}
 	parsed.timeoutMs = asNumber(data.timeoutMs, DEFAULT_SETTINGS.timeoutMs);
 	parsed.cacheEnabled = asBoolean(data.cacheEnabled, DEFAULT_SETTINGS.cacheEnabled);
-	parsed.extraPreamble = asString(data.extraPreamble, DEFAULT_SETTINGS.extraPreamble);
 	parsed.inlineLivePreviewEnabledByDefault = asBoolean(
 		data.inlineLivePreviewEnabledByDefault,
 		DEFAULT_SETTINGS.inlineLivePreviewEnabledByDefault,
@@ -87,6 +90,7 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 	plugin: LuaTikzPlugin;
 	private rendererChoicesContainer: HTMLElement | null = null;
 	private environmentStatusEl: HTMLElement | null = null;
+	private customPreambleInput: TextAreaComponent | null = null;
 
 	constructor(app: App, plugin: LuaTikzPlugin) {
 		super(app, plugin);
@@ -168,14 +172,41 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 					await this.persistSetting('outputFormat', value);
 				}));
 
+		const fontSection = containerEl.createDiv({ cls: 'luatikz-glass-section luatikz-glass-card' });
+		new Setting(fontSection)
+			.setName('Fonts (LuaLaTeX)')
+			.setHeading();
+
+		fontSection.createEl('div', {
+			cls: 'luatikz-muted',
+			text: 'Leave a field blank to use the built-in fallback chain. Names that are not installed are skipped automatically, and Hebrew/Arabic fonts load only when a diagram uses \\he{} or \\ar{}.',
+		});
+
+		const fontFields: { key: 'mainFont' | 'hebrewFont' | 'arabicFont'; name: string; placeholder: string }[] = [
+			{ key: 'mainFont', name: 'Main font', placeholder: 'TeX Gyre Termes' },
+			{ key: 'hebrewFont', name: 'Hebrew font', placeholder: 'Noto Serif Hebrew → David CLM → Frank Ruehl CLM' },
+			{ key: 'arabicFont', name: 'Arabic font', placeholder: 'Noto Sans Arabic → Geeza Pro → Amiri' },
+		];
+
+		for (const field of fontFields) {
+			new Setting(fontSection)
+				.setName(field.name)
+				.addText(text => text
+					.setPlaceholder(field.placeholder)
+					.setValue(this.plugin.settings[field.key])
+					.onChange(async value => {
+						await this.persistSetting(field.key, value);
+					}));
+		}
+
 		const preambleSection = containerEl.createDiv({ cls: 'luatikz-glass-section luatikz-glass-card' });
 		new Setting(preambleSection)
-			.setName('Extra preamble')
+			.setName('Preamble')
 			.setHeading();
 
 		new Setting(preambleSection)
-			.setName('LaTeX preamble')
-			.setDesc('Additional trusted LaTeX inserted before \\begin{document}. LuaLaTeX uses the full preamble. TikZJax keeps TikZ/macros and removes font/localization-only lines.')
+			.setName('Extra preamble')
+			.setDesc('Additional trusted LaTeX appended to the preamble. LuaLaTeX uses the full preamble. TikZJax keeps TikZ/macros and removes font/localization-only lines.')
 			.addTextArea(text => {
 				text.inputEl.rows = 8;
 				text.setPlaceholder(String.raw`\usepackage{physics}`)
@@ -184,6 +215,40 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 						await this.persistSetting('extraPreamble', value);
 					});
 			});
+
+		new Setting(preambleSection)
+			.setName('Custom preamble')
+			.setDesc('Replaces the generated preamble entirely (LuaLaTeX only). Fonts, polyglossia and \\he/\\ar become yours to define; the coordinate-pick calibration block and \\begin{document} are always appended by the plugin. Leave empty to use the managed preamble, which keeps improving with each release.')
+			.addTextArea(text => {
+				this.customPreambleInput = text;
+				text.inputEl.rows = 16;
+				text.setPlaceholder('Empty — using the managed preamble')
+					.setValue(this.plugin.settings.customPreamble)
+					.onChange(async value => {
+						await this.persistSetting('customPreamble', value);
+					});
+			});
+
+		new Setting(preambleSection)
+			.addButton(button => button
+				.setButtonText('Load current preamble')
+				.setClass('luatikz-soft-button')
+				.onClick(async () => {
+					const preamble = buildManagedPreamblePreview(
+						latexWrapperOptionsFromSettings(this.plugin.settings),
+					);
+					await this.persistSetting('customPreamble', preamble);
+					this.customPreambleInput?.setValue(preamble);
+					new Notice('Loaded the generated preamble — it is yours to edit now.');
+				}))
+			.addButton(button => button
+				.setButtonText('Reset to default')
+				.setClass('luatikz-soft-button')
+				.onClick(async () => {
+					await this.persistSetting('customPreamble', '');
+					this.customPreambleInput?.setValue('');
+					new Notice('Using the managed preamble.');
+				}));
 
 		const appearanceSection = containerEl.createDiv({ cls: 'luatikz-glass-section luatikz-glass-card' });
 		new Setting(appearanceSection)
@@ -335,8 +400,9 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 			}
 		} else if (settingKey === 'timeoutMs') {
 			this.plugin.settings.timeoutMs = asNumber(value, DEFAULT_SETTINGS.timeoutMs);
-		} else if (settingKey === 'lualatexPath' || settingKey === 'extraPreamble') {
-			this.plugin.settings[settingKey] = asString(value, DEFAULT_SETTINGS[settingKey]);
+		} else if ((STRING_SETTING_KEYS as readonly string[]).includes(settingKey)) {
+			const stringKey = settingKey as typeof STRING_SETTING_KEYS[number];
+			this.plugin.settings[stringKey] = asString(value, DEFAULT_SETTINGS[stringKey]);
 		} else if (
 			settingKey === 'enableLocalShellRenderer'
 			|| settingKey === 'showInstallNotice'

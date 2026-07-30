@@ -18,11 +18,13 @@ const PNG_MAX_EDGE = 4000;
 
 function triggerDownload(blob: Blob, filename: string, activeDocument: Document): void {
 	const url = URL.createObjectURL(blob);
-	const link = activeDocument.createElement('a');
-	link.href = url;
-	link.download = filename;
-	link.classList.add('tikzjax-hebrew-local-download-link');
-	activeDocument.body.appendChild(link);
+	// Created on the caller's document, not the global one, so downloads still
+	// work from a popout window.
+	const link = activeDocument.body.createEl('a', {
+		cls: 'tikzjax-hebrew-local-download-link',
+		href: url,
+		attr: { download: filename },
+	});
 	link.click();
 	link.remove();
 	URL.revokeObjectURL(url);
@@ -107,6 +109,9 @@ export async function svgToPngBlob(
 
 	const image = await loadSvgImage(svgText);
 	const { width, height } = pngCanvasSize(size.width, size.height);
+	// Deliberately not an Obsidian createEl helper: this canvas is never
+	// attached, and the global helper would build it in the main document,
+	// discarding the caller's document and breaking export from a popout window.
 	const canvas = activeDocument.createElement('canvas');
 	canvas.width = width;
 	canvas.height = height;

@@ -7,16 +7,80 @@ import {
 } from '../utils/diagramAlign';
 import { prepareGridForRender } from '../utils/diagramGrid';
 import { CAL_MARKER_MAX_RGB, CAL_MARKER_MIN_RGB } from '../utils/coordinatePick';
+import { containsArabicContent, containsHebrewContent } from '../utils/rtlDetection';
+import type { LuaTikzSettings } from '../settings/settingsModel';
 
-const DOCUMENTCLASS_LINE = '\\documentclass[tikz,border=5pt]{standalone}\n';
+const DOCUMENTCLASS_LINE = '\\documentclass[tikz,border=5pt]{standalone}';
 
-/** Internal defaults for LuaLaTeX RTL/English rendering — not user-configurable. */
-const DEFAULT_HEBREW_FONT = 'David CLM';
-const DEFAULT_ARABIC_FONT = 'Geeza Pro';
-const DEFAULT_ENGLISH_FONT = 'Times New Roman';
+/**
+ * Font fallback chains, tried in order via `\IfFontExistsTF`. Hardcoding a
+ * single macOS font here used to make every render fail on Linux, even for
+ * diagrams with no RTL content at all.
+ *
+ * TeX Gyre Termes is metrically identical to Times New Roman and ships with
+ * TeX Live / MiKTeX, so it is available wherever LuaLaTeX is and existing
+ * diagrams keep their appearance. If a whole chain misses, nothing is emitted
+ * for that script and the compile still succeeds.
+ */
+const DEFAULT_MAIN_FONT_CHAIN: readonly string[] = ['TeX Gyre Termes'];
+const DEFAULT_HEBREW_FONT_CHAIN: readonly string[] = [
+	'Noto Serif Hebrew',
+	'David CLM',
+	'Frank Ruehl CLM',
+];
+const DEFAULT_ARABIC_FONT_CHAIN: readonly string[] = [
+	'Noto Sans Arabic',
+	'Geeza Pro',
+	'Amiri',
+];
 
-function escapeLatexFontName(fontName: string): string {
-	return fontName.replace(/\\/g, '\\\\').replace(/[{}]/g, '');
+const FONT_NAME_MAX_LENGTH = 100;
+
+/**
+ * Font names come from settings, so they are pasted straight into
+ * `\setmainfont{...}`. Illegal characters are *removed* rather than escaped —
+ * an escaped `\%` would not match a real font anyway, and removing `\` and
+ * braces makes preamble injection impossible. Control characters matter most:
+ * a newline would change the wrapper's line count and silently shift every
+ * LaTeX error line number.
+ */
+export function sanitizeFontName(raw: string): string {
+	return raw
+		.replace(/[\u0000-\u001F\u007F]/g, ' ')
+		.replace(/[\\{}%#$&_~^[\],=]/g, '')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.slice(0, FONT_NAME_MAX_LENGTH)
+		.trim();
+}
+
+/** User override (sanitized) first, then the defaults as fallbacks. */
+function resolveFontChain(override: string | undefined, defaults: readonly string[]): string[] {
+	const cleaned = sanitizeFontName(override ?? '');
+	const chain = cleaned ? [cleaned, ...defaults] : [...defaults];
+	return chain.filter((name, index) => chain.indexOf(name) === index);
+}
+
+/**
+ * Fold a chain into exactly ONE line:
+ *   \IfFontExistsTF{A}{<body A>}{\IfFontExistsTF{B}{<body B>}{}}
+ * One line per chain keeps the preamble's line count independent of how many
+ * fallbacks are configured, which the error line mapping depends on.
+ */
+function emitFontChainLine(
+	chain: readonly string[],
+	body: (font: string) => string,
+): string {
+	return chain.reduceRight(
+		(fallback, font) => `\\IfFontExistsTF{${font}}{${body(font)}}{${fallback}}`,
+		'',
+	);
+}
+
+function hebrewFontBody(font: string): string {
+	return ['\\hebrewfont', '\\hebrewfontsf', '\\hebrewfonttt']
+		.map(family => `\\newfontfamily${family}[Script=Hebrew]{${font}}`)
+		.join('');
 }
 
 function formatXcolorRgb(rgb: readonly [number, number, number]): string {
@@ -48,57 +112,230 @@ const CALIBRATION_PREAMBLE = `\\definecolor{luatikzcalmin}{rgb}{${formatXcolorRg
 \\makeatother
 `;
 
-function joinPreambleLines(lines: readonly string[]): string {
-	return lines.length ? `${lines.join('\n')}\n` : '';
+/** Split a multi-line constant into individual lines so the array stays 1:1 with the output. */
+function constantLines(block: string): string[] {
+	return block.replace(/\n$/, '').split('\n');
 }
 
-function buildLatexWrapperPrefix(
-	extraPreamble = '',
-	userPackages: readonly string[] = [],
-	userLibraries: readonly string[] = [],
-): string {
-	const hebrewFont = escapeLatexFontName(DEFAULT_HEBREW_FONT);
-	const arabicFont = escapeLatexFontName(DEFAULT_ARABIC_FONT);
-	const englishFont = escapeLatexFontName(DEFAULT_ENGLISH_FONT);
+const TIKZ_STACK_LINES: readonly string[] = [
+	'\\usepackage{tikz}',
+	'\\usetikzlibrary{arrows.meta,positioning,calc,shapes,decorations.pathmorphing,shapes.gates.logic.US}',
+	'\\usepackage{amsmath}',
+	'\\usepackage{amssymb}',
+	'\\usepackage{circuitikz}',
+	'\\usepackage{pgfplots}',
+	'\\pgfplotsset{compat=1.18}',
+];
 
-	return `${DOCUMENTCLASS_LINE}\\usepackage{fontspec}
-\\usepackage{polyglossia}
+/** Which RTL scripts a source actually uses. Per script: a Hebrew-only diagram
+ * must not pull in the Arabic gloss, which minimal TeX installs lack. */
+export interface RtlUsage {
+	hebrew: boolean;
+	arabic: boolean;
+}
 
-\\setmainlanguage{english}
-\\setotherlanguage{hebrew}
-\\setotherlanguage{arabic}
+export function detectRtlUsage(source: string): RtlUsage {
+	return {
+		hebrew: containsHebrewContent(source),
+		arabic: containsArabicContent(source),
+	};
+}
 
-\\setmainfont{${englishFont}}
-\\newfontfamily\\hebrewfont[Script=Hebrew]{${hebrewFont}}
-\\newfontfamily\\hebrewfontsf[Script=Hebrew]{${hebrewFont}}
-\\newfontfamily\\hebrewfonttt[Script=Hebrew]{${hebrewFont}}
-\\newfontfamily\\arabicfont[Script=Arabic]{${arabicFont}}
+export interface LatexWrapperOptions {
+	extraPreamble?: string;
+	/** Replaces the generated preamble entirely when non-empty. */
+	customPreamble?: string;
+	mainFont?: string;
+	hebrewFont?: string;
+	arabicFont?: string;
+}
 
-${joinPreambleLines(userPackages)}\\usepackage{tikz}
-\\usetikzlibrary{arrows.meta,positioning,calc,shapes,decorations.pathmorphing,shapes.gates.logic.US}
-\\usepackage{amsmath}
-\\usepackage{amssymb}
-\\usepackage{circuitikz}
-\\usepackage{pgfplots}
-\\pgfplotsset{compat=1.18}
-${joinPreambleLines(userLibraries)}
-\\newcommand{\\he}[1]{\\texthebrew{#1}}
-\\newcommand{\\ar}[1]{\\textarabic{#1}}
-${SIMPLE_TIKZ_HELPERS}
-${CALIBRATION_PREAMBLE}${extraPreamble.trim() ? `${extraPreamble.trim()}\n` : ''}\\begin{document}
-`;
+/** Single place that maps settings onto wrapper options, so no caller can forget a field. */
+export function latexWrapperOptionsFromSettings(
+	settings: Pick<LuaTikzSettings,
+		'extraPreamble' | 'customPreamble' | 'mainFont' | 'hebrewFont' | 'arabicFont'>,
+): LatexWrapperOptions {
+	return {
+		extraPreamble: settings.extraPreamble,
+		customPreamble: settings.customPreamble,
+		mainFont: settings.mainFont,
+		hebrewFont: settings.hebrewFont,
+		arabicFont: settings.arabicFont,
+	};
+}
+
+interface PrefixInput {
+	options: LatexWrapperOptions;
+	packages: readonly string[];
+	libraries: readonly string[];
+	rtl: RtlUsage;
+}
+
+/** The managed font + language block, emitted only for the scripts in use. */
+function fontAndLanguageLines(options: LatexWrapperOptions, rtl: RtlUsage): string[] {
+	const lines = ['\\usepackage{fontspec}'];
+
+	lines.push(emitFontChainLine(
+		resolveFontChain(options.mainFont, DEFAULT_MAIN_FONT_CHAIN),
+		font => `\\setmainfont{${font}}`,
+	));
+
+	if (!rtl.hebrew && !rtl.arabic) {
+		return lines;
+	}
+
+	lines.push('\\usepackage{polyglossia}', '\\setmainlanguage{english}');
+	if (rtl.hebrew) {
+		lines.push('\\setotherlanguage{hebrew}');
+	}
+	if (rtl.arabic) {
+		lines.push('\\setotherlanguage{arabic}');
+	}
+
+	// Font families come after \setotherlanguage — polyglossia's documented order.
+	if (rtl.hebrew) {
+		lines.push(emitFontChainLine(
+			resolveFontChain(options.hebrewFont, DEFAULT_HEBREW_FONT_CHAIN),
+			hebrewFontBody,
+		));
+	}
+	if (rtl.arabic) {
+		lines.push(emitFontChainLine(
+			resolveFontChain(options.arabicFont, DEFAULT_ARABIC_FONT_CHAIN),
+			font => `\\newfontfamily\\arabicfont[Script=Arabic]{${font}}`,
+		));
+	}
+
+	return lines;
+}
+
+/**
+ * \he and \ar are always defined so the line count is constant and a stray
+ * macro degrades to plain text instead of erroring out.
+ */
+function rtlMacroLines(rtl: RtlUsage): string[] {
+	return [
+		rtl.hebrew
+			? '\\newcommand{\\he}[1]{\\texthebrew{#1}}'
+			: '\\newcommand{\\he}[1]{#1}',
+		rtl.arabic
+			? '\\newcommand{\\ar}[1]{\\textarabic{#1}}'
+			: '\\newcommand{\\ar}[1]{#1}',
+	];
+}
+
+const LOADS_TIKZ_RE = /\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*(?:tikz|pgfplots|circuitikz)[^}]*\}/;
+
+/**
+ * The user owns this text; nothing is escaped. Only conflicts with the
+ * machinery the plugin always appends are repaired: a second \begin{document}
+ * would abort the compile, and CALIBRATION_PREAMBLE uses \tikzset and
+ * \pgf@picminx so *something* has to load TikZ.
+ */
+export function sanitizeCustomPreamble(raw: string): string[] {
+	// Blanked in place, never collapsed, so the user's own line numbers hold.
+	const cleaned = raw
+		.replace(/\\begin\{document\}/g, '')
+		.replace(/\\end\{document\}/g, '');
+
+	const lines = constantLines(cleaned);
+	if (!/\\documentclass/.test(cleaned)) {
+		lines.unshift(DOCUMENTCLASS_LINE);
+	}
+	if (!LOADS_TIKZ_RE.test(cleaned)) {
+		lines.push('\\usepackage{tikz}');
+	}
+	return lines;
+}
+
+function buildWrapperPrefixLines(input: PrefixInput): string[] {
+	const { options, packages, libraries, rtl } = input;
+	const custom = options.customPreamble?.trim() ?? '';
+	const lines: string[] = [];
+
+	if (custom) {
+		lines.push(...sanitizeCustomPreamble(custom));
+		lines.push(...packages, ...libraries);
+	} else {
+		lines.push(DOCUMENTCLASS_LINE);
+		lines.push(...fontAndLanguageLines(options, rtl));
+		lines.push(...packages);
+		lines.push(...TIKZ_STACK_LINES);
+		lines.push(...libraries);
+		lines.push(...rtlMacroLines(rtl));
+		lines.push(...constantLines(SIMPLE_TIKZ_HELPERS));
+	}
+
+	const extra = options.extraPreamble?.trim() ?? '';
+	if (extra) {
+		lines.push(...constantLines(extra));
+	}
+
+	// Always ours, in both modes: coordinate picking depends on it.
+	lines.push(...constantLines(CALIBRATION_PREAMBLE));
+	lines.push('\\begin{document}');
+
+	return lines;
 }
 
 const LATEX_WRAPPER_SUFFIX = `
 \\end{document}
 `;
 
-export function getUserSourceLineOffsetForExtraPreamble(
-	extraPreamble = '',
-	source = '',
-): number {
-	const { packages, libraries } = extractUserPreamble(stripUserDocumentPreamble(source));
-	return getUserSourceLineOffset(buildLatexWrapperPrefix(extraPreamble, packages, libraries));
+export interface WrappedLatexDocument {
+	/** Exactly what gets written to disk. */
+	tex: string;
+	/** Lines of `tex` preceding the user's body. Only valid for THIS tex. */
+	userLineOffset: number;
+	/** Body as embedded (hoisted commands blanked in place, line count preserved). */
+	body: string;
+	features: { hebrew: boolean; arabic: boolean; customPreamble: boolean };
+}
+
+/**
+ * Build the .tex and report where the user's body starts, together.
+ *
+ * These used to be two exported functions (`wrapLatexSource` and
+ * `getUserSourceLineOffsetForExtraPreamble`) that the renderer called
+ * separately and that had to agree. They no longer can disagree: there is no
+ * way to obtain an offset without the document it belongs to.
+ */
+export function buildLatexDocument(
+	source: string,
+	options: LatexWrapperOptions = {},
+): WrappedLatexDocument {
+	const { packages, libraries, body } = extractUserPreamble(stripUserDocumentPreamble(source));
+	const rtl = detectRtlUsage(source);
+	const prefix = `${buildWrapperPrefixLines({ options, packages, libraries, rtl }).join('\n')}\n`;
+
+	return {
+		tex: prefix + body + LATEX_WRAPPER_SUFFIX,
+		// From the joined string, never from lines.length: SIMPLE_TIKZ_HELPERS
+		// and CALIBRATION_PREAMBLE are multi-line, so a slot count under-reports.
+		userLineOffset: getUserSourceLineOffset(prefix),
+		body,
+		features: {
+			hebrew: rtl.hebrew,
+			arabic: rtl.arabic,
+			customPreamble: !!options.customPreamble?.trim(),
+		},
+	};
+}
+
+/**
+ * The managed preamble with both RTL scripts on, for the settings "Load
+ * current preamble" button. Stops before the calibration block, which the
+ * plugin always appends and the user cannot usefully edit.
+ */
+export function buildManagedPreamblePreview(options: LatexWrapperOptions = {}): string {
+	const lines = buildWrapperPrefixLines({
+		options: { ...options, customPreamble: '', extraPreamble: '' },
+		packages: [],
+		libraries: [],
+		rtl: { hebrew: true, arabic: true },
+	});
+	const calibrationStart = lines.indexOf(constantLines(CALIBRATION_PREAMBLE)[0]);
+	return lines.slice(0, calibrationStart === -1 ? lines.length : calibrationStart).join('\n');
 }
 
 export function tidyTikzSource(tikzSource: string): string {
@@ -268,7 +505,3 @@ export function extractUserPreamble(source: string): ExtractedUserPreamble {
 	return { packages, libraries, body };
 }
 
-export function wrapLatexSource(source: string, extraPreamble = ''): string {
-	const { packages, libraries, body } = extractUserPreamble(stripUserDocumentPreamble(source));
-	return buildLatexWrapperPrefix(extraPreamble, packages, libraries) + body + LATEX_WRAPPER_SUFFIX;
-}

@@ -121,11 +121,11 @@ class TikzLineNumberWidget extends WidgetType {
 	}
 
 	override toDOM(): HTMLElement {
-		const span = activeDocument.createElement('span');
-		span.className = 'luatikz-inline-line-number';
-		span.textContent = String(this.lineNumber);
-		span.setAttribute('aria-hidden', 'true');
-		return span;
+		return createSpan({
+			cls: 'luatikz-inline-line-number',
+			text: String(this.lineNumber),
+			attr: { 'aria-hidden': 'true' },
+		});
 	}
 
 	override ignoreEvent(): boolean {

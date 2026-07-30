@@ -47,18 +47,17 @@ class TikzAutofixPopupWidget extends WidgetType {
 	}
 
 	override toDOM(): HTMLElement {
-		const popup = activeDocument.createElement('div');
-		popup.className = 'luatikz-autofix-popup';
+		// Detached root, so the global createDiv is the applicable helper here;
+		// its children can then use the element methods.
+		const popup = createDiv({ cls: 'luatikz-autofix-popup' });
 
-		const label = activeDocument.createElement('span');
-		label.className = 'luatikz-autofix-popup-label';
-		label.textContent = 'LuaTikZ';
+		popup.createSpan({ cls: 'luatikz-autofix-popup-label', text: 'LuaTikZ' });
 
-		const button = activeDocument.createElement('button');
-		button.type = 'button';
-		button.className = 'luatikz-autofix-popup-fix';
-		button.textContent = 'Fix';
-		button.title = this.title;
+		const button = popup.createEl('button', {
+			cls: 'luatikz-autofix-popup-fix',
+			text: 'Fix',
+			attr: { type: 'button', title: this.title },
+		});
 		button.addEventListener('mousedown', (event: MouseEvent) => {
 			event.preventDefault();
 		});
@@ -68,8 +67,6 @@ class TikzAutofixPopupWidget extends WidgetType {
 			autofixHandlers.get(this.view)?.();
 		});
 
-		popup.appendChild(label);
-		popup.appendChild(button);
 		return popup;
 	}
 }

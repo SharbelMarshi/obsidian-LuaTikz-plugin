@@ -1,12 +1,8 @@
-import type { LuaTikzSettings } from '../settings/settingsModel';
+import { RENDER_IDENTITY_KEYS, type LuaTikzSettings } from '../settings/settingsModel';
 
 const RENDER_CACHE_KEYS = new Set<keyof LuaTikzSettings>([
+	...RENDER_IDENTITY_KEYS,
 	'renderEngine',
-	'lualatexPath',
-	'extraPreamble',
-	'timeoutMs',
-	'outputFormat',
-	'darkModeStyle',
 	'enableLocalShellRenderer',
 ]);
 
