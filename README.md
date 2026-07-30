@@ -8,6 +8,14 @@ Enable **LuaTikZ** under Settings → Community plugins. The release ships as `m
 
 ![Floating live preview](<floating preview feature.png>)
 
+## What's new in 1.8.1
+
+- **Fixed: LuaLaTeX failed to render on Linux and Windows.** The preamble hardcoded macOS-only fonts (`David CLM`, `Geeza Pro`, `Times New Roman`) and loaded them unconditionally, so *every* diagram failed on a machine missing any of them — even one with no RTL content. Fonts now resolve through fallback chains that skip what isn't installed. [Details](#fonts-and-rtl)
+- **Hebrew/Arabic load only when used** — and per script, so a Hebrew diagram no longer pulls in the Arabic gloss that minimal TeX installs lack. [Details](#fonts-and-rtl)
+- **Font settings** — override the main, Hebrew and Arabic fonts. [Details](#fonts-and-rtl)
+- **Custom preamble** — replace the generated LuaLaTeX preamble entirely, with buttons to load the current one or reset. [Details](#custom-preamble)
+- **Security:** bundled `svgo` bumped to 3.3.4 ([GHSA-2p49-hgcm-8545](https://github.com/advisories/GHSA-2p49-hgcm-8545)).
+
 ## What's new in 1.8.0
 
 - **Hover-to-locate** — moving the pointer over a shape in the floating preview highlights the statement that drew it. [Details](#live-preview-and-coordinate-picking-desktop)
