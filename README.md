@@ -8,6 +8,14 @@ Enable **LuaTikZ** under Settings → Community plugins. The release ships as `m
 
 ![Floating live preview](<floating preview feature.png>)
 
+## What's new in 1.8.0
+
+- **Hover-to-locate** — moving the pointer over a shape in the floating preview highlights the statement that drew it. [Details](#live-preview-and-coordinate-picking-desktop)
+- **PNG export** — the toolbar button is now **Export** with a format menu for SVG or PNG. [Details](#export)
+- **Explained errors** — opaque LaTeX failures such as `Dimension too large` now come with a plain-language explanation of the cause and the fixes that work. [Details](#errors-and-editing)
+- **Preamble rewriting** — `\usetikzlibrary{pgfplots}` and similar no longer abort the compile. [Details](#renderers)
+- **Fixed:** the *Starter block on new fence* setting never inserted its `tikzpicture` skeleton.
+
 ### Mobile (iOS / Android)
 
 LuaTikZ runs on Obsidian mobile. Diagrams render in reading view through the bundled TikZJax runtime — no local TeX install and no shell access required.
@@ -103,7 +111,7 @@ Inside `tikz` / `luatikz` blocks (and standalone `\begin{tikzpicture}` environme
 
 - Line numbers on every line, including blanks
 - Active-line and matching `\begin`/`\end` pair highlights
-- Structural lint: unmatched environments/braces, missing libraries, empty option keys
+- Structural lint: unmatched environments/braces, missing libraries, rewritten `\usetikzlibrary` names, empty option keys
 - New fences can auto-insert a blank `tikzpicture` skeleton
 - Semicolon reminder on unfinished `\draw` lines (hint or auto-append)
 - Auto-close `{`, `[`, `(`, `$`
@@ -130,6 +138,7 @@ When a diagram fails:
 - A short error card appears in reading view (e.g. `Missing semicolon (;) (line 3)`).
 - **Go to line** jumps to the block-relative line in the source editor.
 - The error line is highlighted in the editor; a **Fix** popup appears when LuaTikZ can suggest a repair (missing `;`, braces, typos, empty `align=`, etc.).
+- Errors whose LaTeX message says nothing about the cause carry a short explanation instead. `Dimension too large` on a curved `to`, for example, explains that pgf overflows TeX's arithmetic once the endpoints are more than ~1024pt (~36cm) apart, and that `x=0.5cm` or explicit control points fix it while `scale=` does not.
 - **Show log** expands the full compiler output.
 
 Line numbers in error messages are relative to your TikZ block, not the generated LaTeX wrapper.
