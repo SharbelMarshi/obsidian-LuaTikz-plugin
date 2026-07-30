@@ -6,6 +6,7 @@ import { InlinePreviewManager } from './editor/inlinePreview';
 import { latexAutocompleteExtension } from './editor/latexAutocomplete';
 import { tikzIdeExtension } from './editor/tikzIdeGutter';
 import { tikzErrorHighlightExtension } from './editor/tikzErrorHighlight';
+import { tikzHoverHighlightExtension } from './editor/tikzHoverHighlight';
 import { tikzFenceStarterExtension } from './editor/tikzFenceStarter';
 import { tikzStructuralLintExtension } from './editor/tikzStructuralLint';
 import { tikzSemicolonReminderExtension } from './editor/tikzSemicolonReminder';
@@ -139,6 +140,7 @@ export default class LuaTikzPlugin extends Plugin {
 				...extensionList(latexAutocompleteExtension()),
 				...extensionList(tikzIdeExtension()),
 				...tikzErrorHighlightExtension(),
+				...tikzHoverHighlightExtension(),
 				...extensionList(tikzFenceStarterExtension(() => this.settings.starterBlockOnNewFence)),
 				...extensionList(tikzStructuralLintExtension(() => this.settings.enableStructuralLint)),
 				...extensionList(tikzSemicolonReminderExtension(() => this.settings.semicolonReminderMode)),

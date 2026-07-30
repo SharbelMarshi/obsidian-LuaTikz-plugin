@@ -2,8 +2,10 @@ import { linter, type Diagnostic } from '@codemirror/lint';
 import type { Extension, Text } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { parseTikzBlockContext, allLibrariesNeeded } from '../latex/tikzBlockContext';
+import { normalizeUserLibraryCommand } from '../core/tikzSource';
 
 const OPEN_FENCE_RE = /^```(?:tikz|luatikz)\b.*$/;
+const USETIKZLIBRARY_RE = /\\usetikzlibrary\s*\{[^}]*\}/g;
 const BEGIN_ENV_RE = /\\begin\{([^}]+)\}/g;
 const END_ENV_RE = /\\end\{([^}]+)\}/g;
 const EMPTY_KEY_RE = /(?:^|[\s,{])([A-Za-z!-]+)=\s*(?=[,\]]|$)/g;
@@ -104,6 +106,31 @@ function lintBlockSource(source: string, blockFrom: number): Diagnostic[] {
 				to: lineFrom + line.length,
 				severity: 'hint',
 				message: 'Unclosed option bracket [',
+			});
+		}
+
+		// TikZ aborts the whole compile on an unknown library name, so LuaTikz
+		// rewrites these before compiling; say so rather than dropping silently.
+		for (const match of line.matchAll(USETIKZLIBRARY_RE)) {
+			const rewritten = normalizeUserLibraryCommand(match[0]);
+			if (rewritten.length === 1 && rewritten[0] === match[0]) {
+				continue;
+			}
+			const matchIndex = match.index ?? 0;
+			const replacement = rewritten.join('\n');
+			diagnostics.push({
+				from: lineFrom + matchIndex,
+				to: lineFrom + matchIndex + match[0].length,
+				severity: 'warning',
+				message: replacement
+					? `Not all of these are TikZ libraries — LuaTikz compiles this as: ${replacement.replace(/\n/g, ' ')}`
+					: 'Not a TikZ library — LuaTikz already loads this package, so the line has no effect.',
+				actions: [{
+					name: replacement ? 'Rewrite' : 'Remove',
+					apply(view: EditorView, from: number, to: number) {
+						view.dispatch({ changes: { from, to, insert: replacement } });
+					},
+				}],
 			});
 		}
 

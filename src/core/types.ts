@@ -10,6 +10,8 @@ export interface RenderImageResult {
 	html?: string;
 	error?: string;
 	errorSummary?: string;
+	/** Plain-language explanation of the failure, shown under the error title. */
+	hint?: string;
 	rawLog?: string;
 	userLine?: number;
 	noteLine?: number;
@@ -50,6 +52,8 @@ export interface RenderResult {
 	pngPath?: string;
 	error?: string;
 	errorSummary?: string;
+	/** Plain-language explanation of the failure, shown under the error title. */
+	hint?: string;
 	rawLog?: string;
 	userLine?: number;
 	noteLine?: number;
@@ -70,6 +74,7 @@ export function renderResultToImageResult(result: RenderResult): RenderImageResu
 		html: result.html,
 		error: result.error,
 		errorSummary: result.errorSummary,
+		hint: result.hint,
 		rawLog: result.rawLog,
 		userLine: result.userLine,
 		noteLine: result.noteLine,

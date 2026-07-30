@@ -38,12 +38,14 @@ function windowsInstallHints(): { poppler: string; tex: string } {
 }
 
 /**
- * Read the platform from the runtime global rather than the bare `process`
- * identifier: the bundle injects a browser process shim for mobile, and this
- * desktop-only check must keep seeing Electron's real process object.
+ * Read the platform off the window rather than the bare `process` identifier:
+ * the bundle injects a browser process shim for mobile, and this desktop-only
+ * check must keep seeing Electron's real process object.
  */
 function desktopPlatform(): NodeJS.Platform {
-	const runtimeProcess = (globalThis as { process?: { platform?: NodeJS.Platform } }).process;
+	const runtimeProcess = (activeWindow as Window & {
+		process?: { platform?: NodeJS.Platform };
+	}).process;
 	return runtimeProcess?.platform ?? 'darwin';
 }
 

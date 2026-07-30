@@ -198,6 +198,7 @@ export class LuaLatexRenderer {
 			engine: 'lualatex',
 			error: timedOut ? 'Timed out.' : buildLatexErrorTitle(mapped),
 			errorSummary: mapped.summary,
+			hint: timedOut ? undefined : mapped.hint,
 			rawLog: debug ? formatCompileDebugLog(debug, body) : body,
 			userLine: mapped.userLine,
 			noteLine: mapped.noteLine,

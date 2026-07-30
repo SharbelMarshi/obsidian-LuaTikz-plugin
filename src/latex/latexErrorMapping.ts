@@ -2,6 +2,7 @@ import type { Editor } from 'obsidian';
 import type { TikzBlock } from '../core/types';
 import { prepareBlockLineForRender } from '../utils/diagramAlign';
 import { suggestLatexAutofix, type LatexAutofix } from './latexAutofix';
+import { hintForLatexError } from './latexErrorHints';
 
 export interface MappedLatexError {
 	/** Short LaTeX error summary, e.g. "Missing semicolon (;)" */
@@ -12,6 +13,8 @@ export interface MappedLatexError {
 	lineContent?: string;
 	noteLine?: number;
 	autofix?: LatexAutofix;
+	/** Plain-language explanation shown under the error title. */
+	hint?: string;
 }
 
 const LATEX_LINE_PATTERN = /(?:^|\n)\s*l\.(\d+)/;
@@ -64,6 +67,15 @@ function humanizeLatexError(rawLine: string): string {
 	}
 	if (lower.includes('ended by \\end{document}') && lower.includes('tikzpicture')) {
 		return 'Missing \\end{tikzpicture}';
+	}
+	if (lower.startsWith('dimension too large')) {
+		return 'Dimension too large';
+	}
+	if (lower.includes('did not find the tikz library')) {
+		const nameMatch = trimmed.match(/tikz library '([^']+)'/);
+		return nameMatch
+			? `Unknown tikz library '${nameMatch[1]}'`
+			: 'Unknown tikz library';
 	}
 	if (lower.includes('runaway argument')) {
 		return 'Runaway argument';
@@ -148,7 +160,7 @@ export function formatLatexErrorWithLineMapping(
 	const latexLine = parseLatexErrorLine(raw);
 
 	if (latexLine === null || latexLine <= sourceLineOffset) {
-		return { summary, message: summary };
+		return { summary, message: summary, hint: hintForLatexError(summary) };
 	}
 
 	const renderLine = latexLine - sourceLineOffset;
@@ -159,6 +171,7 @@ export function formatLatexErrorWithLineMapping(
 		lineContent = editor.getLine(noteLine - 1)?.trimEnd() ?? lineContent;
 	}
 	const autofix = suggestLatexAutofix(summary, lineContent, raw);
+	const hint = hintForLatexError(summary, lineContent);
 	const snippet = lineContent
 		? (lineContent.length > 80 ? `${lineContent.slice(0, 77)}...` : lineContent)
 		: summary;
@@ -171,6 +184,7 @@ export function formatLatexErrorWithLineMapping(
 			lineContent,
 			noteLine,
 			autofix: autofix ?? undefined,
+			hint,
 		};
 	}
 
@@ -180,5 +194,6 @@ export function formatLatexErrorWithLineMapping(
 		userLine: renderLine,
 		lineContent,
 		autofix: autofix ?? undefined,
+		hint,
 	};
 }

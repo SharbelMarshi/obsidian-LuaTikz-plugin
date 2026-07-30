@@ -156,6 +156,77 @@ export interface ExtractedUserPreamble {
 const USER_PACKAGE_RE = /\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]+\}/g;
 const USER_LIBRARY_RE = /\\(?:usetikzlibrary|usepgfplotslibrary|usegdlibrary)\s*\{[^}]*\}/g;
 
+/**
+ * Package names people reach for inside `\usetikzlibrary`. TikZ hard-errors on
+ * an unknown library ("I did not find the tikz library ..."), and the wrapper
+ * preamble already loads every one of these, so they are simply dropped.
+ */
+const PACKAGES_MISTAKEN_FOR_LIBRARIES = new Set([
+	'pgfplots',
+	'pgf',
+	'tikz',
+	'circuitikz',
+	'amsmath',
+	'amssymb',
+	'xcolor',
+	'graphicx',
+	'standalone',
+	'fontspec',
+]);
+
+/**
+ * PGFPlots ships these as `tikzlibrarypgfplots.<name>.code.tex`, reachable only
+ * through `\usepgfplotslibrary`; `\usetikzlibrary{<name>}` errors out. Names
+ * that do work through both (dateplot, external, fillbetween, colorbrewer) are
+ * deliberately absent so they keep loading the way the user wrote them.
+ */
+const PGFPLOTS_ONLY_LIBRARIES = new Set([
+	'groupplots',
+	'colormaps',
+	'patchplots',
+	'polar',
+	'smithchart',
+	'statistics',
+	'units',
+	'ternary',
+	'contourlua',
+]);
+
+function formatLibraryCommand(command: string, names: readonly string[]): string[] {
+	return names.length ? [`\\${command}{${names.join(',')}}`] : [];
+}
+
+/**
+ * Rewrite a hoisted `\usetikzlibrary` so a stray package or PGFPlots library
+ * name cannot abort the whole compile. Other library commands pass through.
+ */
+export function normalizeUserLibraryCommand(command: string): string[] {
+	const match = command.match(/^\\usetikzlibrary\s*\{([^}]*)\}$/);
+	if (!match) {
+		return [command];
+	}
+
+	const tikzLibraries: string[] = [];
+	const pgfplotsLibraries: string[] = [];
+
+	for (const raw of match[1].split(',')) {
+		const name = raw.trim();
+		if (!name || PACKAGES_MISTAKEN_FOR_LIBRARIES.has(name)) {
+			continue;
+		}
+		if (PGFPLOTS_ONLY_LIBRARIES.has(name)) {
+			pgfplotsLibraries.push(name);
+			continue;
+		}
+		tikzLibraries.push(name);
+	}
+
+	return [
+		...formatLibraryCommand('usetikzlibrary', tikzLibraries),
+		...formatLibraryCommand('usepgfplotslibrary', pgfplotsLibraries),
+	];
+}
+
 /** Code portion of a line, up to the first unescaped %. */
 function codePartOfLine(line: string): string {
 	for (let index = 0; index < line.length; index++) {
@@ -187,7 +258,7 @@ export function extractUserPreamble(source: string): ExtractedUserPreamble {
 				return '';
 			});
 			newCode = newCode.replace(USER_LIBRARY_RE, match => {
-				libraries.push(match);
+				libraries.push(...normalizeUserLibraryCommand(match));
 				return '';
 			});
 			return newCode === code ? line : newCode + line.slice(code.length);

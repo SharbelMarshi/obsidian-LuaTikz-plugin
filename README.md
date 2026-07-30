@@ -93,6 +93,8 @@ To close an orthogonal shape (rectangle, L-shape, …) without nudging the last 
 
 becomes `(0.54,-0.96)--cycle` on the last segment.
 
+Move the pointer over a shape in the preview and the statement that drew it is highlighted in the editor. The mapping is derived from the explicit coordinates in your source (`--` chains, `rectangle`/`grid`, `circle`/`ellipse`, node anchors, `++` relative steps, picture-level `scale`); statements built from anything it cannot read — named nodes, polar coordinates, `foreach` bodies — are simply never highlighted rather than guessed at.
+
 While you edit, the preview keeps the last good diagram visible so a half-finished `\draw` line does not blank the surface.
 
 ### Editor
@@ -119,7 +121,7 @@ Inside `tikz` / `luatikz` blocks (and standalone `\begin{tikzpicture}` environme
 
 ### Export
 
-Hover a rendered block and click **Export SVG**.
+Hover a rendered block and click **Export** to save the diagram as SVG. The arrow next to it opens a menu to choose **SVG** or **PNG**; PNG is rasterized from the vector output at 2× so it stays crisp.
 
 ## Errors and editing
 
@@ -152,6 +154,8 @@ Pre-render checks catch empty option values (`align=`, `opacity=`, `minimum widt
 ## Renderers
 
 **LuaLaTeX** runs your full TeX toolchain: extra packages, pgfplots, circuitikz, math mode, and RTL via polyglossia. The default preamble loads common TikZ libraries.
+
+`\usepackage` and `\usetikzlibrary` lines you write inside a block are hoisted into that preamble. Since TikZ aborts the whole compile on a name it does not recognise, two cases are rewritten first: package names (`\usetikzlibrary{pgfplots}`, `{circuitikz}`, …) are dropped because the preamble already loads them, and PGFPlots-only libraries (`groupplots`, `polar`, `statistics`, …) are moved to `\usepgfplotslibrary`. The editor flags both so the rewrite is never a surprise.
 
 **TikZJax** renders in-process with no shell. Good for standard TikZ and simple plots. Advanced pgfplots (e.g. interpolated 3D surfaces) and real RTL shaping need LuaLaTeX.
 

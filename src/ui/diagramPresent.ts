@@ -1,10 +1,11 @@
-import { Notice } from 'obsidian';
+import { Menu } from 'obsidian';
 import type { LuaTikzSettings } from '../settings/settingsModel';
 import type { RenderImageResult } from '../core/types';
 import type { PreparedTikzSource } from '../core/tikzSource';
 import { applyDiagramAlign } from '../utils/diagramAlign';
 import { applyDarkPresentationClass } from '../utils/darkMode';
 import { applyRtlToContainer } from '../utils/rtl';
+import { exportDiagram, type DiagramExportFormat, type ExportableDiagram } from './exportDiagram';
 
 export interface PresentErrorOptions {
 	source?: string;
@@ -13,27 +14,61 @@ export interface PresentErrorOptions {
 	onJumpToLine?: (noteLine: number) => void;
 	onRetry?: () => void;
 	extraCls?: string;
+	/** Plain-language explanation shown between the title and the buttons. */
+	hint?: string;
 }
 
 export interface PresentDiagramOptions {
 	isDarkTheme?: boolean;
 }
 
-function downloadSvg(
-	svgText: string,
+const EXPORT_FORMATS: { format: DiagramExportFormat; label: string; icon: string }[] = [
+	{ format: 'svg', label: 'SVG', icon: 'file-code' },
+	{ format: 'png', label: 'PNG', icon: 'image' },
+];
+
+/**
+ * "Export" primary button (SVG) plus a caret that opens the format menu.
+ * Rendered as one visual unit so the caret reads as part of the button.
+ */
+function appendExportControl(
+	toolbar: HTMLElement,
+	diagram: ExportableDiagram,
 	activeDocument: Document,
-	filename = 'tikz-diagram.svg',
 ): void {
-	const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
-	const url = URL.createObjectURL(blob);
-	const link = activeDocument.createElement('a');
-	link.href = url;
-	link.download = filename;
-	link.classList.add('tikzjax-hebrew-local-download-link');
-	activeDocument.body.appendChild(link);
-	link.click();
-	link.remove();
-	URL.revokeObjectURL(url);
+	const group = toolbar.createDiv({ cls: 'luatikz-export-split' });
+
+	const run = (format: DiagramExportFormat) => {
+		void exportDiagram(diagram, format, activeDocument);
+	};
+
+	const defaultFormat: DiagramExportFormat = diagram.svgText ? 'svg' : 'png';
+
+	const exportButton = group.createEl('button', {
+		text: 'Export',
+		cls: 'tikzjax-hebrew-local-toolbar-button luatikz-soft-button luatikz-export-main',
+	});
+	exportButton.setAttr('aria-label', `Export as ${defaultFormat.toUpperCase()}`);
+	exportButton.addEventListener('click', () => run(defaultFormat));
+
+	const caret = group.createEl('button', {
+		text: '▾',
+		cls: 'tikzjax-hebrew-local-toolbar-button luatikz-soft-button luatikz-export-caret',
+	});
+	caret.setAttr('aria-label', 'Choose export format');
+	caret.addEventListener('click', (event: MouseEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+
+		const menu = new Menu();
+		for (const { format, label, icon } of EXPORT_FORMATS) {
+			menu.addItem(item => item
+				.setTitle(label)
+				.setIcon(icon)
+				.onClick(() => run(format)));
+		}
+		menu.showAtMouseEvent(event);
+	});
 }
 
 export function appendTikzError(
@@ -49,6 +84,7 @@ export function appendTikzError(
 		noteLine,
 		blockLine,
 		onJumpToLine,
+		hint,
 	} = options;
 
 	const displayLine = blockLine ?? noteLine;
@@ -66,6 +102,13 @@ export function appendTikzError(
 
 	if (source) {
 		applyRtlToContainer(errorEl, source);
+	}
+
+	if (hint) {
+		errorEl.createDiv({
+			cls: 'tikzjax-hebrew-local-error-hint',
+			text: hint,
+		});
 	}
 
 	const buttonRow = errorEl.createDiv({
@@ -127,6 +170,7 @@ export function presentTikzFailure(
 			...options,
 			noteLine: result.noteLine ?? options.noteLine,
 			blockLine: result.userLine ?? options.blockLine,
+			hint: result.hint ?? options.hint,
 		},
 	);
 }
@@ -152,16 +196,7 @@ export function presentTikzDiagram(
 
 	const toolbar = block.createDiv({ cls: 'tikzjax-hebrew-local-toolbar' });
 
-	const exportButton = toolbar.createEl('button', {
-		text: 'Export SVG',
-		cls: 'tikzjax-hebrew-local-toolbar-button luatikz-soft-button',
-	});
-	exportButton.addEventListener('click', () => {
-		if (svgText) {
-			downloadSvg(svgText, el.ownerDocument);
-			new Notice('SVG exported.');
-		}
-	});
+	appendExportControl(toolbar, { svgText, dataUrl }, el.ownerDocument);
 
 	const container = block.createDiv({ cls: 'tikzjax-hebrew-local-output' });
 	applyRtlToContainer(container, renderSource);

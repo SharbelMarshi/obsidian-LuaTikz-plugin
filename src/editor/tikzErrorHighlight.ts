@@ -323,17 +323,10 @@ export function replaceEditorLine(editor: Editor, noteLine: number, nextLine: st
 	);
 }
 
+// The error line/mark colours live in styles.css: a baseTheme selector is
+// prefixed with the base theme class, which sits on the same element as
+// .cm-editor, so ".cm-editor .cm-line.foo" would never match.
 const tikzErrorHighlightTheme = EditorView.baseTheme({
-	'.cm-editor .cm-line.luatikz-error-line-highlight': {
-		backgroundColor: 'rgba(255, 80, 80, 0.18)',
-	},
-	'.cm-editor .luatikz-error-mark-highlight': {
-		backgroundColor: 'rgba(255, 80, 80, 0.42)',
-		borderRadius: '2px',
-	},
-	'&.cm-focused .cm-editor .cm-line.luatikz-error-line-highlight': {
-		backgroundColor: 'rgba(255, 80, 80, 0.22)',
-	},
 	'.luatikz-autofix-popup': {
 		position: 'absolute',
 		top: '-1.85em',

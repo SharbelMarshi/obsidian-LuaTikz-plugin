@@ -388,6 +388,26 @@
   }
 }
 
+.luatikz-export-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.tikzjax-hebrew-local-toolbar-button.luatikz-soft-button.luatikz-export-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right-width: 0;
+}
+
+.tikzjax-hebrew-local-toolbar-button.luatikz-soft-button.luatikz-export-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid var(--background-modifier-border);
+  padding-left: 7px;
+  padding-right: 7px;
+  line-height: 1;
+}
+
 .tikzjax-hebrew-local-download-link {
   display: none;
 }
@@ -435,6 +455,28 @@
   color: var(--text-error);
   font-weight: 600;
   margin-bottom: 8px;
+}
+
+.tikzjax-hebrew-local-error-hint {
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border-left: 2px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-secondary) 60%, transparent);
+  color: var(--text-muted);
+  font-size: 0.85em;
+  line-height: 1.45;
+}
+
+.cm-editor .cm-content .cm-line.luatikz-hover-line-highlight {
+  background-color: rgba(120, 170, 255, 0.20);
+  box-shadow: inset 2px 0 0 0 rgba(120, 170, 255, 0.85);
+  border-radius: 3px;
+}
+
+.theme-dark .cm-editor .cm-content .cm-line.luatikz-hover-line-highlight {
+  background-color: rgba(130, 180, 255, 0.24);
+  box-shadow: inset 2px 0 0 0 rgba(150, 195, 255, 0.9);
 }
 
 .cm-editor .cm-content .cm-line.luatikz-error-line-highlight {

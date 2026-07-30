@@ -7,12 +7,21 @@ import type { TikzBlock } from '../core/types';
 import { applyDiagramAlign, type DiagramAlign } from '../utils/diagramAlign';
 import { applyDarkPresentationClass } from '../utils/darkMode';
 import { clearTikzErrorHighlight } from './tikzErrorHighlight';
+import { clearTikzHoverHighlight, showTikzHoverHighlight } from './tikzHoverHighlight';
 import { showTikzErrorHighlightFromResult } from './editorNavigation';
 import { applyRtlToContainer } from '../utils/rtl';
-import { formatTikzCoordinate, clientPointToTikzCoordinate, applyShiftConstraint, INCOMPLETE_DRAW_LINE_RE, parseLastNumericCoordinate, tikzCoordinateToClient } from '../utils/coordinatePick';
+import { formatTikzCoordinate, clientPointToTikzCoordinate, applyShiftConstraint, INCOMPLETE_DRAW_LINE_RE, parseLastNumericCoordinate, tikzCoordinateToClient, parseBBoxAttribute, ptToCm } from '../utils/coordinatePick';
+import {
+	buildTikzGeometryMap,
+	findStatementAt,
+	geometryFitsPicture,
+	type TikzGeometryMap,
+} from '../latex/tikzStatementGeometry';
 import { isMobileApp } from '../utils/platform';
 
 const RENDER_DEBOUNCE_MS = 200;
+/** Pointer slack, in screen px, for deciding what the pointer is over. */
+const HOVER_TOLERANCE_PX = 10;
 const MIN_PREVIEW_WIDTH = 160;
 const MIN_PREVIEW_HEIGHT = 120;
 const DEFAULT_PREVIEW_WIDTH = 520;
@@ -39,6 +48,16 @@ function applyPreviewBoxCss(container: HTMLElement, props: PreviewBoxCss): void 
 		...(props.width !== undefined ? { '--luatikz-preview-width': props.width } : {}),
 		...(props.height !== undefined ? { '--luatikz-preview-height': props.height } : {}),
 	});
+}
+
+/** HOVER_TOLERANCE_PX expressed in TikZ cm at the preview's current zoom. */
+function hoverToleranceCm(svgEl: SVGSVGElement, clientX: number, clientY: number): number {
+	const origin = clientPointToTikzCoordinate(svgEl, clientX, clientY);
+	const offset = clientPointToTikzCoordinate(svgEl, clientX + HOVER_TOLERANCE_PX, clientY);
+	if (!origin || !offset) {
+		return 0.2;
+	}
+	return Math.max(0.05, Math.abs(offset.x - origin.x));
 }
 
 export function getCurrentTikzBlock(editor: Editor): TikzBlock | null {
@@ -143,6 +162,9 @@ export class InlinePreviewManager {
 	private previewWidth = DEFAULT_PREVIEW_WIDTH;
 	private previewHeight = DEFAULT_PREVIEW_HEIGHT;
 	private resizeListenersAttached = false;
+	private geometryMapSource: string | null = null;
+	private geometryMap: TikzGeometryMap | null = null;
+	private hoverFrame: number | null = null;
 
 	constructor(
 		private readonly getActiveMarkdownView: () => MarkdownView | null,
@@ -158,6 +180,7 @@ export class InlinePreviewManager {
 	}
 
 	disable(): void {
+		this.clearHoverHighlight();
 		this.enabled = false;
 		this.lastGoodDataUrl = null;
 		this.lastGoodSvgText = null;
@@ -168,6 +191,17 @@ export class InlinePreviewManager {
 		this.previewInteractionActive = false;
 		this.clearTimer();
 		this.hide();
+	}
+
+	private clearHoverHighlight(): void {
+		if (this.hoverFrame !== null) {
+			window.cancelAnimationFrame(this.hoverFrame);
+			this.hoverFrame = null;
+		}
+		const view = this.getViewForPreview();
+		if (view) {
+			clearTikzHoverHighlight(view.editor);
+		}
 	}
 
 	scheduleUpdate(renderDelay = RENDER_DEBOUNCE_MS): void {
@@ -321,6 +355,7 @@ export class InlinePreviewManager {
 
 	private hide(): void {
 		if (this.container) {
+			this.clearHoverHighlight();
 			this.container.remove();
 			this.container = null;
 			this.resizeListenersAttached = false;
@@ -573,6 +608,7 @@ export class InlinePreviewManager {
 
 		const host = output.createDiv({ cls: 'luatikz-inline-svg-host luatikz-pick-mode' });
 		host.appendChild(svgEl);
+		this.attachHoverHighlight(host, svgEl);
 
 		const handlePick = (event: MouseEvent) => {
 			event.preventDefault();
@@ -628,6 +664,81 @@ export class InlinePreviewManager {
 		});
 
 		output.addEventListener('click', handlePick);
+	}
+
+	private getGeometryMap(blockSource: string): TikzGeometryMap {
+		if (this.geometryMapSource !== blockSource || !this.geometryMap) {
+			this.geometryMap = buildTikzGeometryMap(blockSource);
+			this.geometryMapSource = blockSource;
+		}
+		return this.geometryMap;
+	}
+
+	/** Highlight the statement the pointer is over while it moves across the preview. */
+	private attachHoverHighlight(host: HTMLElement, svgEl: SVGSVGElement): void {
+		host.addEventListener('mousemove', (event: MouseEvent) => {
+			const { clientX, clientY } = event;
+			if (this.hoverFrame !== null) {
+				return;
+			}
+			this.hoverFrame = window.requestAnimationFrame(() => {
+				this.hoverFrame = null;
+				this.updateHoverHighlight(svgEl, clientX, clientY);
+			});
+		});
+
+		host.addEventListener('mouseleave', () => {
+			this.clearHoverHighlight();
+		});
+	}
+
+	private updateHoverHighlight(svgEl: SVGSVGElement, clientX: number, clientY: number): void {
+		const view = this.getViewForPreview();
+		if (!view) {
+			return;
+		}
+
+		const block = this.resolveBlock(view);
+		const point = block ? clientPointToTikzCoordinate(svgEl, clientX, clientY) : null;
+		if (!block || !point) {
+			clearTikzHoverHighlight(view.editor);
+			return;
+		}
+
+		const map = this.getGeometryMap(block.source);
+		if (!map.statements.length) {
+			clearTikzHoverHighlight(view.editor);
+			return;
+		}
+
+		const pictureBBox = parseBBoxAttribute(svgEl);
+		if (pictureBBox && !geometryFitsPicture(map, {
+			minX: ptToCm(pictureBBox.minX),
+			minY: ptToCm(pictureBBox.minY),
+			maxX: ptToCm(pictureBBox.maxX),
+			maxY: ptToCm(pictureBBox.maxY),
+		})) {
+			clearTikzHoverHighlight(view.editor);
+			return;
+		}
+
+		const statement = findStatementAt(
+			map,
+			point,
+			hoverToleranceCm(svgEl, clientX, clientY),
+		);
+		if (!statement) {
+			clearTikzHoverHighlight(view.editor);
+			return;
+		}
+
+		// Block source line 0 is the editor line after the opening fence, and
+		// CodeMirror line numbers are 1-based.
+		const firstBodyLine = block.startLine + 2;
+		showTikzHoverHighlight(view.editor, {
+			fromLine: firstBodyLine + statement.startLine,
+			toLine: firstBodyLine + statement.endLine,
+		});
 	}
 
 	private showError(
