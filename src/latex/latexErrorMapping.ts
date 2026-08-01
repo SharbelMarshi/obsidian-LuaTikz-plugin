@@ -1,6 +1,7 @@
 import type { Editor } from 'obsidian';
 import type { TikzBlock } from '../core/types';
 import { prepareBlockLineForRender } from '../utils/diagramAlign';
+import { gridInjectionIndex } from '../utils/diagramGrid';
 import { suggestLatexAutofix, type LatexAutofix } from './latexAutofix';
 import { hintForLatexError } from './latexErrorHints';
 
@@ -125,17 +126,29 @@ export function buildLatexErrorTitle(mapped: MappedLatexError): string {
  * Map each render-source line (after tidy + strip align directives) to a 1-based note line.
  * Mirrors prepareTikzRenderSource so error line numbers match the editor.
  */
-export function buildRenderToNoteLineMap(block: TikzBlock, editor?: Editor): number[] {
+export function buildRenderToNoteLineMap(block: TikzBlock, editor?: Editor): (number | null)[] {
 	const innerLines = block.source.split('\n');
-	const map: number[] = [];
+	const rawLines: string[] = [];
+	const renderLines: string[] = [];
+	const map: (number | null)[] = [];
 
 	for (let i = 0; i < innerLines.length; i++) {
 		const noteLine0 = block.startLine + 1 + i;
 		const raw = editor?.getLine(noteLine0) ?? innerLines[i] ?? '';
-		if (prepareBlockLineForRender(raw) === null) {
+		rawLines.push(raw);
+		const prepared = prepareBlockLineForRender(raw);
+		if (prepared === null) {
 			continue;
 		}
+		renderLines.push(prepared);
 		map.push(noteLine0 + 1);
+	}
+
+	// The generated grid line exists only in the render source, so every line
+	// below it would otherwise report one line short of where it really is.
+	const gridAt = gridInjectionIndex(rawLines.join('\n'), renderLines);
+	if (gridAt !== null) {
+		map.splice(gridAt, 0, null);
 	}
 
 	return map;
@@ -163,37 +176,48 @@ export function formatLatexErrorWithLineMapping(
 		return { summary, message: summary, hint: hintForLatexError(summary) };
 	}
 
-	const renderLine = latexLine - sourceLineOffset;
+	const blamedLine = latexLine - sourceLineOffset;
 	const renderLines = renderSource.split('\n');
-	let lineContent = renderLines[renderLine - 1]?.trimEnd();
-	const noteLine = noteLineMapper?.(renderLine) ?? undefined;
-	if (noteLine !== undefined && editor) {
-		lineContent = editor.getLine(noteLine - 1)?.trimEnd() ?? lineContent;
+
+	const resolveLineContent = (line: number): string | undefined => {
+		const noteLine = noteLineMapper?.(line) ?? undefined;
+		if (noteLine !== undefined && editor) {
+			return editor.getLine(noteLine - 1)?.trimEnd() ?? renderLines[line - 1]?.trimEnd();
+		}
+		return renderLines[line - 1]?.trimEnd();
+	};
+
+	const suggested = suggestLatexAutofix(summary, resolveLineContent(blamedLine), raw, {
+		lines: renderLines,
+		lineIndex: blamedLine - 1,
+	});
+
+	// A fix that relocates moves the whole reported location with it: the line
+	// TeX blamed is where it gave up, not where the mistake is, and the
+	// highlight has to land on the line the Fix button will edit.
+	const renderLine = suggested?.lineDelta
+		? Math.max(1, Math.min(renderLines.length, blamedLine + suggested.lineDelta))
+		: blamedLine;
+
+	let autofix: LatexAutofix | undefined;
+	if (suggested) {
+		const { lineDelta: _resolved, ...rest } = suggested;
+		autofix = rest;
 	}
-	const autofix = suggestLatexAutofix(summary, lineContent, raw);
+	const lineContent = resolveLineContent(renderLine);
+	const noteLine = noteLineMapper?.(renderLine) ?? undefined;
 	const hint = hintForLatexError(summary, lineContent);
 	const snippet = lineContent
 		? (lineContent.length > 80 ? `${lineContent.slice(0, 77)}...` : lineContent)
 		: summary;
-
-	if (noteLine !== undefined) {
-		return {
-			summary,
-			message: `Line ${renderLine}: ${summary} — ${snippet}`,
-			userLine: renderLine,
-			lineContent,
-			noteLine,
-			autofix: autofix ?? undefined,
-			hint,
-		};
-	}
 
 	return {
 		summary,
 		message: `Line ${renderLine}: ${summary} — ${snippet}`,
 		userLine: renderLine,
 		lineContent,
-		autofix: autofix ?? undefined,
+		noteLine,
+		autofix,
 		hint,
 	};
 }

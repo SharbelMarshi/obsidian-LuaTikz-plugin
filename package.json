@@ -6,7 +6,7 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "node scripts/generate-tikzjax-tex-assets.mjs && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && node scripts/validate-tikzjax-bundle.mjs",
-		"test:tikzjax": "node scripts/test-tikzjax-normalize.mjs && node scripts/test-render-routing.mjs && node scripts/test-tikzjax.mjs && node scripts/test-tikzjax-mobile-sim.mjs && node scripts/test-error-mapping.mjs && node scripts/test-line-mapping.mjs && node scripts/test-source-validation.mjs && node scripts/test-tikz-snippets.mjs && node scripts/test-structural-lint.mjs && node scripts/test-coordinate-pick.mjs && node scripts/test-statement-geometry.mjs && node scripts/test-fence-starter.mjs && node scripts/test-preamble-and-hints.mjs && node scripts/test-latex-wrapper.mjs && node scripts/test-decoration-styles.mjs && node scripts/test-lualatex-compile.mjs"
+		"test:tikzjax": "node scripts/test-tikzjax-normalize.mjs && node scripts/test-render-routing.mjs && node scripts/test-tikzjax.mjs && node scripts/test-tikzjax-mobile-sim.mjs && node scripts/test-error-mapping.mjs && node scripts/test-line-mapping.mjs && node scripts/test-error-highlight-widget.mjs && node scripts/test-source-validation.mjs && node scripts/test-tikz-snippets.mjs && node scripts/test-structural-lint.mjs && node scripts/test-coordinate-pick.mjs && node scripts/test-statement-geometry.mjs && node scripts/test-fence-starter.mjs && node scripts/test-preamble-and-hints.mjs && node scripts/test-latex-wrapper.mjs && node scripts/test-decoration-styles.mjs && node scripts/test-lualatex-compile.mjs"
 	},
 	"keywords": [],
 	"author": "Sharbel Marshi",
@@ -14,6 +14,7 @@
 	"devDependencies": {
 		"@types/node": "^16.11.6",
 		"esbuild": "0.13.12",
+		"jsdom": "^23.2.0",
 		"obsidian": "latest",
 		"tslib": "2.3.1",
 		"typescript": "^6.0.3"

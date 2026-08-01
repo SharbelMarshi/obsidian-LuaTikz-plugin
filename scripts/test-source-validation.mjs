@@ -1,38 +1,21 @@
+/**
+ * Pre-compile option validation, against the real src/ modules.
+ *
+ * Covers both halves: spotting the bad option, and offering a Fix that
+ * actually rewrites the line. A suggestion whose apply step is a no-op renders
+ * a button that appears broken, so every autofix here is applied and checked.
+ */
 import assert from 'node:assert/strict';
+import { loadSrcModules } from './loadSrc.mjs';
 
-const KNOWN_ENUM_OPTIONS = {
-	align: ['left', 'center', 'right'],
-};
+const { validation, autofix } = await loadSrcModules({
+	validation: 'src/latex/tikzSourceValidation.ts',
+	autofix: 'src/latex/latexAutofix.ts',
+});
+const { findOptionEqualIssues, validateTikzRenderSource } = validation;
+const { applyAutofixToLine } = autofix;
 
-const OPTION_KEY_EQ_RE = /([a-zA-Z][\w\s.-]*?)\s*=/g;
-
-function findOptionEqualIssues(line) {
-	const codePart = line.replace(/%.*/, '');
-	const issues = [];
-
-	for (const match of codePart.matchAll(OPTION_KEY_EQ_RE)) {
-		const key = match[1].trim();
-		const columnStart = match.index ?? 0;
-		const eqEnd = columnStart + match[0].length;
-		const rest = codePart.slice(eqEnd);
-		const valueMatch = rest.match(/^\s*([^,\]\}\)]*)/);
-		const rawValue = valueMatch?.[1] ?? '';
-		const value = rawValue.trim();
-		const columnEnd = value ? eqEnd + valueMatch[0].length : eqEnd;
-
-		if (!value) {
-			issues.push({ key, kind: 'empty', columnStart, columnEnd });
-			continue;
-		}
-
-		const enumValues = KNOWN_ENUM_OPTIONS[key.toLowerCase()];
-		if (enumValues && !enumValues.includes(value.toLowerCase())) {
-			issues.push({ key, kind: 'invalid', value, columnStart, columnEnd });
-		}
-	}
-
-	return issues;
-}
+// --- issue detection ------------------------------------------------------
 
 const emptyAlign = findOptionEqualIssues('\\begin{tikzpicture}[align=]');
 assert.equal(emptyAlign.length, 1);
@@ -43,8 +26,7 @@ const emptyOpacity = findOptionEqualIssues('\\node[opacity=, draw] {x};');
 assert.equal(emptyOpacity.length, 1);
 assert.equal(emptyOpacity[0].key, 'opacity');
 
-const valid = findOptionEqualIssues('\\node[align=center, opacity=0.5] {x};');
-assert.equal(valid.length, 0);
+assert.equal(findOptionEqualIssues('\\node[align=center, opacity=0.5] {x};').length, 0);
 
 const trailingEmpty = findOptionEqualIssues('\\draw[line width=] (0,0)--(1,1);');
 assert.equal(trailingEmpty.length, 1);
@@ -58,5 +40,38 @@ const invalidAlign = findOptionEqualIssues('\\node[align=top] {};');
 assert.equal(invalidAlign.length, 1);
 assert.equal(invalidAlign[0].kind, 'invalid');
 assert.equal(invalidAlign[0].value, 'top');
+
+// --- the fix has to actually change the line ------------------------------
+
+function firstError(line) {
+	return validateTikzRenderSource(['\\begin{tikzpicture}', line, '\\end{tikzpicture}'].join('\n'));
+}
+
+for (const [line, expected] of [
+	['\\node[align=] at (0,0) {x};', '\\node[align=center] at (0,0) {x};'],
+	['\\node[align=middle] at (0,0) {x};', '\\node[align=center] at (0,0) {x};'],
+	['\\draw[line width=] (0,0)--(1,1);', '\\draw[line width=1pt] (0,0)--(1,1);'],
+	['\\node[opacity=, draw] {x};', '\\node[opacity=1, draw] {x};'],
+	['\\node[minimum width=] {};', '\\node[minimum width=1cm] {};'],
+]) {
+	const error = firstError(line);
+	assert.ok(error, `no validation error for ${line}`);
+	assert.ok(error.autofix, `no autofix offered for ${line}`);
+	const applied = applyAutofixToLine(line, error.autofix);
+	assert.notEqual(applied, line, `autofix for ${line} did not change the line`);
+	assert.equal(applied, expected);
+	// The mark has to cover the option, since the Fix popup anchors to it.
+	assert.ok(error.markColumnEnd >= error.markColumnStart);
+	assert.equal(line.slice(error.markColumnStart, error.markColumnEnd).includes('='), true);
+}
+
+// A key with no unambiguous default gets the error but no button, rather than
+// a "Fix" that silently does nothing when clicked.
+const unknownKey = firstError('\\node[my custom key=] {x};');
+assert.ok(unknownKey, 'unknown key should still be reported');
+assert.equal(unknownKey.autofix, undefined, 'unknown key must not offer a no-op fix');
+
+// An invalid (not merely empty) value for a key with no enum is left alone.
+assert.equal(firstError('\\node[opacity=0.5] {x};'), null);
 
 console.log('test-source-validation: ok');

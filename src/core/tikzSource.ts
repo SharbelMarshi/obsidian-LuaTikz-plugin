@@ -5,7 +5,7 @@ import {
 	stripDiagramAlignDirective,
 	type DiagramAlign,
 } from '../utils/diagramAlign';
-import { prepareGridForRender } from '../utils/diagramGrid';
+import { applyGridDirective } from '../utils/diagramGrid';
 import { CAL_MARKER_MAX_RGB, CAL_MARKER_MIN_RGB } from '../utils/coordinatePick';
 import { containsArabicContent, containsHebrewContent } from '../utils/rtlDetection';
 import type { LuaTikzSettings } from '../settings/settingsModel';
@@ -356,7 +356,8 @@ export function prepareTikzRenderSource(source: string): PreparedTikzSource {
 	const tidied = tidyTikzSource(source);
 	const stripped = stripDiagramAlignDirective(tidied);
 	return {
-		renderSource: prepareGridForRender(stripped),
+		// tidied, not stripped: the `% grid=N` line is gone from `stripped`.
+		renderSource: applyGridDirective(tidied, stripped),
 		diagramAlign: parseDiagramAlign(tidied),
 	};
 }

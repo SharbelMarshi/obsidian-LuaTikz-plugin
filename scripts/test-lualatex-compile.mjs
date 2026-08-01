@@ -123,19 +123,35 @@ for (const [label, src, options] of [
 	assert.ok(result.log.includes('cannot be found'), 'expected the fontspec "cannot be found" error');
 }
 
-// Error line numbers must survive the offset refactor, against real compiler output.
-for (const [label, src, expectedLine] of [
-	['undefined control sequence, body line 2', '\\begin{tikzpicture}\n\\notacommand\n\\draw (0,0) -- (1,1);\n\\end{tikzpicture}', 2],
-	['undefined control sequence, body line 4', '\\begin{tikzpicture}\n\\draw (0,0) -- (1,1);\n\\draw (1,1) -- (2,2);\n\\bogusmacro\n\\end{tikzpicture}', 4],
-	// An unclosed brace swallows \end{tikzpicture}, so TeX itself only notices
-	// on the following line — reporting line 4 here is faithful, not a bug.
-	['unclosed brace surfaces on body line 4', '\\begin{tikzpicture}\n\\draw (0,0) -- (1,1);\n\\node at (2,2) {oops;\n\\end{tikzpicture}', 4],
+// Error line numbers must survive the offset refactor, against real compiler
+// output. `expectedFix` is the label of the autofix offered on that line, or
+// null when the failure is not something we can repair.
+for (const [label, src, expectedLine, expectedFix] of [
+	['undefined control sequence, body line 2', '\\begin{tikzpicture}\n\\notacommand\n\\draw (0,0) -- (1,1);\n\\end{tikzpicture}', 2, null],
+	['undefined control sequence, body line 4', '\\begin{tikzpicture}\n\\draw (0,0) -- (1,1);\n\\draw (1,1) -- (2,2);\n\\bogusmacro\n\\end{tikzpicture}', 4, null],
+	// An unclosed brace swallows \end{tikzpicture}, so TeX only notices on the
+	// following line. The report is relocated back onto the line that is
+	// actually wrong — otherwise the highlight, and the Fix button anchored to
+	// it, would sit on a line with nothing to repair.
+	['unclosed brace relocates to body line 3', '\\begin{tikzpicture}\n\\draw (0,0) -- (1,1);\n\\node at (2,2) {oops;\n\\end{tikzpicture}', 3, 'Add missing closing brace (})'],
+	// Same story for a missing semicolon: TeX blames the next statement.
+	['missing semicolon relocates to body line 2', '\\begin{tikzpicture}\n\\draw (0,0) -- (2,2)\n\\draw (0,2) -- (2,0);\n\\end{tikzpicture}', 2, 'Add missing semicolon (;)'],
 ]) {
 	const doc = wrap(src);
 	const result = compile(doc.tex);
 	assert.equal(result.ok, false, `${label}: expected a compile failure`);
 	const mapped = formatLatexErrorWithLineMapping(result.log, doc.body, doc.userLineOffset);
 	assert.equal(mapped.userLine, expectedLine, `${label}: reported line ${mapped.userLine}`);
+	assert.equal(
+		mapped.autofix?.label ?? null,
+		expectedFix,
+		`${label}: offered ${JSON.stringify(mapped.autofix?.label ?? null)}`,
+	);
+	if (expectedFix) {
+		// The line the fix lands on has to be the line it was computed for.
+		const target = doc.body.split('\n')[expectedLine - 1];
+		assert.equal(mapped.lineContent, target, `${label}: lineContent does not match body line ${expectedLine}`);
+	}
 }
 
-console.log('lualatex-compile: 8 documents compiled, guard control + 3 line mappings OK');
+console.log('lualatex-compile: 8 documents compiled, guard control + 4 line mappings OK');

@@ -15,6 +15,40 @@ const KNOWN_ENUM_OPTIONS: Record<string, readonly string[]> = {
 	align: ['left', 'center', 'right'],
 };
 
+/**
+ * What to put after `key=` when the value was left blank. Only keys whose
+ * TikZ default is unambiguous belong here — a wrong guess compiles into a
+ * silently wrong diagram, which is worse than the error the user already sees.
+ * Anything absent gets no Fix button at all rather than a button that does
+ * nothing when clicked.
+ */
+const EMPTY_VALUE_DEFAULTS: Record<string, string> = {
+	align: 'center',
+	anchor: 'center',
+	opacity: '1',
+	'fill opacity': '1',
+	'draw opacity': '1',
+	'text opacity': '1',
+	scale: '1',
+	'xscale': '1',
+	'yscale': '1',
+	rotate: '0',
+	xshift: '0cm',
+	yshift: '0cm',
+	'line width': '1pt',
+	'inner sep': '2pt',
+	'outer sep': '0pt',
+	'minimum size': '1cm',
+	'minimum width': '1cm',
+	'minimum height': '1cm',
+	'rounded corners': '2pt',
+	draw: 'black',
+	fill: 'white',
+	text: 'black',
+	'text width': '3cm',
+	step: '1',
+};
+
 const OPTION_KEY_EQ_RE = /([a-zA-Z][\w\s.-]*?)\s*=/g;
 
 export function findOptionEqualIssues(line: string): OptionEqualIssue[] {
@@ -69,34 +103,31 @@ function normalizeOptionKey(key: string): string {
 function buildAutofixForIssue(issue: OptionEqualIssue): LatexAutofix | undefined {
 	const key = normalizeOptionKey(issue.key);
 
-	if (issue.kind === 'empty' && key === 'align') {
+	if (issue.kind === 'invalid') {
+		const enumValues = KNOWN_ENUM_OPTIONS[key];
+		const fallback = enumValues ? EMPTY_VALUE_DEFAULTS[key] : undefined;
+		if (!fallback) {
+			return undefined;
+		}
 		return {
 			kind: 'fill-option-value',
-			label: 'Set align=center',
+			label: `Set ${issue.key}=${fallback}`,
 			optionKey: issue.key,
-			optionValue: 'center',
+			optionValue: fallback,
 		};
 	}
 
-	if (issue.kind === 'invalid' && key === 'align') {
-		return {
-			kind: 'fill-option-value',
-			label: 'Set align=center',
-			optionKey: issue.key,
-			optionValue: 'center',
-		};
+	const value = EMPTY_VALUE_DEFAULTS[key];
+	if (!value) {
+		return undefined;
 	}
 
-	if (issue.kind === 'empty') {
-		return {
-			kind: 'fill-option-value',
-			label: `Add value after ${issue.key}=`,
-			optionKey: issue.key,
-			optionValue: '?',
-		};
-	}
-
-	return undefined;
+	return {
+		kind: 'fill-option-value',
+		label: `Set ${issue.key}=${value}`,
+		optionKey: issue.key,
+		optionValue: value,
+	};
 }
 
 function buildSummary(issue: OptionEqualIssue): string {

@@ -71,6 +71,13 @@ class TikzAutofixPopupWidget extends WidgetType {
 	}
 }
 
+/**
+ * RangeSetBuilder demands ranges sorted by `from`, then by `value.startSide`.
+ * At the same `from`, a widget (side 1 => startSide 1e8+1) sorts *before* a
+ * mark (startSide 5e8), so the popup has to be added before the mark it sits
+ * on. Adding it after throws, CodeMirror then drops the whole view plugin, and
+ * the Fix button silently disappears for the rest of the session.
+ */
 function buildErrorDecorations(
 	highlight: TikzErrorHighlightRange | null,
 	view?: EditorView,
@@ -85,12 +92,6 @@ function buildErrorDecorations(
 		class: 'luatikz-error-line-highlight',
 	}));
 
-	if (markTo > markFrom) {
-		builder.add(markFrom, markTo, Decoration.mark({
-			class: 'luatikz-error-mark-highlight',
-		}));
-	}
-
 	if (autofix && view && autofixHandlers.has(view)) {
 		builder.add(
 			markFrom,
@@ -102,7 +103,30 @@ function buildErrorDecorations(
 		);
 	}
 
+	if (markTo > markFrom) {
+		builder.add(markFrom, markTo, Decoration.mark({
+			class: 'luatikz-error-mark-highlight',
+		}));
+	}
+
 	return builder.finish();
+}
+
+/**
+ * The side constants above come from whichever CodeMirror Obsidian ships, not
+ * from package.json — they are externals. If a future release reorders them
+ * again, drop the decorations rather than letting the throw disable the plugin.
+ */
+function safeBuildErrorDecorations(
+	highlight: TikzErrorHighlightRange | null,
+	view?: EditorView,
+): DecorationSet {
+	try {
+		return buildErrorDecorations(highlight, view);
+	} catch (err) {
+		console.error('LuaTikz: could not build error decorations', err);
+		return Decoration.none;
+	}
 }
 
 const tikzErrorDecorationsField = StateField.define<DecorationSet>({
@@ -119,7 +143,7 @@ const tikzErrorDecorationsField = StateField.define<DecorationSet>({
 			if (highlight === null) {
 				return Decoration.none;
 			}
-			return buildErrorDecorations(highlight);
+			return safeBuildErrorDecorations(highlight);
 		}
 
 		if (tr.docChanged && decorations !== Decoration.none) {
@@ -145,7 +169,7 @@ const tikzErrorWidgetPlugin = ViewPlugin.fromClass(class {
 		}
 
 		const highlight = update.state.field(tikzErrorHighlightMeta);
-		this.decorations = buildErrorDecorations(highlight, update.view);
+		this.decorations = safeBuildErrorDecorations(highlight, update.view);
 	}
 
 	destroy(): void {

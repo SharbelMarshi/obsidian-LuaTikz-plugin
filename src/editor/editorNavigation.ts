@@ -164,6 +164,8 @@ export async function applyTikzErrorAutofix(
 
 	const { editor } = opened;
 	if (!applyAutofixAtNoteLine(editor, noteLine, autofix)) {
+		// Say so rather than leaving a Fix button that appears to do nothing.
+		new Notice('LuaTikz: could not apply this fix automatically.');
 		return false;
 	}
 	clearTikzErrorHighlight(editor);
@@ -197,14 +199,8 @@ export function showTikzErrorHighlightFromResult(
 		markColumnEnd: result.markColumnEnd,
 	};
 
-	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-	if (activeView?.file?.path === sourcePath) {
-		window.requestAnimationFrame(() => {
-			void showTikzErrorInEditor(app, sourcePath, location, { focus: false });
-		});
-		return;
-	}
-
+	// Deferred a frame: the code block processor is still writing into the DOM,
+	// and dispatching into CodeMirror from inside that pass fights the update.
 	window.requestAnimationFrame(() => {
 		void showTikzErrorInEditor(app, sourcePath, location, { focus: false });
 	});
