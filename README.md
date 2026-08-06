@@ -1,6 +1,6 @@
 # LuaTikZ
 
-Fast LuaLaTeX TikZ rendering with full library support, live preview, RTL support, and simple diagram helpers.
+Fast LuaLaTeX TikZ rendering with full library support, live preview, a visual touch/stylus TikZ editor, RTL support, and simple diagram helpers.
 
 Render `tikz` and `luatikz` fenced code blocks in Obsidian. Desktop can use local LuaLaTeX or TikZJax; mobile uses TikZJax.
 
@@ -8,7 +8,27 @@ Enable **LuaTikZ** under Settings → Community plugins. The release ships as `m
 
 ![Floating live preview](<floating preview feature.png>)
 
-## What's new in 1.8.2
+## What's new in 1.9.0
+
+### Added
+
+- **Visual TikZ editor** — the floating preview now has an **Edit** mode: press **Edit** and the preview animates into a full visual editor filling the pane; press **Done** and it collapses back. Draw with Select, Pan, Line, Arrow, Path, Bézier, Freehand, Rectangle, Rounded rectangle, Circle, Ellipse, Arc, Grid, Diamond, Polygon, Star, Text, and Math tools — everything is written into your existing ```` ```tikz ```` fence as plain, native TikZ. No new fence, no separate drawing file. [Details](#visual-editor-edit-mode)
+- **Draw on the real diagram** — the compiled output is embedded in the canvas as an aligned background layer (calibrated to the exact TikZ coordinates), so you sketch on top of what LuaLaTeX actually rendered, including constructs the editor can't parse.
+- **Freehand ink** — strokes are smoothed, simplified, and fitted to editable Bézier paths (readable `.. controls ..` output, not a dump of pointer samples), with an adjustable smoothing setting.
+- **Touch, stylus, and Apple Pencil** — one finger pans, two fingers pinch-zoom; an explicit **Finger draw** toggle makes one finger draw; a pen always draws, with practical palm rejection while it's near the glass.
+- **Lossless two-way source sync** — visual edits patch only the coordinate, length, and option tokens that changed; comments, indentation, custom styles, and any unsupported statements (`\foreach`, `to[bend]`, scopes, …) are preserved byte-for-byte and shown as locked ghosts. The optional source panel has TikZ syntax highlighting, and hovering an object on the canvas highlights its statement in the panel. Every completed operation is one normal undo step.
+- **Floating preview on mobile** — the inline live preview (and the Edit mode) now works on iPad, Android tablets, and phones, rendering through TikZJax; coordinate picking remains desktop-only. [Details](#live-preview-and-coordinate-picking)
+
+### Changed
+
+- The Edit-mode toolbar uses quiet icon buttons with tooltips and 44 px touch targets; the whole editor follows the active theme (light, dark, custom) and stays LTR even in RTL notes.
+
+### Attribution
+
+- Parts of the editor (freehand pipeline, source-patch model, pinch-zoom math) are adapted from [tikz-editor](https://github.com/DominikPeters/tikz-editor) by Dominik Peters (MIT). See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+<details>
+<summary>Previous release — 1.8.2</summary>
 
 ### Fixed
 
@@ -31,13 +51,15 @@ Enable **LuaTikZ** under Settings → Community plugins. The release ships as `m
 
 - Bundled `svgo` bumped to 3.3.4 ([GHSA-2p49-hgcm-8545](https://github.com/advisories/GHSA-2p49-hgcm-8545)).
 
+</details>
+
 ## Requirements
 
 ### Mobile (iOS / Android)
 
 LuaTikZ runs on Obsidian mobile. Diagrams render in reading view through the bundled TikZJax runtime — no local TeX install and no shell access required.
 
-On mobile you get the same fenced-block editing helpers (autocomplete, structural lint, templates, error highlighting). **Inline live preview and coordinate picking are desktop-only** (they need the floating SVG preview). The renderer setting is fixed to TikZJax; LuaLaTeX is not available on mobile.
+On mobile you get the same fenced-block editing helpers (autocomplete, structural lint, templates, error highlighting), plus the floating live preview and the visual Edit mode (both render through TikZJax). **Coordinate picking and hover-to-locate are desktop-only.** The renderer setting is fixed to TikZJax; LuaLaTeX is not available on mobile.
 
 ### Local LuaLaTeX (desktop)
 
