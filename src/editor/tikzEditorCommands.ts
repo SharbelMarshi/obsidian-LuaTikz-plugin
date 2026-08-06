@@ -91,7 +91,7 @@ export class SnippetListModal extends Modal {
 			const row = contentEl.createDiv({ cls: 'luatikz-snippet-row' });
 			row.createEl('strong', { text: completion.label ?? '' });
 			if (completion.detail) {
-				row.createEl('div', { cls: 'luatikz-muted', text: String(completion.detail) });
+				row.createDiv({ cls: 'luatikz-muted', text: String(completion.detail) });
 			}
 			row.addEventListener('click', () => {
 				const body = typeof completion.apply === 'string'

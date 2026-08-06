@@ -92,7 +92,12 @@ const { main } = await loadSrcModules(
 	{ main: 'src/main.ts' },
 	{
 		external: ['@codemirror/state', '@codemirror/view', '@codemirror/autocomplete', '@codemirror/lint', 'node-tikzjax'],
-		stubs: { obsidian: OBSIDIAN_STUB },
+		stubs: {
+			obsidian: OBSIDIAN_STUB,
+			// Provided by Obsidian at runtime; only the history-isolation
+			// annotation is imported.
+			'@codemirror/commands': 'export const isolateHistory = { of: value => ({ value }) };',
+		},
 	},
 );
 const { migrateLegacySettings } = main;

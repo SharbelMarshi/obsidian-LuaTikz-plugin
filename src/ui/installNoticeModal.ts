@@ -50,7 +50,7 @@ export class InstallNoticeModal extends Modal {
 				const item = list.createEl('li');
 				item.setText(`${tool.label}: ${tool.found ? 'found' : 'missing'}${tool.path ? ` (${tool.path})` : ''}`);
 				if (!tool.found && tool.installHint) {
-					item.createEl('div', {
+					item.createDiv({
 						cls: 'luatikz-environment-hint',
 						text: tool.installHint,
 					});

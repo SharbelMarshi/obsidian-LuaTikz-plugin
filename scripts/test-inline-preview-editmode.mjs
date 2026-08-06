@@ -68,8 +68,13 @@ globalThis.createSpan = opts => applyOpts(window.document.createElement('span'),
 const { preview } = await loadSrcModules(
 	{ preview: 'src/editor/inlinePreview.ts' },
 	{
-		external: ['@codemirror/state', '@codemirror/view', '@codemirror/commands'],
-		stubs: { obsidian: OBSIDIAN_STUB },
+		external: ['@codemirror/state', '@codemirror/view'],
+		stubs: {
+			obsidian: OBSIDIAN_STUB,
+			// Provided by Obsidian at runtime; the scripted editor has no CM
+			// view, so the isolated-history path is never reached in tests.
+			'@codemirror/commands': 'export const isolateHistory = { of: value => ({ value }) };',
+		},
 	},
 );
 const { InlinePreviewManager } = preview;

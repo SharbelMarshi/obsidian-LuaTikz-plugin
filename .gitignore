@@ -18,3 +18,4 @@ release/
 luatikz-*.zip
 vendor/
 .vendor-staging/
+.github/workflows/

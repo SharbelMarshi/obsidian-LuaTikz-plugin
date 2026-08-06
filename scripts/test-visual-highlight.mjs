@@ -1,14 +1,14 @@
 /**
- * Source-panel syntax highlighting: token classification, HTML escaping, and
- * the range-splitting that weaves hover/selection tints through the tokens.
- * Reconstructing the exact input from the emitted spans is the key check —
+ * Source-panel syntax highlighting: token classification and the
+ * range-splitting that weaves hover/selection tints through the tokens.
+ * Reconstructing the exact input from the emitted segments is the key check —
  * a lossy tokenizer would desynchronize the color mirror from the textarea.
  */
 import assert from 'node:assert/strict';
 import { loadSrcModules } from './loadSrc.mjs';
 
 const { highlight } = await loadSrcModules({ highlight: 'src/visual/tikzHighlight.ts' });
-const { tokenizeTikz, buildHighlightHtml } = highlight;
+const { tokenizeTikz, buildHighlightSegments } = highlight;
 
 // --- tokenization -----------------------------------------------------------
 
@@ -38,36 +38,39 @@ assert.equal(byText('[').cls, 'bracket');
 assert.equal(byText('{').cls, 'brace');
 assert.equal(byText('thick').cls, null, 'plain words stay untinted');
 
-// --- HTML output ------------------------------------------------------------
+// --- segment output ----------------------------------------------------------
 
-const html = buildHighlightHtml('\\draw (0,0) -- (1,1); % a<b & c');
-assert.match(html, /<span class="luatikz-tzk-command">\\draw<\/span>/);
-assert.match(html, /luatikz-tzk-comment/);
-assert.ok(html.includes('a&lt;b &amp; c'), 'HTML must be escaped');
-assert.ok(!html.includes('<b '), 'raw angle brackets must never pass through');
-
-// Stripping tags reproduces the escaped source exactly (mirror stays aligned).
-const stripped = html.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-assert.equal(stripped, '\\draw (0,0) -- (1,1); % a<b & c');
+const plainSource = '\\draw (0,0) -- (1,1); % a<b & c';
+const segments = buildHighlightSegments(plainSource);
+assert.ok(segments.some(segment =>
+	segment.text === '\\draw' && segment.classes.includes('luatikz-tzk-command')));
+assert.ok(segments.some(segment => segment.classes.includes('luatikz-tzk-comment')));
+// Text (including markup-hostile characters) passes through verbatim: the
+// caller renders segments as text nodes, so nothing needs escaping.
+assert.equal(segments.map(segment => segment.text).join(''), plainSource);
 
 // --- range tints ------------------------------------------------------------
 
 const body = '\\draw (0,0) -- (1,1);\n\\draw (2,2) -- (3,3);';
 const second = body.indexOf('\\draw', 1);
-const ranged = buildHighlightHtml(body, [
+const ranged = buildHighlightSegments(body, [
 	{ from: second, to: body.length, cls: 'luatikz-tzk-hover' },
 ]);
-// Every character of the second statement carries the tint; none of the first.
-const hoverText = [...ranged.matchAll(/<span class="[^"]*luatikz-tzk-hover[^"]*">([^<]*)<\/span>/g)]
-	.map(match => match[1])
-	.join('')
-	.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+// Segments still tile the source exactly…
+assert.equal(ranged.map(segment => segment.text).join(''), body);
+// …and every character of the second statement carries the tint, none of the first.
+const hoverText = ranged
+	.filter(segment => segment.classes.includes('luatikz-tzk-hover'))
+	.map(segment => segment.text)
+	.join('');
 assert.equal(hoverText, '\\draw (2,2) -- (3,3);');
 
 // A range boundary inside a token splits it without losing characters.
-const midToken = buildHighlightHtml('12345', [{ from: 2, to: 4, cls: 'x' }]);
-const midStripped = midToken.replace(/<[^>]+>/g, '');
-assert.equal(midStripped, '12345');
-assert.match(midToken, /<span class="luatikz-tzk-number x">34<\/span>/);
+const midToken = buildHighlightSegments('12345', [{ from: 2, to: 4, cls: 'x' }]);
+assert.equal(midToken.map(segment => segment.text).join(''), '12345');
+assert.ok(midToken.some(segment =>
+	segment.text === '34'
+	&& segment.classes.includes('luatikz-tzk-number')
+	&& segment.classes.includes('x')));
 
 console.log('visual-highlight: ok');

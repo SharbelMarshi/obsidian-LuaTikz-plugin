@@ -46,7 +46,7 @@ const FONT_NAME_MAX_LENGTH = 100;
  */
 export function sanitizeFontName(raw: string): string {
 	return raw
-		.replace(/[\u0000-\u001F\u007F]/g, ' ')
+		.replace(/\p{Cc}/gu, ' ')
 		.replace(/[\\{}%#$&_~^[\],=]/g, '')
 		.replace(/\s+/g, ' ')
 		.trim()

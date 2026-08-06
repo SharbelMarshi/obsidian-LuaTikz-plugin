@@ -1,4 +1,12 @@
-import { App, Notice, PluginSettingTab, Setting, debounce, type TextAreaComponent } from 'obsidian';
+import {
+	App,
+	Notice,
+	PluginSettingTab,
+	Setting,
+	debounce,
+	type SettingDefinitionItem,
+	type TextAreaComponent,
+} from 'obsidian';
 import LuaTikzPlugin from '../main';
 import {
 	DEFAULT_SETTINGS,
@@ -110,6 +118,76 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	/**
+	 * Search metadata for Obsidian 1.13+'s settings search. The tab keeps its
+	 * custom `display()` rendering; these informational definitions make every
+	 * setting findable by name/description and route the user to this tab.
+	 */
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [
+			{
+				type: 'group',
+				heading: 'Renderer',
+				items: [
+					{ name: 'Renderer', desc: 'Choose between local LuaLaTeX and the bundled TikZJax.', aliases: ['engine', 'lualatex', 'tikzjax'] },
+					{ name: 'Test render', desc: 'Compile a small sample diagram with the current renderer settings.' },
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Local LuaLaTeX',
+				items: [
+					{ name: 'Allow local LuaLaTeX execution', desc: 'Explicitly allow the plugin to run lualatex on your machine.' },
+					{ name: 'LuaLaTeX path', desc: 'Direct path to the lualatex executable.' },
+					{ name: 'Timeout (ms)', desc: 'Per-render compile timeout.' },
+					{ name: 'Output format', desc: 'SVG conversion pipeline for compiled PDFs.' },
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Fonts (LuaLaTeX)',
+				items: [
+					{ name: 'Main font', desc: 'Override the main text font.', aliases: ['fonts'] },
+					{ name: 'Hebrew font', desc: 'Override the Hebrew fallback chain.', aliases: ['rtl'] },
+					{ name: 'Arabic font', desc: 'Override the Arabic fallback chain.', aliases: ['rtl'] },
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Preamble',
+				items: [
+					{ name: 'Extra preamble', desc: 'Additional trusted LaTeX appended to the preamble.' },
+					{ name: 'Custom preamble', desc: 'Replaces the generated preamble entirely (LuaLaTeX only).' },
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Appearance',
+				items: [
+					{ name: 'Dark mode handling', desc: 'Auto-invert near-black strokes or lightly brighten the whole diagram.', aliases: ['theme', 'invert'] },
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Editor',
+				items: [
+					{ name: 'Starter block on new fence', desc: 'Insert a blank tikzpicture when you open a new tikz block.' },
+					{ name: 'Structural lint', desc: 'Warn about unmatched environments, braces, and missing libraries.' },
+					{ name: 'Semicolon reminder', desc: 'Hint or auto-append ; on unfinished \\draw/\\path lines.' },
+					{ name: 'Auto-close brackets', desc: 'Automatically close {, [, (, and $ inside TikZ blocks.' },
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Cache',
+				items: [
+					{ name: 'Enable cache', desc: 'Reuse recent render results in memory and on disk.' },
+					{ name: 'Clear cache', desc: 'Remove cached render results and temporary build files.' },
+				],
+			},
+		];
+	}
+
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
@@ -202,7 +280,7 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 			.setName('Fonts (LuaLaTeX)')
 			.setHeading();
 
-		fontSection.createEl('div', {
+		fontSection.createDiv({
 			cls: 'luatikz-muted',
 			text: 'Leave a field blank to use the built-in fallback chain. Names that are not installed are skipped automatically, and Hebrew/Arabic fonts load only when a diagram uses \\he{} or \\ar{}.',
 		});
@@ -389,7 +467,7 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 			const status = tool.found ? 'Found' : 'Missing';
 			item.setText(`${tool.label}: ${status}${tool.path ? ` (${tool.path})` : ''}`);
 			if (!tool.found && tool.installHint) {
-				item.createEl('div', {
+				item.createDiv({
 					cls: 'luatikz-environment-hint',
 					text: tool.installHint,
 				});

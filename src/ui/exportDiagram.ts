@@ -109,10 +109,12 @@ export async function svgToPngBlob(
 
 	const image = await loadSvgImage(svgText);
 	const { width, height } = pngCanvasSize(size.width, size.height);
-	// Deliberately not an Obsidian createEl helper: this canvas is never
-	// attached, and the global helper would build it in the main document,
-	// discarding the caller's document and breaking export from a popout window.
-	const canvas = activeDocument.createElement('canvas');
+	// Created through the element-level createEl helper on the *active*
+	// document's body (the global helper would build it in the main document
+	// and break export from a popout window), then detached: the canvas is
+	// only an off-screen rasterization surface.
+	const canvas = activeDocument.body.createEl('canvas');
+	canvas.remove();
 	canvas.width = width;
 	canvas.height = height;
 

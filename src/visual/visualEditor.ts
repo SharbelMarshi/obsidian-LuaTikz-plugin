@@ -47,7 +47,7 @@ import {
 } from './sceneSvg';
 import { GestureRouter, type PointerLike } from './pointerGestures';
 import { iconEl, type EditorIconName } from './icons';
-import { buildHighlightHtml, type HighlightRange } from './tikzHighlight';
+import { buildHighlightSegments, type HighlightRange } from './tikzHighlight';
 import { axisConstrain, snapPoint, snapTranslation, type SnapContext } from './snapping';
 import {
 	appendFreehandPoint,
@@ -265,7 +265,7 @@ export class VisualTikzEditor {
 		initialBody: string,
 	) {
 		this.doc = container.ownerDocument;
-		const win = this.doc.defaultView as (Window & typeof globalThis) | null;
+		const win = this.doc.defaultView;
 		this.ac = new (win?.AbortController ?? AbortController)();
 		this.scene = parseTikzScene(initialBody);
 		this.viewBox = viewBoxFromCmBounds(DEFAULT_VIEWPORT_CM);
@@ -294,6 +294,16 @@ export class VisualTikzEditor {
 		cls?: string,
 		parent?: HTMLElement,
 	): HTMLElementTagNameMap[K] {
+		// Obsidian's createEl helper when available (it always is inside the
+		// app); plain DOM otherwise (jsdom in tests).
+		const host = parent ?? this.doc.body;
+		if (typeof host.createEl === 'function') {
+			const node = host.createEl(tag, cls ? { cls } : undefined);
+			if (!parent) {
+				node.remove();
+			}
+			return node;
+		}
 		const node = this.doc.createElement(tag);
 		if (cls) {
 			node.className = cls;
@@ -2335,7 +2345,17 @@ export class VisualTikzEditor {
 			return;
 		}
 		this.lastHighlightKey = key;
-		this.sourceHighlightCode.innerHTML = `${buildHighlightHtml(value, ranges)}\n`;
+		// Rebuild as text nodes and spans — never via markup strings.
+		this.sourceHighlightCode.textContent = '';
+		for (const segment of buildHighlightSegments(value, ranges)) {
+			if (!segment.classes.length) {
+				this.sourceHighlightCode.appendChild(this.doc.createTextNode(segment.text));
+				continue;
+			}
+			const span = this.el('span', segment.classes.join(' '), this.sourceHighlightCode);
+			span.textContent = segment.text;
+		}
+		this.sourceHighlightCode.appendChild(this.doc.createTextNode('\n'));
 	}
 
 	/** Track the object under an idle pointer and tint its source range. */

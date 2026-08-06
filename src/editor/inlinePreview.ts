@@ -1,4 +1,5 @@
 import { App, Editor, MarkdownView, Notice, type EditorPosition } from 'obsidian';
+import { isolateHistory } from '@codemirror/commands';
 import { presentTikzFailure } from '../ui/diagramPresent';
 import type { TikzRenderer } from '../render';
 import type { LuaTikzSettings } from '../settings/settingsModel';
@@ -1031,8 +1032,6 @@ export class InlinePreviewManager {
 				|| cm.state.doc.sliceString(base, end) !== block.source) {
 				return false;
 			}
-			// eslint-disable-next-line @typescript-eslint/no-var-requires
-			const { isolateHistory } = require('@codemirror/commands') as typeof import('@codemirror/commands');
 			cm.dispatch({
 				changes: patches.map(patch => ({
 					from: base + patch.oldSpan.from,

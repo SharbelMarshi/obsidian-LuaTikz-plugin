@@ -47,7 +47,7 @@ export class TikzHelperCheatsheetModal extends Modal {
 
 			const row = container.createDiv({ cls: 'luatikz-cheatsheet-row' });
 			row.createEl('strong', { text: entry.label });
-			row.createEl('div', { cls: 'luatikz-muted', text: entry.detail });
+			row.createDiv({ cls: 'luatikz-muted', text: entry.detail });
 			row.createEl('code', { cls: 'luatikz-cheatsheet-snippet', text: entry.body.split('\n')[0] });
 
 			row.addEventListener('click', () => {

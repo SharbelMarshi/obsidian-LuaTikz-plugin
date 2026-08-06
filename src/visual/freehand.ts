@@ -6,14 +6,14 @@ import { buildOptionsPrefix, formatPoint } from './tikzWriter';
  * Freehand stroke pipeline: capture → smooth → simplify → Bézier fit →
  * readable TikZ `.. controls ..` output.
  *
- * Adapted from the tikz-editor project by Dominik Peters
- * (https://github.com/DominikPeters/tikz-editor,
- * packages/app/src/ui/canvas-panel/freehand-tool.ts), MIT License,
- * Copyright (c) 2026 Dominik Peters. See THIRD-PARTY-NOTICES.md.
+ * Built from three textbook pieces: minimum-spacing sampling during capture,
+ * Ramer–Douglas–Peucker simplification (keeps corners, drops redundancy), and
+ * a uniform Catmull-Rom spline through the surviving points expressed as
+ * cubic Bézier segments.
  *
- * All geometry here is in TikZ cm. Screen-space tolerances are converted by
- * the caller using the current zoom, so the same pixel feel applies at every
- * zoom level. Pointer pressure is captured alongside each sample so a later
+ * All geometry is in TikZ cm. Screen-space tolerances are converted by the
+ * caller using the current zoom, so the same pixel feel applies at every zoom
+ * level. Pointer pressure is captured alongside each sample so a later
  * variable-width representation stays possible, but it does not affect the
  * generated path today.
  */
@@ -24,6 +24,9 @@ export const FREEHAND_MIN_POINTS = 3;
 export const FREEHAND_SMOOTHING_MIN_PX = 2;
 export const FREEHAND_SMOOTHING_MAX_PX = 32;
 export const FREEHAND_SMOOTHING_DEFAULT_PX = 10;
+
+/** Smoothing px → RDP deviation: half feels comparable to the old spacing. */
+const SMOOTHING_TO_DEVIATION = 0.5;
 
 export interface FreehandSample extends TikzCoordinate {
 	pressure: number;
@@ -98,7 +101,27 @@ export function smoothFreehandPoints(
 	return smoothed;
 }
 
-/** Distance-based simplification: keep points at least `toleranceCm` apart. */
+/** Perpendicular distance from `point` to the line through `a`–`b`. */
+function deviationFromChord(
+	point: TikzCoordinate,
+	a: TikzCoordinate,
+	b: TikzCoordinate,
+): number {
+	const dx = b.x - a.x;
+	const dy = b.y - a.y;
+	const lengthSq = dx * dx + dy * dy;
+	if (lengthSq < 1e-12) {
+		return Math.hypot(point.x - a.x, point.y - a.y);
+	}
+	return Math.abs(dy * point.x - dx * point.y + b.x * a.y - b.y * a.x)
+		/ Math.sqrt(lengthSq);
+}
+
+/**
+ * Ramer–Douglas–Peucker simplification: keep the endpoints plus every point
+ * that deviates more than `toleranceCm` from the chord of its span. Unlike
+ * plain resampling this preserves sharp corners exactly.
+ */
 export function simplifyFreehandPoints(
 	points: readonly FreehandSample[],
 	toleranceCm: number,
@@ -106,40 +129,53 @@ export function simplifyFreehandPoints(
 	if (points.length <= 2) {
 		return [...points];
 	}
-	const toleranceSq = toleranceCm * toleranceCm;
-	const simplified: FreehandSample[] = [points[0]];
-	let lastKept = points[0];
-	for (let index = 1; index < points.length - 1; index++) {
-		const point = points[index];
-		if (distanceSquared(lastKept, point) >= toleranceSq) {
-			simplified.push(point);
-			lastKept = point;
+	const keep = new Array<boolean>(points.length).fill(false);
+	keep[0] = true;
+	keep[points.length - 1] = true;
+
+	const spans: Array<[number, number]> = [[0, points.length - 1]];
+	while (spans.length) {
+		const [first, last] = spans.pop() as [number, number];
+		let worst = -1;
+		let worstIndex = -1;
+		for (let index = first + 1; index < last; index++) {
+			const deviation = deviationFromChord(points[index], points[first], points[last]);
+			if (deviation > worst) {
+				worst = deviation;
+				worstIndex = index;
+			}
+		}
+		if (worstIndex > 0 && worst > toleranceCm) {
+			keep[worstIndex] = true;
+			spans.push([first, worstIndex], [worstIndex, last]);
 		}
 	}
-	const last = points[points.length - 1];
-	if (distanceSquared(simplified[simplified.length - 1], last) > 0) {
-		simplified.push(last);
-	}
-	return simplified;
+	return points.filter((_, index) => keep[index]);
 }
 
-/** Catmull-Rom spline through the points, as cubic Bézier segments. */
+/**
+ * Uniform Catmull-Rom spline through the points, expressed as cubic Bézier
+ * segments (control points at one sixth of the neighbor chord — the standard
+ * conversion). Endpoints clamp to themselves.
+ */
 export function catmullRomToBezier(
 	points: readonly TikzCoordinate[],
 ): FreehandBezierSegment[] {
 	if (points.length < 2) {
 		return [];
 	}
+	const at = (index: number): TikzCoordinate =>
+		points[Math.max(0, Math.min(points.length - 1, index))];
 	const segments: FreehandBezierSegment[] = [];
 	for (let index = 0; index < points.length - 1; index++) {
-		const p0 = index === 0 ? points[index] : points[index - 1];
-		const p1 = points[index];
-		const p2 = points[index + 1];
-		const p3 = index + 2 < points.length ? points[index + 2] : p2;
+		const before = at(index - 1);
+		const from = at(index);
+		const to = at(index + 1);
+		const after = at(index + 2);
 		segments.push({
-			c1: { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 },
-			c2: { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 },
-			to: p2,
+			c1: { x: from.x + (to.x - before.x) / 6, y: from.y + (to.y - before.y) / 6 },
+			c2: { x: to.x - (after.x - from.x) / 6, y: to.y - (after.y - from.y) / 6 },
+			to,
 		});
 	}
 	return segments;
@@ -156,14 +192,20 @@ export function clampSmoothingPx(value: number): number {
 	return Math.max(FREEHAND_SMOOTHING_MIN_PX, Math.min(FREEHAND_SMOOTHING_MAX_PX, Math.round(value)));
 }
 
+function simplificationToleranceCm(smoothingPx: number, pxToCm: number): number {
+	return clampSmoothingPx(smoothingPx) * SMOOTHING_TO_DEVIATION * Math.max(pxToCm, 1e-6);
+}
+
 /** Segments for the live in-progress stroke preview. */
 export function freehandPreviewSegments(
 	draft: FreehandDraft,
 	smoothingPx: number,
 	pxToCm: number,
 ): FreehandPreviewSegment[] {
-	const toleranceCm = clampSmoothingPx(smoothingPx) * Math.max(pxToCm, 1e-6);
-	const cleaned = simplifyFreehandPoints(smoothFreehandPoints(draft.points), toleranceCm);
+	const cleaned = simplifyFreehandPoints(
+		smoothFreehandPoints(draft.points),
+		simplificationToleranceCm(smoothingPx, pxToCm),
+	);
 
 	if (cleaned.length < FREEHAND_MIN_POINTS) {
 		const lines: FreehandPreviewSegment[] = [];
@@ -203,8 +245,10 @@ export function generateFreehandStatement(
 	pxToCm: number,
 	style: ObjectStyle = {},
 ): string | null {
-	const toleranceCm = clampSmoothingPx(smoothingPx) * Math.max(pxToCm, 1e-6);
-	const simplified = simplifyFreehandPoints(smoothFreehandPoints(draft.points), toleranceCm);
+	const simplified = simplifyFreehandPoints(
+		smoothFreehandPoints(draft.points),
+		simplificationToleranceCm(smoothingPx, pxToCm),
+	);
 
 	if (polylineLength(simplified) <= MIN_STROKE_LENGTH_CM) {
 		return null;

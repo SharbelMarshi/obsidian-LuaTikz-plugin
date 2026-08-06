@@ -25,10 +25,8 @@ import type {
  *
  * The guiding rule is "lock, don't guess": any statement containing syntax
  * outside the supported subset is preserved verbatim as a locked object. The
- * lossless span/patch approach follows the tikz-editor project by Dominik
- * Peters (MIT; see THIRD-PARTY-NOTICES.md), with the heavyweight Lezer CST
- * replaced by a focused statement-level scanner in the style of
- * tikzStatementGeometry.ts.
+ * scanner follows the focused statement-level style of
+ * tikzStatementGeometry.ts rather than a full grammar-based parse.
  */
 
 /** Path-producing commands whose statements this editor may edit. */

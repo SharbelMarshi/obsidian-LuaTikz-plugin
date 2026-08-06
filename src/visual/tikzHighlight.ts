@@ -99,22 +99,29 @@ export interface HighlightRange {
 	cls: string;
 }
 
-function escapeHtml(text: string): string {
-	return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+export interface HighlightSegment {
+	text: string;
+	/** CSS classes for this run; empty for plain text. */
+	classes: string[];
 }
 
-/** Escaped, classed HTML for the mirror layer. */
-export function buildHighlightHtml(
+/**
+ * Classed text runs for the mirror layer. The caller renders them as text
+ * nodes and `<span>`s — no HTML strings are ever built, so nothing needs
+ * escaping and `innerHTML` never enters the picture. Concatenating the
+ * segment texts always reproduces the input exactly.
+ */
+export function buildHighlightSegments(
 	source: string,
 	ranges: readonly HighlightRange[] = [],
-): string {
+): HighlightSegment[] {
 	const bounds: number[] = [];
 	for (const range of ranges) {
 		bounds.push(range.from, range.to);
 	}
 	bounds.sort((a, b) => a - b);
 
-	const parts: string[] = [];
+	const segments: HighlightSegment[] = [];
 	for (const token of tokenizeTikz(source)) {
 		const cuts = [token.from];
 		for (const bound of bounds) {
@@ -139,11 +146,8 @@ export function buildHighlightHtml(
 					classes.push(range.cls);
 				}
 			}
-			const text = escapeHtml(source.slice(from, to));
-			parts.push(classes.length
-				? `<span class="${classes.join(' ')}">${text}</span>`
-				: text);
+			segments.push({ text: source.slice(from, to), classes });
 		}
 	}
-	return parts.join('');
+	return segments;
 }

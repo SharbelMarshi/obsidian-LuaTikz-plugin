@@ -89,17 +89,16 @@ async function captureConsoleOutput<T>(
 	const originalWarn = console.warn.bind(console) as ConsoleWriteFn;
 	const originalError = console.error.bind(console) as ConsoleWriteFn;
 
+	// Capture only — TikZJax's internal chatter is not re-emitted to the
+	// console; it surfaces through the plugin's own error report instead.
 	console.log = (...args: unknown[]): void => {
 		captured.push(stringifyConsoleArgs(args));
-		originalLog(...args);
 	};
 	console.warn = (...args: unknown[]): void => {
 		captured.push(stringifyConsoleArgs(args));
-		originalWarn(...args);
 	};
 	console.error = (...args: unknown[]): void => {
 		captured.push(stringifyConsoleArgs(args));
-		originalError(...args);
 	};
 
 	try {

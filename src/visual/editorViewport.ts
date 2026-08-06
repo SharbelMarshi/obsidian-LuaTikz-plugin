@@ -131,8 +131,7 @@ export interface PinchState {
 
 /**
  * Two-finger pinch update: scale about the starting midpoint, then translate
- * so the midpoint tracks the fingers. Follows the viewport-effects approach
- * of the tikz-editor reference (MIT, Dominik Peters).
+ * so the midpoint tracks the fingers.
  */
 export function pinchViewBox(
 	pinch: PinchState,

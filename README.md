@@ -8,7 +8,7 @@ Enable **LuaTikZ** under Settings → Community plugins. The release ships as `m
 
 ![Floating live preview](<floating preview feature.png>)
 
-## What's new in 1.9.0
+## What's new in 1.9.1
 
 ### Added
 
@@ -22,10 +22,6 @@ Enable **LuaTikZ** under Settings → Community plugins. The release ships as `m
 ### Changed
 
 - The Edit-mode toolbar uses quiet icon buttons with tooltips and 44 px touch targets; the whole editor follows the active theme (light, dark, custom) and stays LTR even in RTL notes.
-
-### Attribution
-
-- Parts of the editor (freehand pipeline, source-patch model, pinch-zoom math) are adapted from [tikz-editor](https://github.com/DominikPeters/tikz-editor) by Dominik Peters (MIT). See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 <details>
 <summary>Previous release — 1.8.2</summary>
