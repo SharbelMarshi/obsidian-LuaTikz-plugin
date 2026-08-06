@@ -181,7 +181,7 @@ export function presentTikzDiagram(
 	}
 
 	const isDarkTheme = options.isDarkTheme ?? false;
-	const { renderSource, diagramAlign } = prepared;
+	const { diagramAlign } = prepared;
 
 	el.empty();
 	const block = el.createDiv({ cls: 'tikzjax-hebrew-local-block luatikz-output-card' });

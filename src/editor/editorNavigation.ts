@@ -37,6 +37,17 @@ export interface JumpToTikzErrorOptions extends TikzEditorErrorLocation {
 	focus?: boolean;
 }
 
+/** The markdown leaf currently showing `sourcePath`, if any. */
+function findMarkdownLeafView(app: App, sourcePath: string): MarkdownView | null {
+	for (const leaf of app.workspace.getLeavesOfType('markdown')) {
+		const view = leaf.view;
+		if (view instanceof MarkdownView && view.file?.path === sourcePath) {
+			return view;
+		}
+	}
+	return null;
+}
+
 async function openMarkdownEditor(
 	app: App,
 	sourcePath: string,
@@ -46,12 +57,8 @@ async function openMarkdownEditor(
 		return null;
 	}
 
-	const existingLeaf = app.workspace.getLeavesOfType('markdown').find(leaf => {
-		const view = leaf.view;
-		return view instanceof MarkdownView && view.file?.path === sourcePath;
-	});
-
-	const leaf = existingLeaf ?? app.workspace.getLeaf(false);
+	const existingView = findMarkdownLeafView(app, sourcePath);
+	const leaf = existingView?.leaf ?? app.workspace.getLeaf(false);
 	await leaf.openFile(file);
 	app.workspace.setActiveLeaf(leaf, { focus: true });
 
@@ -87,15 +94,9 @@ export async function showTikzErrorInEditor(
 	}
 
 	const focus = options.focus ?? false;
-	const existingLeaf = app.workspace.getLeavesOfType('markdown').find(leaf => {
-		const view = leaf.view;
-		return view instanceof MarkdownView && view.file?.path === sourcePath;
-	});
-
-	const opened = existingLeaf
-		? (existingLeaf.view instanceof MarkdownView
-			? { view: existingLeaf.view, editor: existingLeaf.view.editor }
-			: null)
+	const existingView = findMarkdownLeafView(app, sourcePath);
+	const opened = existingView
+		? { view: existingView, editor: existingView.editor }
 		: (focus ? await openMarkdownEditor(app, sourcePath) : null);
 
 	if (!opened) {
@@ -175,11 +176,9 @@ export async function applyTikzErrorAutofix(
 }
 
 export function clearTikzErrorHighlightForPath(app: App, sourcePath: string): void {
-	for (const leaf of app.workspace.getLeavesOfType('markdown')) {
-		const view = leaf.view;
-		if (view instanceof MarkdownView && view.file?.path === sourcePath) {
-			clearTikzErrorHighlight(view.editor);
-		}
+	const view = findMarkdownLeafView(app, sourcePath);
+	if (view) {
+		clearTikzErrorHighlight(view.editor);
 	}
 }
 

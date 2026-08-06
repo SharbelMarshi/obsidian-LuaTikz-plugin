@@ -32,7 +32,7 @@ function parseAlignFromTikzpicture(source: string): DiagramAlign | null {
 }
 
 function stripAlignFromTikzpictureOptions(source: string): string {
-	return source.replace(TIKZPICTURE_BEGIN_RE, (full, options: string) => {
+	return source.replace(TIKZPICTURE_BEGIN_RE, (_full, options: string) => {
 		const cleaned = options
 			.split(',')
 			.map(part => part.trim())

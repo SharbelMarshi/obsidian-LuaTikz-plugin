@@ -2,7 +2,8 @@ import type { App } from 'obsidian';
 import { RENDER_IDENTITY_KEYS, type LuaTikzRenderEngine, type LuaTikzSettings } from '../settings/settingsModel';
 import type { RenderResult } from '../core/types';
 import { ensureAdapterFolderExists, getPluginCacheDir } from '../core/pluginPaths';
-import { encodeBytesBase64, encodeUtf8Base64, decodeBase64 } from './base64Utils';
+import { encodeBytesBase64, decodeBase64 } from './base64Utils';
+import { svgDataUrl } from './svgDataUrl';
 import { sha256Hex } from './sha256Hex';
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -21,10 +22,6 @@ interface CacheIndexFile {
 	entries: Record<string, CacheIndexEntry>;
 }
 
-function svgDataUrl(svgText: string): string {
-	return `data:image/svg+xml;base64,${encodeUtf8Base64(svgText)}`;
-}
-
 function pngDataUrl(pngBytes: ArrayBuffer): string {
 	return `data:image/png;base64,${encodeBytesBase64(pngBytes)}`;
 }
@@ -38,12 +35,18 @@ export function buildRenderCacheKey(
 	source: string,
 	settings: LuaTikzSettings,
 	invertDark: boolean,
+	pluginVersion: string,
 ): string {
 	return sha256Hex([
 		engine,
 		':',
 		source,
 		invertDark ? ':dark' : ':light',
+		// The plugin version, so a release that changes the preamble generator
+		// self-invalidates instead of serving week-old diagrams built by the
+		// previous version's wrapper.
+		':',
+		pluginVersion,
 		// Driven off RENDER_IDENTITY_KEYS so a new render-affecting setting
 		// cannot be forgotten here and serve a week-old diagram.
 		...RENDER_IDENTITY_KEYS.flatMap(key => [':', String(settings[key])]),
@@ -55,20 +58,63 @@ export class RenderDiskCache {
 	private index: CacheIndexFile = { version: 2, entries: {} };
 	private cacheAdapterDir: string | null = null;
 	private loaded = false;
+	private pendingClear: Promise<void> | null = null;
 
 	constructor(
 		private readonly app: App,
 		private readonly pluginId: string,
 	) {}
 
-	clear(): void {
+	/**
+	 * Drop in-memory state only; the on-disk cache survives. This is the
+	 * unload/disable path — a plugin update must not throw away a week of
+	 * rendered diagrams.
+	 */
+	dispose(): void {
 		this.memory.clear();
 		this.index = { version: 2, entries: {} };
 		this.loaded = false;
 		this.cacheAdapterDir = null;
 	}
 
+	/**
+	 * Delete every cached asset and write an empty index. The old clear()
+	 * only reset in-memory state with loaded=false — the next get() then
+	 * re-read index.json from disk and restored everything, so the
+	 * "Clear cache" button and settings-change invalidation were no-ops.
+	 *
+	 * Resolves only after the disk is actually clean; ensureLoaded() awaits
+	 * pendingClear so a render racing the clear cannot resurrect the old
+	 * index mid-delete.
+	 */
+	async invalidateCache(): Promise<void> {
+		const run = async (): Promise<void> => {
+			this.memory.clear();
+			this.cacheAdapterDir = getPluginCacheDir(this.app, this.pluginId);
+			await ensureAdapterFolderExists(this.app, this.cacheAdapterDir);
+			// Load the on-disk index first: entries from previous sessions are
+			// not in memory but their assets still need deleting.
+			await this.loadIndex();
+			for (const [key, entry] of Object.entries(this.index.entries)) {
+				await this.deleteEntry(key, entry);
+			}
+			this.index = { version: 2, entries: {} };
+			await this.saveIndex();
+			this.loaded = true;
+		};
+
+		this.pendingClear = run();
+		try {
+			await this.pendingClear;
+		} finally {
+			this.pendingClear = null;
+		}
+	}
+
 	private async ensureLoaded(): Promise<void> {
+		if (this.pendingClear) {
+			await this.pendingClear;
+		}
 		if (this.loaded && this.cacheAdapterDir) {
 			return;
 		}
@@ -78,6 +124,22 @@ export class RenderDiskCache {
 		this.loaded = true;
 		await this.loadIndex();
 		this.pruneExpired();
+	}
+
+	/** LRU-capped: the memory layer stores SVG text plus its base64 data URL
+	 * (~2.4x the SVG), and it used to grow without bound for the whole session. */
+	private rememberInMemory(key: string, value: RenderResult & { createdAt: number }): void {
+		if (this.memory.has(key)) {
+			this.memory.delete(key);
+		}
+		this.memory.set(key, value);
+		while (this.memory.size > CACHE_MAX_ENTRIES) {
+			const oldest = this.memory.keys().next().value;
+			if (oldest === undefined) {
+				break;
+			}
+			this.memory.delete(oldest);
+		}
 	}
 
 	private indexAdapterPath(): string {
@@ -212,7 +274,7 @@ export class RenderDiskCache {
 			return null;
 		}
 
-		this.memory.set(key, { ...result, createdAt: entry.createdAt });
+		this.rememberInMemory(key, { ...result, createdAt: entry.createdAt });
 		return result;
 	}
 
@@ -222,7 +284,7 @@ export class RenderDiskCache {
 		}
 
 		const createdAt = Date.now();
-		this.memory.set(key, { ...result, createdAt });
+		this.rememberInMemory(key, { ...result, createdAt });
 
 		await this.ensureLoaded();
 		if (!settings.cacheEnabled) {

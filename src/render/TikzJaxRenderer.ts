@@ -8,19 +8,15 @@ import {
 } from '../latex/tikzJaxSource';
 import { splitExtraPreamble } from '../utils/extraPreamble';
 import type { RenderRequest, RenderResult } from '../core/types';
-import { firstMapKey, isCallable, isRecord } from '../utils/guards';
+import { isCallable, isRecord } from '../utils/guards';
+import { LruTtlCache } from '../utils/lruTtlCache';
 import { finalizeTikzJaxSvg } from '../utils/tikzJaxSvgFix';
-import { encodeUtf8Base64 } from '../utils/base64Utils';
+import { svgDataUrl } from '../utils/svgDataUrl';
 import { sha256Hex } from '../utils/sha256Hex';
 import { installTikzJaxTexAssets } from '../utils/tikzJaxGlobal';
 
 const CACHE_MAX = 32;
 const CACHE_TTL_MS = 30 * 60 * 1000;
-
-interface CacheEntry {
-	svgText: string;
-	createdAt: number;
-}
 
 interface TikzJaxDebugInfo {
 	texDir: string;
@@ -50,10 +46,6 @@ function runExclusive<T>(task: () => Promise<T>): Promise<T> {
 
 function cacheKey(source: string, settings: LuaTikzSettings): string {
 	return sha256Hex([source, settings.extraPreamble]);
-}
-
-function svgDataUrl(svgText: string): string {
-	return `data:image/svg+xml;base64,${encodeUtf8Base64(svgText)}`;
 }
 
 function formatTikzJaxDebugLog(
@@ -138,25 +130,24 @@ function readTex2SvgExport(moduleValue: unknown): Tex2SvgFn | null {
 }
 
 export class TikzJaxRenderer {
-	private cache = new Map<string, CacheEntry>();
+	private cache = new LruTtlCache<string>(CACHE_MAX, CACHE_TTL_MS);
 	private tex2svg: Tex2SvgFn | null = null;
 	private loadError: string | null = null;
 	private loadErrorLog: string | null = null;
 	private texDir: string | null = null;
 	private loadPromise: Promise<Tex2SvgFn | null> | null = null;
 
-	constructor(
-		private readonly app: App,
-		private readonly pluginId: string,
-	) {}
+	// The (app, pluginId) shape matches LuaLatexRenderer so RendererManager can
+	// construct both uniformly; TikZJax itself runs entirely from bundled assets.
+	constructor(_app: App, _pluginId: string) {}
 
 	clearCache(): void {
 		this.cache.clear();
-		this.tex2svg = null;
+		// A failed load may retry (clearing the error re-arms ensureLoaded),
+		// but a loaded module stays loaded: nulling tex2svg here forced a full
+		// TeX + WASM re-initialisation on every settings keystroke.
 		this.loadError = null;
 		this.loadErrorLog = null;
-		this.texDir = null;
-		this.loadPromise = null;
 	}
 
 	private async ensureLoaded(): Promise<Tex2SvgFn | null> {
@@ -213,20 +204,15 @@ export class TikzJaxRenderer {
 		const key = cacheKey(normalizedSource, settings);
 
 		if (settings.cacheEnabled) {
-			const hit = this.cache.get(key);
-			if (hit && Date.now() - hit.createdAt <= CACHE_TTL_MS) {
-				this.cache.delete(key);
-				this.cache.set(key, hit);
+			const svgText = this.cache.get(key);
+			if (svgText !== null) {
 				return {
 					ok: true,
 					engine: 'tikzjax',
-					svg: hit.svgText,
-					svgText: hit.svgText,
-					dataUrl: svgDataUrl(hit.svgText),
+					svg: svgText,
+					svgText,
+					dataUrl: svgDataUrl(svgText),
 				};
-			}
-			if (hit) {
-				this.cache.delete(key);
 			}
 		}
 
@@ -281,14 +267,7 @@ export class TikzJaxRenderer {
 			}
 
 			if (settings.cacheEnabled) {
-				this.cache.set(key, { svgText: fixedSvg, createdAt: Date.now() });
-				while (this.cache.size > CACHE_MAX) {
-					const oldestKey = firstMapKey(this.cache);
-					if (typeof oldestKey !== 'string') {
-						break;
-					}
-					this.cache.delete(oldestKey);
-				}
+				this.cache.set(key, fixedSvg);
 			}
 
 			return {

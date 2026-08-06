@@ -129,7 +129,7 @@ export function openTemplatePicker(app: App, view: MarkdownView | null): void {
 	}).open();
 }
 
-export function insertTemplateById(app: App, view: MarkdownView | null, id: string): void {
+export function insertTemplateById(view: MarkdownView | null, id: string): void {
 	const template = TIKZ_TEMPLATE_CATALOG.find(entry => entry.id === id);
 	if (!template || !view) {
 		return;

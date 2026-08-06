@@ -6,10 +6,7 @@ export interface RenderImageResult {
 	ok: boolean;
 	dataUrl?: string;
 	svgText?: string;
-	pngPath?: string;
-	html?: string;
 	error?: string;
-	errorSummary?: string;
 	/** Plain-language explanation of the failure, shown under the error title. */
 	hint?: string;
 	rawLog?: string;
@@ -35,23 +32,19 @@ export interface RenderErrorContext {
 }
 
 export interface RenderRequest {
-	source: string;
 	normalizedSource: string;
 	settings: LuaTikzSettings;
-	containerEl?: HTMLElement;
 	errorContext?: RenderErrorContext;
 	invertDark?: boolean;
 }
 
 export interface RenderResult {
 	ok: boolean;
-	html?: string;
 	svg?: string;
 	svgText?: string;
 	dataUrl?: string;
 	pngPath?: string;
 	error?: string;
-	errorSummary?: string;
 	/** Plain-language explanation of the failure, shown under the error title. */
 	hint?: string;
 	rawLog?: string;
@@ -70,10 +63,7 @@ export function renderResultToImageResult(result: RenderResult): RenderImageResu
 		ok: result.ok,
 		dataUrl: result.dataUrl,
 		svgText: result.svgText ?? result.svg,
-		pngPath: result.pngPath,
-		html: result.html,
 		error: result.error,
-		errorSummary: result.errorSummary,
 		hint: result.hint,
 		rawLog: result.rawLog,
 		userLine: result.userLine,

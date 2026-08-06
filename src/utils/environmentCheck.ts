@@ -1,4 +1,4 @@
-import { resolveLuaLatex, resolvePdfToCairo } from '../core/commandResolver';
+import { resolveLuaLatex, resolvePdfToCairo } from '../desktop/lualatexShell';
 import type { LuaTikzSettings } from '../settings/settingsModel';
 
 export interface ToolCheckResult {
@@ -62,8 +62,22 @@ function hintsForPlatform(): { poppler: string; tex: string } {
 
 export async function checkEnvironment(settings: LuaTikzSettings): Promise<EnvironmentReport> {
 	const hints = hintsForPlatform();
-	const lualatexPath = await resolveLuaLatex(settings.lualatexPath);
-	const pdftocairoPath = await resolvePdfToCairo();
+	// A user who turned local execution OFF has said "do not run binaries" —
+	// probing (which spawns lualatex/pdftocairo) must honour that too. It used
+	// to run unconditionally, including right after the toggle was switched off.
+	const allowProbe = settings.enableLocalShellRenderer;
+	const lualatexPath = allowProbe ? await resolveLuaLatex(settings.lualatexPath) : null;
+	const pdftocairoPath = allowProbe ? await resolvePdfToCairo() : null;
+
+	if (!allowProbe) {
+		return {
+			lualatex: { label: 'LuaLaTeX', found: false, path: null },
+			pdftocairo: { label: 'pdftocairo', found: false, path: null },
+			platform: desktopPlatform(),
+			summary: 'Local LuaLaTeX execution is disabled; using the TikZJax renderer.',
+			readyForLuaLatex: false,
+		};
+	}
 
 	const lualatex: ToolCheckResult = {
 		label: 'LuaLaTeX',

@@ -26,19 +26,18 @@ import {
 import { RENDER_IDENTITY_KEYS, type LuaTikzSettings } from '../settings/settingsModel';
 import { buildLatexDocument, latexWrapperOptionsFromSettings } from '../core/tikzSource';
 import type { RenderRequest, RenderResult } from '../core/types';
-import { encodeUtf8Base64, encodeBytesBase64 } from '../utils/base64Utils';
+import { encodeBytesBase64 } from '../utils/base64Utils';
 import { sha256Hex } from '../utils/sha256Hex';
-import { sanitizeCacheFilename, validateLualatexPath, firstMapKey, asString } from '../utils/guards';
-import { invertSvgForDarkMode } from '../utils/darkMode';
+import { sanitizeCacheFilename, validateLualatexPath, asString } from '../utils/guards';
+import { LruTtlCache } from '../utils/lruTtlCache';
+import { svgDataUrl } from '../utils/svgDataUrl';
 import { injectTikzBBoxAttribute } from '../utils/coordinatePick';
 
 const CACHE_MAX = 32;
 const CACHE_TTL_MS = 30 * 60 * 1000;
 
-interface CacheEntry {
-	svgText: string;
-	createdAt: number;
-}
+/** Monotonic job-dir suffix; see the comment at the use site. */
+let jobCounter = 0;
 
 interface CompileDebugInfo {
 	lualatexPath: string;
@@ -47,18 +46,15 @@ interface CompileDebugInfo {
 	features?: { hebrew: boolean; arabic: boolean; customPreamble: boolean };
 }
 
-function cacheKey(source: string, invertDark: boolean, settings: LuaTikzSettings): string {
+// No dark/light component: this cache stores the un-inverted compiler output,
+// and RendererManager applies dark-mode inversion after every render() call.
+function cacheKey(source: string, settings: LuaTikzSettings): string {
 	return sha256Hex([
 		source,
-		invertDark ? ':dark' : ':light',
 		// See renderCache.ts: driven off the shared list so font/preamble
 		// changes always invalidate rather than serving a stale SVG.
 		...RENDER_IDENTITY_KEYS.map(key => String(settings[key])),
 	]);
-}
-
-function svgDataUrl(svgText: string): string {
-	return `data:image/svg+xml;base64,${encodeUtf8Base64(svgText)}`;
 }
 
 /** Which conditional preamble blocks were active — makes the RTL gate visible in bug reports. */
@@ -128,12 +124,11 @@ function isSvgOutput(text: string): boolean {
 }
 
 export class LuaLatexRenderer {
-	private cache = new Map<string, CacheEntry>();
+	private cache = new LruTtlCache<string>(CACHE_MAX, CACHE_TTL_MS);
 
 	constructor(
 		private readonly app: App,
 		private readonly pluginId: string,
-		private readonly isDarkTheme: () => boolean,
 	) {}
 
 	clearCache(): void {
@@ -143,7 +138,6 @@ export class LuaLatexRenderer {
 
 	async render(request: RenderRequest): Promise<RenderResult> {
 		const { settings, normalizedSource, errorContext } = request;
-		const invertDark = request.invertDark ?? this.isDarkTheme();
 
 		if (!settings.enableLocalShellRenderer) {
 			return {
@@ -158,13 +152,10 @@ export class LuaLatexRenderer {
 			return { ok: false, engine: 'lualatex', error: pathValidation };
 		}
 
-		const key = cacheKey(normalizedSource, invertDark, settings);
+		const key = cacheKey(normalizedSource, settings);
 		if (settings.cacheEnabled) {
-			const hit = this.cache.get(key);
-			if (hit && Date.now() - hit.createdAt <= CACHE_TTL_MS) {
-				this.cache.delete(key);
-				this.cache.set(key, hit);
-				const svgText = hit.svgText;
+			const svgText = this.cache.get(key);
+			if (svgText !== null) {
 				return {
 					ok: true,
 					engine: 'lualatex',
@@ -173,12 +164,9 @@ export class LuaLatexRenderer {
 					dataUrl: svgDataUrl(svgText),
 				};
 			}
-			if (hit) {
-				this.cache.delete(key);
-			}
 		}
 
-		return this.compile(normalizedSource, settings, errorContext, invertDark, key);
+		return this.compile(normalizedSource, settings, errorContext, key);
 	}
 
 	private latexError(
@@ -210,7 +198,6 @@ export class LuaLatexRenderer {
 			ok: false,
 			engine: 'lualatex',
 			error: timedOut ? 'Timed out.' : buildLatexErrorTitle(mapped),
-			errorSummary: mapped.summary,
 			hint: timedOut ? undefined : mapped.hint,
 			rawLog: debug ? formatCompileDebugLog(debug, body) : body,
 			userLine: mapped.userLine,
@@ -222,24 +209,13 @@ export class LuaLatexRenderer {
 	}
 
 	private remember(key: string, svgText: string): void {
-		if (this.cache.has(key)) {
-			this.cache.delete(key);
-		}
-		this.cache.set(key, { svgText, createdAt: Date.now() });
-		while (this.cache.size > CACHE_MAX) {
-			const oldestKey = firstMapKey(this.cache);
-			if (typeof oldestKey !== 'string') {
-				break;
-			}
-			this.cache.delete(oldestKey);
-		}
+		this.cache.set(key, svgText);
 	}
 
 	private async compile(
 		source: string,
 		settings: LuaTikzSettings,
 		errorContext: RenderRequest['errorContext'],
-		invertDark: boolean,
 		key: string,
 	): Promise<RenderResult> {
 		const tempDirResult = await ensurePluginTempFsDir(this.app, this.pluginId);
@@ -251,8 +227,12 @@ export class LuaLatexRenderer {
 			};
 		}
 
+		// The counter keeps concurrent compiles of the *same* source in
+		// separate directories: with a purely key-derived name, two in-flight
+		// compiles shared a job dir and the first one's cleanup deleted the
+		// other's .tex/.pdf mid-compile ("No PDF produced.").
 		const safeId = sanitizeCacheFilename(key.slice(0, 16));
-		const jobId = `luatikz-${safeId}`;
+		const jobId = `luatikz-${safeId}-${++jobCounter}`;
 		const jobAdapterDir = normalizePath(`${getPluginTempDir(this.app, this.pluginId)}/${jobId}`);
 		await ensureAdapterFolderExists(this.app, jobAdapterDir);
 
@@ -421,10 +401,8 @@ export class LuaLatexRenderer {
 					debugInfo,
 				);
 			}
-			if (invertDark) {
-				svgText = invertSvgForDarkMode(svgText);
-			}
-
+			// Dark-mode inversion happens once in RendererManager, for every
+			// engine — inverting here as well would double-invert.
 			try {
 				const bboxSidecar = await readArtifactText(this.app, bboxAdapterPath);
 				svgText = injectTikzBBoxAttribute(svgText, bboxSidecar);

@@ -190,7 +190,6 @@ export function validationErrorToRenderResult(
 ): {
 	ok: false;
 	error: string;
-	errorSummary: string;
 	rawLog?: string;
 	userLine: number;
 	noteLine?: number;
@@ -207,7 +206,6 @@ export function validationErrorToRenderResult(
 			userLine: error.userLine,
 			noteLine: error.noteLine,
 		}),
-		errorSummary: error.summary,
 		rawLog: error.message,
 		userLine: error.userLine,
 		noteLine: error.noteLine,

@@ -199,22 +199,28 @@ shader=interp,
 		console.log('Test 2 (TikZJax smoke): OK');
 	});
 
-	try {
-		const svgB = await renderNormalized(TEST_B);
-		if (!svgB.includes('<svg')) {
-			throw new Error('Test 3 (2D PGFPlots) did not return SVG.');
-		}
-		console.log('Test 3 (2D PGFPlots): OK');
-	} catch (err) {
-		console.log(`Test 3 (2D PGFPlots): skipped (${err instanceof Error ? err.message : err})`);
+	// Fails hard: 2D PGFPlots is a supported feature, and the old try/catch
+	// reported a genuine regression as "skipped".
+	const svgB = await renderNormalized(TEST_B);
+	if (!svgB.includes('<svg')) {
+		throw new Error('Test 3 (2D PGFPlots) did not return SVG.');
 	}
+	console.log('Test 3 (2D PGFPlots): OK');
 
+	// 3D surface plots (shader=interp) are a documented TikZJax limitation.
+	// This asserts the limitation *stays* a clean failure: if a node-tikzjax
+	// upgrade starts supporting it, or the error stops mentioning the shader,
+	// this test says so instead of printing an unchecked log line.
+	let test4Failed = null;
 	try {
 		await renderNormalized(TEST_A);
-		console.log('Test 4 (3D PGFPlots): unexpected success');
-	} catch {
-		console.log('Test 4 (3D PGFPlots): expected limitation (advanced plot not supported)');
+	} catch (err) {
+		test4Failed = err instanceof Error ? err.message : String(err);
 	}
+	if (test4Failed === null) {
+		throw new Error('Test 4 (3D PGFPlots): rendered successfully — the known limitation is gone; update this test and the docs.');
+	}
+	console.log('Test 4 (3D PGFPlots): fails as documented');
 
 	const englishSvg = await renderNormalized(String.raw`\begin{tikzpicture}
 \node {Flow};

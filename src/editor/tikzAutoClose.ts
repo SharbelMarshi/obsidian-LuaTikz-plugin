@@ -1,5 +1,6 @@
 import { Prec, type Extension } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
+import { isInsideTikzEditingContext } from './tikzFenceContext';
 
 const CLOSE_PAIRS: Record<string, string> = {
 	'{': '}',
@@ -17,7 +18,14 @@ export function closeBracketsKeymapExtension(getEnabled: () => boolean): Extensi
 			}
 			const { state } = view;
 			const pos = state.selection.main.head;
-			if (pos < 2) {
+			if (pos < 1) {
+				return false;
+			}
+			// Gated like every sibling extension: ungated, this hijacked
+			// Backspace (and the pair keys below) in ordinary prose — typing
+			// `(` anywhere in a note inserted `()`, and `$` inserted `$$`,
+			// overriding Obsidian's own auto-pair setting.
+			if (!isInsideTikzEditingContext(state.doc, pos)) {
 				return false;
 			}
 			const before = state.doc.sliceString(pos - 1, pos);
@@ -45,6 +53,9 @@ export function autoCloseBracketsExtension(getEnabled: () => boolean): Extension
 			const { state } = view;
 			const sel = state.selection.main;
 			if (!sel.empty) {
+				return false;
+			}
+			if (!isInsideTikzEditingContext(state.doc, sel.head)) {
 				return false;
 			}
 			view.dispatch({

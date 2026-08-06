@@ -33,16 +33,6 @@ export function getVaultBasePath(app: App): string | null {
 	return null;
 }
 
-/** Absolute filesystem path to the installed plugin folder. */
-export function getPluginFsDir(app: App, pluginId: string): string | null {
-	const basePath = getVaultBasePath(app);
-	if (!basePath) {
-		return null;
-	}
-
-	return normalizePath(`${basePath}/${app.vault.configDir}/plugins/${pluginId}`);
-}
-
 export function getDesktopFsPath(app: App, adapterPath: string): string | null {
 	const normalized = normalizePath(adapterPath);
 	const adapter = app.vault.adapter as {
@@ -63,10 +53,6 @@ export function getDesktopFsPath(app: App, adapterPath: string): string | null {
 	}
 
 	const posix = `${basePath.replace(/\\/g, '/').replace(/\/+$/, '')}/${normalized}`;
-	// Obsidian normalizePath is vault-relative and strips a leading slash; preserve absolute paths.
-	if (posix.startsWith('/')) {
-		return posix.replace(/\/+/g, '/');
-	}
 	return posix.replace(/\/+/g, '/');
 }
 
@@ -140,6 +126,11 @@ export async function readAdapterLogTail(
 	return '';
 }
 
+/**
+ * Depth-first recursive delete of a folder's contents and the folder itself.
+ * adapter.list() is one level deep, so the old single-pass version left any
+ * nested subdirectory (and everything in it) behind, silently, forever.
+ */
 export async function removeAdapterFolder(app: App, folderPath: string): Promise<void> {
 	const adapter = app.vault.adapter;
 	if (!(await adapter.exists(folderPath))) {
@@ -154,12 +145,13 @@ export async function removeAdapterFolder(app: App, folderPath: string): Promise
 			// ignore cleanup errors
 		}
 	}
-	for (const folder of [...listing.folders].reverse()) {
-		try {
-			await adapter.remove(folder);
-		} catch {
-			// ignore cleanup errors
-		}
+	for (const folder of listing.folders) {
+		await removeAdapterFolder(app, folder);
+	}
+	try {
+		await adapter.rmdir(folderPath, false);
+	} catch {
+		// ignore cleanup errors
 	}
 }
 

@@ -1,33 +1,24 @@
+/**
+ * Coordinate-pick math and calibration, against the real src module.
+ *
+ * Lines 1-107 of the previous version re-implemented six functions that are
+ * real exports of the very module the file bundled further down — the "math
+ * OK" line covered nothing shipped. Everything now imports from src.
+ */
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { buildSync } from 'esbuild';
+import { loadSrcModules } from './loadSrc.mjs';
 
-const PT_PER_CM = 28.452756;
+const { pick } = await loadSrcModules({ pick: 'src/utils/coordinatePick.ts' });
+const {
+	PT_PER_CM,
+	svgUserSpaceToTikzCm,
+	formatTikzCoordinate,
+	applyShiftConstraint,
+	parseLastNumericCoordinate,
+	computeOrthogonalClosePoint,
+} = pick;
 
-function ptToCm(pt) {
-	return pt / PT_PER_CM;
-}
-
-function svgUserSpaceToTikzCm(svgX, svgY) {
-	return { x: ptToCm(svgX), y: ptToCm(-svgY) };
-}
-
-function formatTikzCoordinate(coord, decimals = 2) {
-	return `(${coord.x.toFixed(decimals)}, ${coord.y.toFixed(decimals)})`;
-}
-
-function applyShiftConstraint(picked, anchor, client, anchorClient) {
-	if (!anchor || !anchorClient) return picked;
-	const dx = Math.abs(client.x - anchorClient.x);
-	const dy = Math.abs(client.y - anchorClient.y);
-	if (dy > dx) {
-		return { x: anchor.x, y: picked.y };
-	}
-	return { x: picked.x, y: anchor.y };
-}
+// --- unit conversion and formatting ----------------------------------------
 
 const origin = svgUserSpaceToTikzCm(0, 0);
 assert.equal(formatTikzCoordinate(origin), '(0.00, 0.00)');
@@ -37,6 +28,8 @@ assert.ok(Math.abs(oneCm.x - 1) < 0.001, `expected ~1cm x, got ${oneCm.x}`);
 
 const up = svgUserSpaceToTikzCm(0, -PT_PER_CM);
 assert.ok(Math.abs(up.y - 1) < 0.001, `expected ~1cm y, got ${up.y}`);
+
+// --- shift constraint -------------------------------------------------------
 
 const anchor = { x: 1, y: 2 };
 const verticalPick = applyShiftConstraint(
@@ -57,34 +50,15 @@ const horizontalPick = applyShiftConstraint(
 assert.equal(horizontalPick.x, 4);
 assert.equal(horizontalPick.y, 2);
 
-function parseLastNumericCoordinate(text) {
-	let last = null;
-	const re = /\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/g;
-	for (const match of text.matchAll(re)) {
-		last = { x: Number.parseFloat(match[1]), y: Number.parseFloat(match[2]) };
-	}
-	return last;
-}
+// Without an anchor the pick passes through untouched.
+assert.deepEqual(applyShiftConstraint({ x: 3, y: 5 }, null, { x: 0, y: 0 }, null), { x: 3, y: 5 });
 
-const source = '\\draw (1.00, 2.00) -- ';
-assert.deepEqual(parseLastNumericCoordinate(source), { x: 1, y: 2 });
+// --- coordinate parsing -----------------------------------------------------
+
+assert.deepEqual(parseLastNumericCoordinate('\\draw (1.00, 2.00) -- '), { x: 1, y: 2 });
 assert.equal(parseLastNumericCoordinate('\\draw -- '), null);
 
-function computeOrthogonalClosePoint(points) {
-	if (points.length < 3) return null;
-	const p0 = points[0];
-	const pPrev = points[points.length - 2];
-	const pLast = points[points.length - 1];
-	const AXIS_EPS = 1e-4;
-	const isHorizontal = (a, b) => Math.abs(a.y - b.y) < AXIS_EPS;
-	const isVertical = (a, b) => Math.abs(a.x - b.x) < AXIS_EPS;
-	if (isHorizontal(pPrev, pLast)) return { x: p0.x, y: pPrev.y };
-	if (isVertical(pPrev, pLast)) return { x: pPrev.x, y: p0.y };
-	const p1 = points[1];
-	if (isHorizontal(p0, p1)) return { x: p0.x, y: pPrev.y };
-	if (isVertical(p0, p1)) return { x: pPrev.x, y: p0.y };
-	return null;
-}
+// --- orthogonal close -------------------------------------------------------
 
 const rect = [
 	{ x: 0.54, y: -3.09 },
@@ -92,8 +66,7 @@ const rect = [
 	{ x: 7.0, y: -0.96 },
 	{ x: 2.04, y: -0.96 },
 ];
-const closed = computeOrthogonalClosePoint(rect);
-assert.deepEqual(closed, { x: 0.54, y: -0.96 });
+assert.deepEqual(computeOrthogonalClosePoint(rect), { x: 0.54, y: -0.96 });
 
 const verticalFirst = [
 	{ x: 1, y: 1 },
@@ -101,24 +74,13 @@ const verticalFirst = [
 	{ x: 4, y: 5 },
 	{ x: 3, y: 2 },
 ];
-const closedVertical = computeOrthogonalClosePoint(verticalFirst);
-assert.deepEqual(closedVertical, { x: 4, y: 1 });
+assert.deepEqual(computeOrthogonalClosePoint(verticalFirst), { x: 4, y: 1 });
+
+assert.equal(computeOrthogonalClosePoint([{ x: 0, y: 0 }, { x: 1, y: 1 }]), null, 'fewer than 3 points');
 
 console.log('coordinate-pick: math OK');
 
-// --- calibration (tests the real module, bundled on the fly) ---
-
-const outDir = mkdtempSync(join(tmpdir(), 'luatikz-pick-test-'));
-const outFile = join(outDir, 'coordinatePick.mjs');
-buildSync({
-	entryPoints: ['src/utils/coordinatePick.ts'],
-	bundle: true,
-	format: 'esm',
-	outfile: outFile,
-	logLevel: 'silent',
-});
-const pick = await import(pathToFileURL(outFile).href);
-rmSync(outDir, { recursive: true, force: true });
+// --- calibration ------------------------------------------------------------
 
 // sidecar parsing (format written by the LaTeX calibration hook)
 const sidecar = '-0.2pt,-0.2pt,85.55823pt,57.10548pt\n';

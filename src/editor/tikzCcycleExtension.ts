@@ -47,12 +47,18 @@ function maybeApplyOrthogonalCcycle(update: ViewUpdate): void {
 	const ccycleStart = offsetInLine - (textBeforeHead.match(CCYCLE_SUFFIX_RE)?.[0].length ?? 0);
 	const formatted = formatTikzCoordinate(closePoint);
 
+	// TransactionSpec selections are in *post-change* coordinates. The first
+	// change replaces the last coordinate with `formatted`, shifting everything
+	// after it by the length delta — without accounting for it the caret
+	// landed short of the inserted `cycle`.
+	const coordinateDelta = formatted.length - (last.to - last.from);
+
 	view.dispatch({
 		changes: [
 			{ from: line.from + last.from, to: line.from + last.to, insert: formatted },
 			{ from: line.from + ccycleStart, to: head, insert: 'cycle' },
 		],
-		selection: { anchor: line.from + ccycleStart + 'cycle'.length },
+		selection: { anchor: line.from + ccycleStart + coordinateDelta + 'cycle'.length },
 	});
 }
 

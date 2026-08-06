@@ -45,8 +45,10 @@ export function parseTikzBlockContext(source: string): TikzBlockContext {
 		}
 	}
 
+	// \\begin, escaped: `/\begin/` reads `\b` as a word boundary, so a closed
+	// \begin{axis}…\end{axis} block never counted as using an axis.
 	const insideAxis = environmentStack.includes('axis')
-		|| /\begin\{axis\}/.test(source);
+		|| /\\begin\{axis\}/.test(source);
 
 	return {
 		source,

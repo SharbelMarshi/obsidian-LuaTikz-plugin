@@ -4,7 +4,7 @@ Fast LuaLaTeX TikZ rendering with full library support, live preview, RTL suppor
 
 Render `tikz` and `luatikz` fenced code blocks in Obsidian. Desktop can use local LuaLaTeX or TikZJax; mobile uses TikZJax.
 
-Enable **LuaTikZ** under Settings → Community plugins. The release ships as `main.js`, `manifest.json`, and `styles.css`. TikZJax is bundled into `main.js` (~11 MB).
+Enable **LuaTikZ** under Settings → Community plugins. The release ships as `main.js`, `manifest.json`, and `styles.css`. TikZJax is bundled into `main.js` (~7 MB).
 
 ![Floating live preview](<floating preview feature.png>)
 
@@ -47,7 +47,7 @@ On mobile you get the same fenced-block editing helpers (autocomplete, structura
 
 ### TikZJax
 
-No local TeX install. The TikZJax runtime and TeX WASM files are bundled into `main.js` (~11 MB). Obsidian Sync Standard may not sync plugin files over 5 MB.
+No local TeX install. The TikZJax runtime and TeX WASM files are bundled into `main.js` (~7 MB). Obsidian Sync Standard may not sync plugin files over 5 MB.
 
 ## Usage
 
@@ -212,7 +212,7 @@ In custom mode fonts, polyglossia and `\he`/`\ar` are yours to define. The plugi
 This plugin needs elevated capabilities for its core feature (compiling TikZ with a local TeX installation). What it does with them:
 
 - **Shell execution** (`child_process`, desktop only): runs exactly two programs — the LuaLaTeX binary you configure in settings and `pdftocairo` — always via `spawn` with `shell: false`, so arguments are never interpreted by a shell. Local execution is opt-in via the *Allow local LuaLaTeX execution* setting and never happens on mobile.
-- **Direct filesystem access** (`fs`, desktop only): used as a fallback to read compile artifacts (PDF/SVG/log files) that LuaLaTeX writes into the plugin's own temp folder inside your vault (`.obsidian/plugins/<id>/.luatikz-temp`), because the vault adapter may not have indexed them yet. The plugin does not read or write files elsewhere on your system.
+- **Direct filesystem access** (`fs`, desktop only): used as a fallback to read compile artifacts (PDF/SVG/log files) that LuaLaTeX writes into the plugin's own temp folder inside your vault (`.obsidian/plugins/<id>/.luatikz-temp`), because the vault adapter may not have indexed them yet. The plugin does not read or write files elsewhere on your system. If you use Obsidian Sync, consider excluding `.luatikz-temp` and `.luatikz-cache` (Settings → Sync → Excluded files) — they are per-machine scratch/cache data and safe to regenerate.
 - **Clipboard access**: write-only, and only when you click a snippet in the helper cheatsheet to copy it. The plugin never reads your clipboard.
 - **Dynamic code execution**: the plugin's own source contains no `eval`/`new Function`. The flagged occurrences live inside the bundled [jsdom](https://github.com/jsdom/jsdom) dependency of [node-tikzjax](https://github.com/prinsss/node-tikzjax), which powers the shell-free TikZJax renderer (required for mobile). They are part of jsdom's standard DOM implementation, not code paths this plugin invokes on your notes.
 

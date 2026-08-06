@@ -5,6 +5,7 @@ import {
 	snippetCompletion,
 } from '@codemirror/autocomplete';
 import { Extension } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
 import {
 	allSnippetCompletions,
 	NODE_ANCHOR_SUFFIXES,
@@ -12,6 +13,7 @@ import {
 	type TikzSnippetCategory,
 } from '../latex/tikzSnippets';
 import { parseTikzBlockContext } from '../latex/tikzBlockContext';
+import { LATEX_FENCE_LANGUAGES, TIKZ_FENCE_LANGUAGES, enclosingFenceLine } from './tikzFences';
 
 const latexCommands: Completion[] = [
 	snippetCompletion('\\begin{tikzpicture}\n${}\n\\end{tikzpicture}', {
@@ -93,42 +95,14 @@ const allCommandCompletions = [
 	...greekLetters,
 ];
 
-function insideLatexOrTikzBlock(textBeforeCursor: string): boolean {
-	const fencePattern = /```(?:tikz|luatikz|latex|lualatex|tex)\b/g;
-	let lastOpen = -1;
-	let match: RegExpExecArray | null;
-
-	while ((match = fencePattern.exec(textBeforeCursor)) !== null) {
-		lastOpen = match.index;
-	}
-
-	if (lastOpen === -1) {
-		return false;
-	}
-
-	const afterOpen = textBeforeCursor.slice(lastOpen);
-	const lines = afterOpen.split('\n');
-
-	for (let i = 1; i < lines.length; i++) {
-		if (lines[i].trim() === '```') {
-			return false;
-		}
-	}
-
-	return true;
-}
-
-function getBlockSource(textBeforeCursor: string): string {
-	const fencePattern = /```(?:tikz|luatikz)\b[^\n]*\n/g;
-	let lastOpen = -1;
-	let match: RegExpExecArray | null;
-	while ((match = fencePattern.exec(textBeforeCursor)) !== null) {
-		lastOpen = match.index + match[0].length;
-	}
-	if (lastOpen === -1) {
+/** Block body from the opening fence to the cursor, or '' when not in one. */
+function tikzBlockSourceBeforeCursor(doc: EditorView['state']['doc'], pos: number): string {
+	const fenceLine = enclosingFenceLine(doc, pos, TIKZ_FENCE_LANGUAGES);
+	if (fenceLine === null) {
 		return '';
 	}
-	return textBeforeCursor.slice(lastOpen);
+	const contentFrom = doc.line(fenceLine).to + 1;
+	return contentFrom <= pos ? doc.sliceString(contentFrom, pos) : '';
 }
 
 function filterCompletions(options: Completion[], prefix: string): Completion[] {
@@ -177,13 +151,11 @@ function contextualCompletions(blockSource: string, explicit: boolean): Completi
 }
 
 function latexCompletionSource(context: CompletionContext) {
-	const textBeforeCursor = context.state.doc.sliceString(0, context.pos);
-
-	if (!insideLatexOrTikzBlock(textBeforeCursor)) {
+	if (enclosingFenceLine(context.state.doc, context.pos, LATEX_FENCE_LANGUAGES) === null) {
 		return null;
 	}
 
-	const blockSource = getBlockSource(textBeforeCursor);
+	const blockSource = tikzBlockSourceBeforeCursor(context.state.doc, context.pos);
 	const ctx = parseTikzBlockContext(blockSource);
 
 	const parenMatch = context.matchBefore(/\([^)]*/);

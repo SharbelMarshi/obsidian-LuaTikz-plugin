@@ -1,4 +1,4 @@
-import { editorEditorField, type Editor } from 'obsidian';
+import type { Editor } from 'obsidian';
 import { RangeSetBuilder, StateEffect, StateField, type Extension } from '@codemirror/state';
 import {
 	Decoration,
@@ -9,6 +9,7 @@ import {
 	type ViewUpdate,
 } from '@codemirror/view';
 import type { LatexAutofix } from '../latex/latexAutofix';
+import { getEditorViewWithExtension } from './editorViewAccess';
 
 export interface TikzErrorHighlightRange {
 	lineFrom: number;
@@ -188,24 +189,10 @@ function editorHasHighlightExtension(view: EditorView): boolean {
 	}
 }
 
+// Null when no view carries the extension — the old local copy fell back to
+// the direct view, dispatching effects into a view with no field for them.
 function getEditorView(editor: Editor): EditorView | null {
-	const direct = (editor as Editor & { cm?: EditorView }).cm;
-	if (direct?.state && typeof direct.dispatch === 'function') {
-		if (editorHasHighlightExtension(direct)) {
-			return direct;
-		}
-		try {
-			const linked = direct.state.field(editorEditorField) as EditorView | undefined;
-			if (linked && editorHasHighlightExtension(linked)) {
-				return linked;
-			}
-		} catch {
-			// Fall through to direct view.
-		}
-		return direct;
-	}
-
-	return null;
+	return getEditorViewWithExtension(editor, editorHasHighlightExtension);
 }
 
 export function computeErrorMarkRange(

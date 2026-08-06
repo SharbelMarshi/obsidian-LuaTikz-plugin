@@ -8,7 +8,13 @@ const NAMED_DARK_COLORS = new Set([
 	'rgb(0%,0%,0%)',
 ]);
 
-function invertRgbPercentTriplet(match: string, r: string, g: string, b: string): string {
+/**
+ * Rebuild the rgb() string from the parsed channels. The old form chained
+ * `match.replace(r, …)` per channel, which replaces by *substring*: with
+ * unequal channels the second replace could land inside the first's output
+ * (`rgb(2,25,0)` → `rgb(232553,25,0)`, an invalid colour).
+ */
+function invertRgbPercentTriplet(r: string, g: string, b: string): string {
 	const invert = (value: string) => {
 		const parsed = Number.parseFloat(value);
 		if (!Number.isFinite(parsed)) {
@@ -18,10 +24,10 @@ function invertRgbPercentTriplet(match: string, r: string, g: string, b: string)
 		return Number.isInteger(parsed) ? String(inverted) : inverted.toFixed(1);
 	};
 
-	return match.replace(r, invert(r)).replace(g, invert(g)).replace(b, invert(b));
+	return `rgb(${invert(r)}%,${invert(g)}%,${invert(b)}%)`;
 }
 
-function invertRgbByteTriplet(match: string, r: string, g: string, b: string): string {
+function invertRgbByteTriplet(r: string, g: string, b: string): string {
 	const invert = (value: string) => {
 		const parsed = Number.parseInt(value, 10);
 		if (!Number.isFinite(parsed)) {
@@ -30,7 +36,7 @@ function invertRgbByteTriplet(match: string, r: string, g: string, b: string): s
 		return String(Math.max(0, Math.min(255, 255 - parsed)));
 	};
 
-	return match.replace(r, invert(r)).replace(g, invert(g)).replace(b, invert(b));
+	return `rgb(${invert(r)},${invert(g)},${invert(b)})`;
 }
 
 function invertHexColor(hex: string): string {
@@ -94,12 +100,12 @@ function invertColorValue(value: string): string {
 
 	const percentMatch = lower.match(/^rgb\(\s*([0-9.]+)%\s*,\s*([0-9.]+)%\s*,\s*([0-9.]+)%\s*\)$/i);
 	if (percentMatch) {
-		return invertRgbPercentTriplet(normalized, percentMatch[1], percentMatch[2], percentMatch[3]);
+		return invertRgbPercentTriplet(percentMatch[1], percentMatch[2], percentMatch[3]);
 	}
 
 	const byteMatch = lower.match(/^rgb\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)$/i);
 	if (byteMatch) {
-		return invertRgbByteTriplet(normalized, byteMatch[1], byteMatch[2], byteMatch[3]);
+		return invertRgbByteTriplet(byteMatch[1], byteMatch[2], byteMatch[3]);
 	}
 
 	return normalized;
@@ -119,7 +125,11 @@ function invertStyleAttribute(style: string): string {
 			}
 			const property = trimmed.slice(0, colon).trim().toLowerCase();
 			const value = trimmed.slice(colon + 1).trim();
-			if ((property === 'stroke' || property === 'fill' || property === 'color') && shouldInvertColorValue(value)) {
+			if (
+				(property === 'stroke' || property === 'fill' || property === 'color'
+					|| property === 'stop-color' || property === 'flood-color')
+				&& shouldInvertColorValue(value)
+			) {
 				return `${property}:${invertColorValue(value)}`;
 			}
 			return trimmed;
@@ -128,21 +138,20 @@ function invertStyleAttribute(style: string): string {
 		.join(';');
 }
 
-/** Post-process SVG: invert only near-black strokes/fills so colors stay intact. */
+/**
+ * Post-process SVG: invert only near-black strokes/fills so colors stay intact.
+ *
+ * Every pass is anchored to a paint attribute or style property. The old
+ * version also ran blanket value-level replaces (`rgb(0,0,0)` → white anywhere
+ * in the document), which rewrote non-paint text — ids, data-* attributes,
+ * even visible <text> content that happened to name a colour.
+ *
+ * (?<![-\w]) rather than \b throughout: a word boundary matches after a
+ * hyphen, so \b would treat data-fill="…" and mask-fill="…" as paint.
+ */
 export function invertSvgForDarkMode(svg: string): string {
-	let output = svg
-		.replaceAll('rgb(0%,0%,0%)', 'rgb(100%,100%,100%)')
-		.replace(/rgb[(]\s*0%\s*,\s*0%\s*,\s*0%\s*[)]/gi, 'rgb(100%,100%,100%)')
-		.replace(/rgb[(]\s*0\s*,\s*0\s*,\s*0\s*[)]/g, 'rgb(255,255,255)')
-		.replace(/#000000(?![0-9a-f])/gi, '#ffffff')
-		.replace(/#000(?![0-9a-f])/gi, '#fff')
-		.replace(/stroke:\s*black/gi, 'stroke:white')
-		.replace(/fill:\s*black/gi, 'fill:white')
-		.replace(/stroke="black"/gi, 'stroke="white"')
-		.replace(/fill="black"/gi, 'fill="white"');
-
-	output = output.replace(
-		/\b(stroke|fill)="([^"]+)"/gi,
+	let output = svg.replace(
+		/(?<![-\w])(stroke|fill|color|stop-color|flood-color)="([^"]+)"/gi,
 		(match, attribute: string, value: string) => {
 			if (!shouldInvertColorValue(value)) {
 				return match;

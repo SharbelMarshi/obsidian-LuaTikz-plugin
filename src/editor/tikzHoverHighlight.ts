@@ -1,6 +1,7 @@
-import { editorEditorField, type Editor } from 'obsidian';
+import type { Editor } from 'obsidian';
 import { RangeSetBuilder, StateEffect, StateField, type Extension, type Text } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView } from '@codemirror/view';
+import { getEditorViewWithExtension } from './editorViewAccess';
 
 /** Inclusive 1-based CodeMirror line range for the statement under the pointer. */
 export interface TikzHoverRange {
@@ -65,22 +66,7 @@ function hasHoverExtension(view: EditorView): boolean {
 }
 
 function getEditorView(editor: Editor): EditorView | null {
-	const direct = (editor as Editor & { cm?: EditorView }).cm;
-	if (!direct?.state || typeof direct.dispatch !== 'function') {
-		return null;
-	}
-	if (hasHoverExtension(direct)) {
-		return direct;
-	}
-	try {
-		const linked = direct.state.field(editorEditorField) as EditorView | undefined;
-		if (linked && hasHoverExtension(linked)) {
-			return linked;
-		}
-	} catch {
-		// Fall through: this editor has no hover extension attached.
-	}
-	return null;
+	return getEditorViewWithExtension(editor, hasHoverExtension);
 }
 
 function sameRange(a: TikzHoverRange | null, b: TikzHoverRange | null): boolean {

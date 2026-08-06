@@ -1,6 +1,7 @@
 import { MarkdownRenderChild, MarkdownView, Notice, Plugin } from 'obsidian';
 import type { Extension } from '@codemirror/state';
-import { formatExecError } from './core/commandResolver';
+import { formatExecError, killAllRunningCompiles } from './desktop/lualatexShell';
+import { clearPluginTempFsDir } from './core/pluginPaths';
 import { InstallNoticeModal } from './ui/installNoticeModal';
 import { InlinePreviewManager } from './editor/inlinePreview';
 import { latexAutocompleteExtension } from './editor/latexAutocomplete';
@@ -59,7 +60,7 @@ function getCodeMirror(): { modeInfo: CodeMirrorModeInfo[] } | null {
 	return cm as { modeInfo: CodeMirrorModeInfo[] };
 }
 
-function migrateLegacySettings(raw: unknown, parsed: Partial<LuaTikzSettings>): LuaTikzSettings {
+export function migrateLegacySettings(raw: unknown, parsed: Partial<LuaTikzSettings>): LuaTikzSettings {
 	const merged: LuaTikzSettings = { ...DEFAULT_SETTINGS, ...parsed };
 	if (isRecord(raw) && !('enableLocalShellRenderer' in raw) && !('renderEngine' in raw)) {
 		merged.enableLocalShellRenderer = true;
@@ -99,8 +100,11 @@ class TikzBlockRefresherCleanup extends MarkdownRenderChild {
 
 export default class LuaTikzPlugin extends Plugin {
 	settings: LuaTikzSettings = DEFAULT_SETTINGS;
-	renderer!: TikzRenderer;
-	private inlinePreview!: InlinePreviewManager;
+	// Nullable rather than definite-assignment: onload() rethrows on failure,
+	// and Obsidian still calls onunload() on the half-constructed plugin — a
+	// `renderer!` there meant onunload itself threw and skipped cleanup.
+	renderer: TikzRenderer | null = null;
+	private inlinePreview: InlinePreviewManager | null = null;
 	private tikzBlockRefreshers = new Set<() => void>();
 
 	registerTikzBlockRefresher(refresh: () => void): () => void {
@@ -114,7 +118,7 @@ export default class LuaTikzPlugin extends Plugin {
 		for (const refresh of this.tikzBlockRefreshers) {
 			refresh();
 		}
-		this.inlinePreview.refreshForThemeChange();
+		this.inlinePreview?.refreshForThemeChange();
 	}
 
 	async onload(): Promise<void> {
@@ -125,9 +129,17 @@ export default class LuaTikzPlugin extends Plugin {
 			this.renderer = new TikzRenderer(
 				this.app,
 				this.manifest.id,
+				this.manifest.version,
 				isObsidianDarkMode,
 				() => this.settings,
 			);
+
+			// A compile killed mid-flight (crash, force-quit) leaves its job dir
+			// in the vault forever; no compile can be running this early, so
+			// sweep leftovers once the workspace is up.
+			this.app.workspace.onLayoutReady(() => {
+				void clearPluginTempFsDir(this.app, this.manifest.id);
+			});
 			this.inlinePreview = new InlinePreviewManager(
 				() => this.app.workspace.getActiveViewOfType(MarkdownView),
 				this.renderer,
@@ -178,7 +190,7 @@ export default class LuaTikzPlugin extends Plugin {
 				name: 'Insert TikZ template: blank tikzpicture',
 				callback: () => {
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-					insertTemplateById(this.app, view, 'blank-tikzpicture');
+					insertTemplateById(view, 'blank-tikzpicture');
 				},
 			});
 
@@ -187,7 +199,7 @@ export default class LuaTikzPlugin extends Plugin {
 				name: 'Insert TikZ template: flowchart (3 boxes)',
 				callback: () => {
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-					insertTemplateById(this.app, view, 'flowchart-3');
+					insertTemplateById(view, 'flowchart-3');
 				},
 			});
 
@@ -196,7 +208,7 @@ export default class LuaTikzPlugin extends Plugin {
 				name: 'Insert TikZ template: empty PGFPlots axis',
 				callback: () => {
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-					insertTemplateById(this.app, view, 'empty-axis');
+					insertTemplateById(view, 'empty-axis');
 				},
 			});
 
@@ -205,7 +217,7 @@ export default class LuaTikzPlugin extends Plugin {
 				name: 'Insert TikZ template: logic circuit starter',
 				callback: () => {
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-					insertTemplateById(this.app, view, 'logic-circuit');
+					insertTemplateById(view, 'logic-circuit');
 				},
 			});
 
@@ -252,15 +264,15 @@ export default class LuaTikzPlugin extends Plugin {
 			});
 
 			this.registerEvent(this.app.workspace.on('editor-change', () => {
-				this.inlinePreview.scheduleUpdate();
+				this.inlinePreview?.scheduleUpdate();
 			}));
 
 			this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
-				this.inlinePreview.scheduleUpdate(0);
+				this.inlinePreview?.scheduleUpdate(0);
 			}));
 
 			this.registerDomEvent(activeDocument, 'selectionchange', () => {
-				this.inlinePreview.syncVisibility();
+				this.inlinePreview?.syncVisibility();
 			});
 
 			this.register(watchObsidianDarkMode(() => {
@@ -289,19 +301,17 @@ export default class LuaTikzPlugin extends Plugin {
 
 	onunload() {
 		this.removeSyntaxHighlighting();
-		this.inlinePreview.disable();
-		this.inlinePreview.clearTimer();
-		this.renderer.clearCache();
+		this.inlinePreview?.disable();
+		// dispose(), not invalidateCache(): unloading happens on every plugin
+		// update, and it must not throw away the on-disk render cache.
+		this.renderer?.dispose();
+		killAllRunningCompiles();
 	}
 
 	async loadSettings() {
 		const raw: unknown = await this.loadData();
 		const parsed = parseSettings(raw);
 		this.settings = migrateLegacySettings(raw, parsed);
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
 	}
 
 	registerTikzCodeBlock(language: string) {
@@ -337,6 +347,9 @@ export default class LuaTikzPlugin extends Plugin {
 						return;
 					}
 
+					if (!this.renderer) {
+						return;
+					}
 					const result = await renderPreparedTikz(this.renderer, prepared, errorContext);
 					const errorHandlers = buildErrorHandlers(this.app, ctx.sourcePath, result);
 					if (!result.ok || !result.dataUrl) {
@@ -385,6 +398,9 @@ export default class LuaTikzPlugin extends Plugin {
 	toggleInlineLivePreview(): void {
 		if (isMobileApp) {
 			new Notice('Inline live preview is available on desktop Obsidian.');
+			return;
+		}
+		if (!this.inlinePreview) {
 			return;
 		}
 		if (this.inlinePreview.enabled) {

@@ -1,7 +1,6 @@
 import { EditorView } from '@codemirror/view';
 import type { Extension, Text } from '@codemirror/state';
-
-const OPEN_FENCE_RE = /^```(?:tikz|luatikz)\b.*$/;
+import { OPEN_FENCE_RE } from './tikzFences';
 const STARTER_BODY = String.raw`\begin{tikzpicture}
 
 \end{tikzpicture}`;

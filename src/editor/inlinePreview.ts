@@ -153,7 +153,6 @@ export class InlinePreviewManager {
 	private lastGoodDataUrl: string | null = null;
 	private lastGoodSvgText: string | null = null;
 	private lastRenderSource: string | null = null;
-	private lastDiagramAlign: DiagramAlign = 'center';
 	private pinnedBlock: TikzBlock | null = null;
 	private pinnedFilePath: string | null = null;
 	private savedInsertCursor: EditorPosition | null = null;
@@ -534,8 +533,6 @@ export class InlinePreviewManager {
 	}
 
 	private showOutput(view: MarkdownView, diagramAlign: DiagramAlign = 'center'): void {
-		this.lastDiagramAlign = diagramAlign;
-
 		const useSvg = !isMobileApp && !!this.lastGoodSvgText;
 
 		if (useSvg) {
@@ -744,7 +741,6 @@ export class InlinePreviewManager {
 	private showError(
 		view: MarkdownView,
 		result: Parameters<typeof presentTikzFailure>[1],
-		preparedSource: string,
 		onRetry?: () => void,
 	): void {
 		const sourcePath = view.file?.path;
@@ -823,6 +819,6 @@ export class InlinePreviewManager {
 			return;
 		}
 
-		this.showError(view, result, prepared.renderSource, retry);
+		this.showError(view, result, retry);
 	}
 }

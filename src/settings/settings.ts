@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting, type TextAreaComponent } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, debounce, type TextAreaComponent } from 'obsidian';
 import LuaTikzPlugin from '../main';
 import {
 	DEFAULT_SETTINGS,
@@ -9,11 +9,24 @@ import {
 	type SemicolonReminderMode,
 } from './settingsModel';
 import { TEST_RENDER_SOURCE, checkEnvironment } from '../utils/environmentCheck';
+import { clearCommandResolutionCache } from '../desktop/lualatexShell';
 import { migrateDarkModeStyle } from '../utils/darkMode';
 import { isMobileApp } from '../utils/platform';
 import { shouldClearRenderCacheOnSettingChange } from '../utils/settingsCache';
 import { asBoolean, asNumber, asString, isRecord } from '../utils/guards';
 import { buildManagedPreamblePreview, latexWrapperOptionsFromSettings } from '../core/tikzSource';
+
+/**
+ * Below 1 s a mistyped or half-typed value bricks every render ("Timed out."
+ * instantly — 0 clamps to ~1 ms in setTimeout); above 10 min the safety net
+ * stops being one.
+ */
+export const MIN_TIMEOUT_MS = 1000;
+export const MAX_TIMEOUT_MS = 600000;
+
+export function clampTimeoutMs(value: number): number {
+	return Math.max(MIN_TIMEOUT_MS, Math.min(MAX_TIMEOUT_MS, value));
+}
 
 function parseRenderEngine(value: unknown): LuaTikzRenderEngine | undefined {
 	return value === 'lualatex' || value === 'tikzjax' ? value : undefined;
@@ -56,7 +69,7 @@ export function parseSettings(data: unknown): Partial<LuaTikzSettings> {
 	if (outputFormat) {
 		parsed.outputFormat = outputFormat;
 	}
-	parsed.timeoutMs = asNumber(data.timeoutMs, DEFAULT_SETTINGS.timeoutMs);
+	parsed.timeoutMs = clampTimeoutMs(asNumber(data.timeoutMs, DEFAULT_SETTINGS.timeoutMs));
 	parsed.cacheEnabled = asBoolean(data.cacheEnabled, DEFAULT_SETTINGS.cacheEnabled);
 	parsed.inlineLivePreviewEnabledByDefault = asBoolean(
 		data.inlineLivePreviewEnabledByDefault,
@@ -141,26 +154,38 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 					void this.renderEnvironmentStatus();
 				}));
 
+		// Debounced: unthrottled, every keystroke wrote data.json, wiped the
+		// render cache, and spawned the half-typed path as a process.
+		const persistLualatexPath = debounce(async (value: string) => {
+			clearCommandResolutionCache();
+			await this.persistSetting('lualatexPath', value);
+			void this.renderEnvironmentStatus();
+		}, 500, true);
+
 		new Setting(lualatexSection)
 			.setName('LuaLaTeX path')
 			.setDesc('Direct path to the lualatex executable.')
 			.addText(text => text
 				.setPlaceholder('/Library/TeX/texbin/lualatex')
 				.setValue(this.plugin.settings.lualatexPath)
-				.onChange(async value => {
-					await this.persistSetting('lualatexPath', value);
-					void this.renderEnvironmentStatus();
+				.onChange(value => {
+					persistLualatexPath(value);
 				}));
+
+		const persistTimeout = debounce(async (value: string) => {
+			const parsed = Number.parseInt(value, 10);
+			if (Number.isFinite(parsed)) {
+				await this.persistSetting('timeoutMs', clampTimeoutMs(parsed));
+			}
+		}, 500, true);
 
 		new Setting(lualatexSection)
 			.setName('Timeout (ms)')
+			.setDesc(`Per-render compile timeout, ${MIN_TIMEOUT_MS}–${MAX_TIMEOUT_MS} ms.`)
 			.addText(text => text
 				.setValue(String(this.plugin.settings.timeoutMs))
-				.onChange(async value => {
-					const parsed = Number.parseInt(value, 10);
-					if (Number.isFinite(parsed)) {
-						await this.persistSetting('timeoutMs', parsed);
-					}
+				.onChange(value => {
+					persistTimeout(value);
 				}));
 
 		new Setting(lualatexSection)
@@ -189,13 +214,16 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 		];
 
 		for (const field of fontFields) {
+			const persistFont = debounce(async (value: string) => {
+				await this.persistSetting(field.key, value);
+			}, 500, true);
 			new Setting(fontSection)
 				.setName(field.name)
 				.addText(text => text
 					.setPlaceholder(field.placeholder)
 					.setValue(this.plugin.settings[field.key])
-					.onChange(async value => {
-						await this.persistSetting(field.key, value);
+					.onChange(value => {
+						persistFont(value);
 					}));
 		}
 
@@ -209,10 +237,13 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 			.setDesc('Additional trusted LaTeX appended to the preamble. LuaLaTeX uses the full preamble. TikZJax keeps TikZ/macros and removes font/localization-only lines.')
 			.addTextArea(text => {
 				text.inputEl.rows = 8;
+				const persistExtraPreamble = debounce(async (value: string) => {
+					await this.persistSetting('extraPreamble', value);
+				}, 500, true);
 				text.setPlaceholder(String.raw`\usepackage{physics}`)
 					.setValue(this.plugin.settings.extraPreamble)
-					.onChange(async value => {
-						await this.persistSetting('extraPreamble', value);
+					.onChange(value => {
+						persistExtraPreamble(value);
 					});
 			});
 
@@ -222,10 +253,13 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 			.addTextArea(text => {
 				this.customPreambleInput = text;
 				text.inputEl.rows = 16;
+				const persistCustomPreamble = debounce(async (value: string) => {
+					await this.persistSetting('customPreamble', value);
+				}, 500, true);
 				text.setPlaceholder('Empty — using the managed preamble')
 					.setValue(this.plugin.settings.customPreamble)
-					.onChange(async value => {
-						await this.persistSetting('customPreamble', value);
+					.onChange(value => {
+						persistCustomPreamble(value);
 					});
 			});
 
@@ -304,7 +338,7 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 
 		new Setting(editorSection)
 			.setName('Auto-close brackets')
-			.setDesc('Automatically close {, [, and $ while typing in the editor.')
+			.setDesc('Automatically close {, [, (, and $ while typing inside TikZ blocks.')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.autoCloseBrackets)
 				.onChange(async value => {
@@ -331,8 +365,10 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 			.addButton(button => button
 				.setButtonText('Clear cache')
 				.setClass('luatikz-soft-button')
-				.onClick(() => {
-					this.plugin.renderer.clearCache();
+				.onClick(async () => {
+					// The Notice fires after the disk assets are actually gone;
+					// it used to fire immediately while nothing was deleted.
+					await this.plugin.renderer?.invalidateCache();
 					new Notice('LuaTikz cache cleared.');
 				}));
 	}
@@ -362,6 +398,9 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 	}
 
 	private async runTestRender(): Promise<void> {
+		if (!this.plugin.renderer) {
+			return;
+		}
 		new Notice('Running LuaTikz test render…');
 		const result = await this.plugin.renderer.renderToSvg(TEST_RENDER_SOURCE);
 		if (result.ok) {
@@ -399,7 +438,7 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 				this.plugin.settings.semicolonReminderMode = mode;
 			}
 		} else if (settingKey === 'timeoutMs') {
-			this.plugin.settings.timeoutMs = asNumber(value, DEFAULT_SETTINGS.timeoutMs);
+			this.plugin.settings.timeoutMs = clampTimeoutMs(asNumber(value, DEFAULT_SETTINGS.timeoutMs));
 		} else if ((STRING_SETTING_KEYS as readonly string[]).includes(settingKey)) {
 			const stringKey = settingKey as typeof STRING_SETTING_KEYS[number];
 			this.plugin.settings[stringKey] = asString(value, DEFAULT_SETTINGS[stringKey]);
@@ -417,7 +456,7 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 
 		await this.plugin.saveData(this.plugin.settings);
 		if (shouldClearRenderCacheOnSettingChange(settingKey)) {
-			this.plugin.renderer.clearCache();
+			await this.plugin.renderer?.invalidateCache();
 		}
 	}
 

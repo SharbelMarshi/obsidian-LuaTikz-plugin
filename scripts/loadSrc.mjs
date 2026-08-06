@@ -69,4 +69,23 @@ export class Notice { constructor(message) { this.message = message; } }
 export class MarkdownView {}
 export class TFile {}
 export class Menu {}
+export class Modal { constructor(app) { this.app = app; } }
+export class Plugin { constructor(app, manifest) { this.app = app; this.manifest = manifest; } }
+export class MarkdownRenderChild { constructor(containerEl) { this.containerEl = containerEl; } }
+export class PluginSettingTab { constructor(app, plugin) { this.app = app; this.plugin = plugin; } }
+export class Setting {
+	constructor() {}
+	setName() { return this; }
+	setDesc() { return this; }
+	setHeading() { return this; }
+	setClass() { return this; }
+	addText() { return this; }
+	addTextArea() { return this; }
+	addToggle() { return this; }
+	addDropdown() { return this; }
+	addButton() { return this; }
+}
+export const normalizePath = p => p.replace(/\\\\/g, '/').replace(/\\/{2,}/g, '/');
+export const Platform = { isMobileApp: false };
+export const debounce = (fn) => fn;
 `;

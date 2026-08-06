@@ -3,42 +3,14 @@ import type { Extension, Text } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { parseTikzBlockContext, allLibrariesNeeded } from '../latex/tikzBlockContext';
 import { normalizeUserLibraryCommand } from '../core/tikzSource';
+import { findFencedTikzRanges } from './tikzFences';
 
-const OPEN_FENCE_RE = /^```(?:tikz|luatikz)\b.*$/;
 const USETIKZLIBRARY_RE = /\\usetikzlibrary\s*\{[^}]*\}/g;
 const BEGIN_ENV_RE = /\\begin\{([^}]+)\}/g;
 const END_ENV_RE = /\\end\{([^}]+)\}/g;
-const EMPTY_KEY_RE = /(?:^|[\s,{])([A-Za-z!-]+)=\s*(?=[,\]]|$)/g;
-
-function findTikzBlocks(doc: Text): { from: number; to: number; source: string }[] {
-	const blocks: { from: number; to: number; source: string }[] = [];
-	let openLine: number | null = null;
-
-	for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber++) {
-		const line = doc.line(lineNumber);
-		const trimmed = line.text.trim();
-
-		if (openLine === null) {
-			if (OPEN_FENCE_RE.test(trimmed)) {
-				openLine = lineNumber;
-			}
-			continue;
-		}
-
-		if (trimmed === '```') {
-			const contentStart = openLine + 1;
-			const contentEnd = lineNumber - 1;
-			if (contentEnd >= contentStart) {
-				const from = doc.line(contentStart).from;
-				const to = doc.line(contentEnd).to;
-				blocks.push({ from, to, source: doc.sliceString(from, to) });
-			}
-			openLine = null;
-		}
-	}
-
-	return blocks;
-}
+// `[` belongs in the prefix class: `\node[align=]` — the most common shape —
+// was never flagged because the key sits right after the opening bracket.
+const EMPTY_KEY_RE = /(?:^|[\s,{[])([A-Za-z!-]+)=\s*(?=[,\]]|$)/g;
 
 function lintBlockSource(source: string, blockFrom: number): Diagnostic[] {
 	const diagnostics: Diagnostic[] = [];
@@ -135,10 +107,13 @@ function lintBlockSource(source: string, blockFrom: number): Diagnostic[] {
 		}
 
 		for (const match of line.matchAll(EMPTY_KEY_RE)) {
-			const matchIndex = match.index ?? 0;
+			// Anchor on the key itself, not match.index: the match starts at
+			// the separator character before the key, so the squiggle sat one
+			// column early.
+			const keyStart = (match.index ?? 0) + match[0].indexOf(match[1]);
 			diagnostics.push({
-				from: lineFrom + matchIndex,
-				to: lineFrom + matchIndex + match[0].length,
+				from: lineFrom + keyStart,
+				to: lineFrom + keyStart + match[1].length + 1,
 				severity: 'warning',
 				message: `Empty option key "${match[1]}"`,
 			});
@@ -186,16 +161,19 @@ function lintBlockSource(source: string, blockFrom: number): Diagnostic[] {
 	return diagnostics;
 }
 
-export function tikzStructuralLintExtension(getEnabled: () => boolean): Extension {
-	return linter((view: EditorView) => {
-		if (!getEnabled()) {
-			return [];
-		}
+/** The whole lint pass as a pure function of the document — what the tests call. */
+export function lintMarkdownDoc(doc: Text, enabled: boolean): Diagnostic[] {
+	if (!enabled) {
+		return [];
+	}
 
-		const diagnostics: Diagnostic[] = [];
-		for (const block of findTikzBlocks(view.state.doc)) {
-			diagnostics.push(...lintBlockSource(block.source, block.from));
-		}
-		return diagnostics;
-	});
+	const diagnostics: Diagnostic[] = [];
+	for (const block of findFencedTikzRanges(doc)) {
+		diagnostics.push(...lintBlockSource(block.source, block.from));
+	}
+	return diagnostics;
+}
+
+export function tikzStructuralLintExtension(getEnabled: () => boolean): Extension {
+	return linter((view: EditorView) => lintMarkdownDoc(view.state.doc, getEnabled()));
 }

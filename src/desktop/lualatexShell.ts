@@ -91,6 +91,84 @@ export interface SpawnResult {
 	stderr: string;
 }
 
+interface StringDecoderLike {
+	write(chunk: Buffer | string): string;
+	end(): string;
+}
+
+interface StringDecoderModule {
+	StringDecoder: new (encoding: string) => StringDecoderLike;
+}
+
+function tryLoadStringDecoder(): StringDecoderLike | null {
+	const req = electronRequire();
+	if (!req) {
+		return null;
+	}
+	try {
+		const mod = req('string_decoder') as StringDecoderModule;
+		return new mod.StringDecoder('utf8');
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Accumulates decoded chunks in an array (joined once at the end) and decodes
+ * through a StringDecoder. Naive `stdout += chunk.toString()` had two flaws:
+ * a multi-byte UTF-8 character split across ~64 KB chunk boundaries became
+ * U+FFFD — garbling the Hebrew/Arabic source lines LuaLaTeX echoes into its
+ * error output — and re-slicing the whole string per chunk was O(n²) once the
+ * buffer cap was reached.
+ */
+class ChunkCollector {
+	private parts: string[] = [];
+	private length = 0;
+	private readonly decoder = tryLoadStringDecoder();
+
+	constructor(private readonly maxBuffer: number) {}
+
+	push(chunk: Buffer | string): void {
+		const text = typeof chunk === 'string'
+			? chunk
+			: this.decoder?.write(chunk) ?? chunk.toString();
+		this.parts.push(text);
+		this.length += text.length;
+
+		if (this.length > this.maxBuffer && this.parts.length > 1) {
+			// Drop whole leading parts; exact tail trimming happens in read().
+			while (this.parts.length > 1 && this.length - this.parts[0].length > this.maxBuffer) {
+				this.length -= this.parts[0].length;
+				this.parts.shift();
+			}
+		}
+	}
+
+	read(): string {
+		const tail = this.decoder?.end() ?? '';
+		const joined = this.parts.join('') + tail;
+		return joined.length > this.maxBuffer ? joined.slice(-this.maxBuffer) : joined;
+	}
+}
+
+/**
+ * Children of in-flight compiles. spawnWithTimeout used to register its child
+ * nowhere, so disabling the plugin mid-compile orphaned the lualatex process
+ * and its job directory in the vault.
+ */
+const runningChildren = new Set<ChildProcess>();
+
+export function killAllRunningCompiles(): void {
+	for (const child of runningChildren) {
+		try {
+			child.kill('SIGKILL');
+		} catch {
+			// already exited
+		}
+	}
+	runningChildren.clear();
+}
+
 export function spawnWithTimeout(
 	file: string,
 	args: string[],
@@ -99,9 +177,9 @@ export function spawnWithTimeout(
 ): Promise<SpawnResult> {
 	return new Promise((resolve, reject) => {
 		let timedOut = false;
-		let stdout = '';
-		let stderr = '';
 		const maxBuffer = options.maxBuffer ?? 10 * 1024 * 1024;
+		const stdout = new ChunkCollector(maxBuffer);
+		const stderr = new ChunkCollector(maxBuffer);
 		const childProcess = loadChildProcess();
 
 		const child = childProcess.spawn(file, args, {
@@ -109,19 +187,14 @@ export function spawnWithTimeout(
 			shell: false,
 			windowsHide: true,
 		});
+		runningChildren.add(child);
 
 		child.stdout?.on('data', (chunk: Buffer | string) => {
-			stdout += chunk.toString();
-			if (stdout.length > maxBuffer) {
-				stdout = stdout.slice(-maxBuffer);
-			}
+			stdout.push(chunk);
 		});
 
 		child.stderr?.on('data', (chunk: Buffer | string) => {
-			stderr += chunk.toString();
-			if (stderr.length > maxBuffer) {
-				stderr = stderr.slice(-maxBuffer);
-			}
+			stderr.push(chunk);
 		});
 
 		const timer = window.setTimeout(() => {
@@ -132,6 +205,7 @@ export function spawnWithTimeout(
 
 		child.on('error', (err) => {
 			window.clearTimeout(timer);
+			runningChildren.delete(child);
 			if (!timedOut) {
 				reject(err);
 			}
@@ -139,17 +213,18 @@ export function spawnWithTimeout(
 
 		child.on('close', (code) => {
 			window.clearTimeout(timer);
+			runningChildren.delete(child);
 			if (timedOut) {
 				return;
 			}
 			if (code !== 0) {
 				const err = new Error(`Process exited with code ${code ?? 'unknown'}`);
-				(err as Error & { stdout?: string; stderr?: string }).stdout = stdout;
-				(err as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+				(err as Error & { stdout?: string; stderr?: string }).stdout = stdout.read();
+				(err as Error & { stdout?: string; stderr?: string }).stderr = stderr.read();
 				reject(err);
 				return;
 			}
-			resolve({ stdout, stderr });
+			resolve({ stdout: stdout.read(), stderr: stderr.read() });
 		});
 	});
 }
@@ -198,33 +273,68 @@ async function resolveCommand(
 	return null;
 }
 
+/**
+ * Successful resolutions, keyed by the custom path in force. Unmemoized,
+ * every render re-probed the binaries — 2-6 extra process spawns (each with a
+ * 5 s timeout budget) per diagram. Failures are deliberately NOT cached: a
+ * user who installs TeX mid-session recovers on the next render.
+ */
+const resolvedCommands = new Map<string, string>();
+
+export function clearCommandResolutionCache(): void {
+	resolvedCommands.clear();
+}
+
 export async function resolveLuaLatex(customPath?: string): Promise<string | null> {
-	if (customPath?.trim()) {
-		const validationError = validateLualatexPath(customPath);
-		if (validationError) {
-			return null;
-		}
-		if (await commandIsRunnable(customPath.trim())) {
-			return customPath.trim();
-		}
+	const memoKey = `lualatex:${customPath?.trim() ?? ''}`;
+	const memoized = resolvedCommands.get(memoKey);
+	if (memoized !== undefined) {
+		return memoized;
 	}
 
-	return resolveCommand([
-		'/Library/TeX/texbin/lualatex',
-		'/usr/local/texlive/2025/bin/universal-darwin/lualatex',
-		'/usr/local/bin/lualatex',
-		'lualatex',
-	]);
+	const resolve = async (): Promise<string | null> => {
+		if (customPath?.trim()) {
+			const validationError = validateLualatexPath(customPath);
+			if (validationError) {
+				return null;
+			}
+			if (await commandIsRunnable(customPath.trim())) {
+				return customPath.trim();
+			}
+		}
+
+		return resolveCommand([
+			'/Library/TeX/texbin/lualatex',
+			'/usr/local/texlive/2025/bin/universal-darwin/lualatex',
+			'/usr/local/bin/lualatex',
+			'lualatex',
+		]);
+	};
+
+	const resolved = await resolve();
+	if (resolved) {
+		resolvedCommands.set(memoKey, resolved);
+	}
+	return resolved;
 }
 
 export async function resolvePdfToCairo(): Promise<string | null> {
+	const memoized = resolvedCommands.get('pdftocairo');
+	if (memoized !== undefined) {
+		return memoized;
+	}
+
 	// pdftocairo rejects --version; it requires -v or an output-format flag.
-	return resolveCommand([
+	const resolved = await resolveCommand([
 		'/opt/homebrew/bin/pdftocairo',
 		'/usr/local/bin/pdftocairo',
 		'/usr/bin/pdftocairo',
 		'pdftocairo',
 	], ['-v']);
+	if (resolved) {
+		resolvedCommands.set('pdftocairo', resolved);
+	}
+	return resolved;
 }
 
 export function formatExecError(err: unknown): string {
