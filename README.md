@@ -305,5 +305,3 @@ Diagrams rendered with LuaTikZ, exported as SVG. Files in [`samples/`](samples/)
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-The visual editor adapts parts of the [tikz-editor](https://github.com/DominikPeters/tikz-editor) project by Dominik Peters (MIT): the freehand capture/simplify/Bézier-fit pipeline, the span-based lossless source-patch model, and the pinch-zoom viewport math. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
