@@ -20,7 +20,7 @@ Enable **LuaTikZ** under Settings → Community plugins. The release ships as `m
 
 ### Added
 
-- **Hover-to-locate** — moving the pointer over a shape in the floating preview highlights the statement that drew it. [Details](#live-preview-and-coordinate-picking-desktop)
+- **Hover-to-locate** — moving the pointer over a shape in the floating preview highlights the statement that drew it. [Details](#live-preview-and-coordinate-picking)
 - **PNG export** — the toolbar button is now **Export** with a format menu for SVG or PNG. [Details](#export)
 - **Explained errors** — opaque LaTeX failures such as `Dimension too large` now come with a plain-language explanation of the cause and the fixes that work. [Details](#errors-and-editing)
 - **Font settings** — override the main, Hebrew and Arabic fonts. [Details](#fonts-and-rtl)
@@ -104,9 +104,9 @@ Use `\he{...}` and `\ar{...}` for RTL text in labels. LuaLaTeX shapes the text p
 
 Short macros for quick diagrams: `\Circle`, `\Arrow`, `\Rect`, `\TextRTL`, `\ResistorRow`, logic gates (`\ANDgate`, `\NOTgate`, …), wires, and basic circuit symbols. Autocomplete inside `tikz` blocks suggests TikZ commands, snippets, node anchors, and relative coordinates.
 
-### Live preview and coordinate picking (desktop)
+### Live preview and coordinate picking
 
-Command palette → **Toggle inline live preview**. A floating preview updates while the cursor is inside a `tikz` block.
+Command palette → **Toggle inline live preview**. A floating preview updates while the cursor is inside a `tikz` block. The preview now works on mobile and tablets too (rendered through TikZJax); coordinate picking and hover-to-locate remain desktop features, and on any platform the preview's **Edit** button opens the visual editor described below.
 
 Click the preview to insert TikZ coordinates at the cursor. **Shift+click** constrains the pick to a horizontal or vertical line from the last numeric coordinate already in your source — useful when tracing rectangle edges.
 
@@ -121,6 +121,39 @@ becomes `(0.54,-0.96)--cycle` on the last segment.
 Move the pointer over a shape in the preview and the statement that drew it is highlighted in the editor. The mapping is derived from the explicit coordinates in your source (`--` chains, `rectangle`/`grid`, `circle`/`ellipse`, node anchors, `++` relative steps, picture-level `scale`); statements built from anything it cannot read — named nodes, polar coordinates, `foreach` bodies — are simply never highlighted rather than guessed at.
 
 While you edit, the preview keeps the last good diagram visible so a half-finished `\draw` line does not blank the surface.
+
+### Visual editor (Edit mode)
+
+The floating preview has two modes: **Preview** (everything described above) and **Edit**. Press the **Edit** button in the corner of the floating preview and the same component expands to fill the pane as a full visual TikZ editor. Press **Done** and it collapses back to the compact preview. No new fence, no separate drawing file, no import/export step — the TikZ source inside your existing ```` ```tikz ```` / ```` ```luatikz ```` fence remains the only source of truth, and every visual change is written straight into it as a normal, undoable edit.
+
+The intended workflow while writing lecture notes:
+
+1. Write Markdown; put the cursor inside a `tikz` fence — the floating preview appears.
+2. Press **Edit** — the preview expands into the editor with your diagram loaded.
+3. Draw or adjust visually — the fence source updates after each completed operation.
+4. Press **Done** — back to the compact preview, keep typing.
+
+**Tools** — Select, Pan, Line, Arrow, Path (polyline), Bézier, Freehand, Rectangle, Rounded rectangle, Circle, Ellipse, Arc, Grid, Diamond, Polygon, Star, Text node, Math node — plus Delete, Duplicate, Undo, Redo. Everything generates plain native TikZ: `\draw (0,0) -- (3,2);`, `\draw[->] …`, `rectangle`, `circle[radius=1cm]`, `ellipse[x radius=…]`, `arc[start angle=…]`, `.. controls … ..` curves, `\node at (x,y) {$\alpha$};`, and closed `-- cycle` paths for polygons/stars/diamonds.
+
+**Freehand** strokes are not raw pointer dumps: samples are thinned, smoothed, simplified (adjustable smoothing in the Style panel), and fitted to a readable multi-segment Bézier path that stays fully editable afterwards — you can select it, move it, or drag its control points like any other curve.
+
+**Mouse and trackpad** — primary drag draws with the active tool; middle-button drag (or the Pan tool) pans; the wheel and trackpad zoom around the pointer; Shift constrains lines to an axis; right-click is untouched. Keyboard: `V/H/L/A/P/B/F/R/C/E/T` switch tools, `Delete` deletes, `Esc` cancels, `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` undo/redo, `Ctrl/Cmd+D` duplicates, `Ctrl/Cmd+C`/`V` copy/paste, arrows nudge the selection.
+
+**Touch** — by default one finger pans and two fingers pan/pinch-zoom; nothing is drawn by accident. Turn on **Finger draw** in the status bar and one finger draws with the active tool while two fingers still pan and zoom (a second finger safely cancels an unfinished stroke). Touch targets and selection handles are sized for fingers.
+
+**Stylus / Apple Pencil** — a pen always draws with the active tool, regardless of the Finger draw setting, and drawing never scrolls the note. Pen input takes priority over touch: while the pen is down (and briefly after it lifts) stray finger/palm contacts are ignored — practical palm rejection, not an OS-level guarantee.
+
+**Two-way source sync** — toggle the **Source** panel to see the fence's TikZ next to the canvas. Visual edits update the source; typing in the panel updates the scene (and the fence). Edits are minimal: only the coordinates, lengths, or option tokens you changed are rewritten — comments, indentation, custom styles, and statement order are preserved byte-for-byte. Each completed operation is one undo step in Obsidian's normal history.
+
+**Supported for visual editing** — `\draw`/`\fill`/`\filldraw`/`\path` statements whose coordinates are explicit numeric pairs (absolute, `+`, or `++`), with `--`, `-|`, `|-`, `rectangle`, `grid`, `circle`, `ellipse`, `arc`, `.. controls ..`, `cycle`, and inline `node {…}` labels (carried along verbatim); `\node … at (x,y) {…};` and `\coordinate`; multiple `tikzpicture` environments per fence; picture-level `scale`/`xscale`/`yscale`; empty pictures (you get a stable 12 cm × 8 cm workspace to start drawing in — it never appears in your source).
+
+**Preserved but source-only** — anything the editor cannot safely round-trip stays exactly as written and still renders through the normal LuaTikZ pipeline: `\foreach`, `to[bend …]`/`edge`/`plot`, named or polar coordinates, calc expressions, `scope` environments, pictures with `rotate`/`shift` transforms, nested environments (`axis`, …), and any other command. These appear on the canvas as dashed "locked" ghosts where their geometry can be estimated; tapping one tells you why it is locked. The editor never deletes, rewrites, or simplifies code it does not understand.
+
+**Rendering** — the canvas reacts instantly using its own lightweight SVG scene; nothing is compiled while you drag. After each committed change the existing LuaTikZ pipeline recompiles in the background (debounced) and the authoritative compiled output appears in a small card over the canvas — LuaLaTeX on desktop, TikZJax on mobile, exactly as in Preview mode, with the same cache. If a compile fails you keep the editable scene and the last good output, and the error is shown with the usual line highlight in the Markdown editor.
+
+**Style panel** — stroke and fill color, line width, solid/dashed/dotted, arrowheads, opacity, rounded corners, node text, polygon sides, and freehand smoothing. With a selection it edits the selected objects (existing custom styles like `[my style]` are left intact); with nothing selected it sets the defaults for new objects. **Grid & snapping** — toggle the grid and snapping in the status bar and pick the interval (0.1–2 cm). Snapping works in TikZ coordinates, so snapped points land on exact values like `(1.5, 0.5)`; endpoints and centers of existing objects snap too. The grid is editor-only chrome — it is never written into your source (use the Grid *tool* if you want a real `\draw … grid …;`).
+
+**Mobile** — Edit mode goes near-full-screen with a scrollable toolbar, drawer panels, and safe-area padding; the canvas is a fully interactive SVG. Preview mode's coordinate picking is desktop-only as before, and it never fires while Edit mode is open.
 
 ### Editor
 
@@ -250,3 +283,5 @@ Diagrams rendered with LuaTikZ, exported as SVG. Files in [`samples/`](samples/)
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The visual editor adapts parts of the [tikz-editor](https://github.com/DominikPeters/tikz-editor) project by Dominik Peters (MIT): the freehand capture/simplify/Bézier-fit pipeline, the span-based lossless source-patch model, and the pinch-zoom viewport math. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

@@ -289,7 +289,9 @@ export default class LuaTikzPlugin extends Plugin {
 				});
 			}
 
-			if (!isMobileApp && this.settings.inlineLivePreviewEnabledByDefault) {
+			// Enabled on mobile too: the visual Edit mode is a touch feature,
+			// and the preview itself renders through TikZJax there.
+			if (this.settings.inlineLivePreviewEnabledByDefault) {
 				this.inlinePreview.enable(500);
 			}
 		} catch (error: unknown) {
@@ -396,10 +398,6 @@ export default class LuaTikzPlugin extends Plugin {
 	}
 
 	toggleInlineLivePreview(): void {
-		if (isMobileApp) {
-			new Notice('Inline live preview is available on desktop Obsidian.');
-			return;
-		}
 		if (!this.inlinePreview) {
 			return;
 		}

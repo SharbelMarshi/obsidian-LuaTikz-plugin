@@ -759,3 +759,577 @@
 .luatikz-inline-svg-host.luatikz-pick-mode {
   cursor: crosshair;
 }
+
+/* ==========================================================================
+   Visual TikZ editor (floating-preview Edit mode)
+   ========================================================================== */
+
+.luatikz-preview-edit-btn {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  min-height: 30px;
+  padding: 2px 10px;
+  font-size: 0.8em;
+  border-radius: 7px;
+  border: none;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.luatikz-preview-edit-btn:hover,
+.luatikz-preview-edit-btn:focus-visible {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  color: var(--text-normal);
+}
+
+.luatikz-preview-edit-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+/* Expanded edit-mode container: fills the active Markdown pane. Declared
+   after the sized rule so it wins at equal specificity. */
+.tikzjax-hebrew-local-inline-preview.luatikz-edit-mode {
+  left: 8px;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  z-index: 200;
+  text-align: initial;
+}
+
+.tikzjax-hebrew-local-inline-preview.luatikz-edit-mode .tikzjax-inline-resize-handle {
+  display: none;
+}
+
+.luatikz-edit-mode .tikzjax-hebrew-local-inline-preview-body {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.luatikz-ve-hidden {
+  display: none !important;
+}
+
+/* --- editor frame --------------------------------------------------------- */
+
+.luatikz-visual-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  direction: ltr;
+  text-align: initial;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  outline: none;
+}
+
+.luatikz-ve-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-wrap: wrap;
+}
+
+.luatikz-ve-toolgroup,
+.luatikz-ve-actiongroup {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Quiet, icon-first buttons: transparent at rest, soft gray on hover, accent
+   tint when a tool or toggle is active. Done stays a labeled accent button. */
+.luatikz-ve-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 32px;
+  min-width: 32px;
+  padding: 4px 8px;
+  font-size: 0.8em;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.luatikz-ve-btn.luatikz-ve-btn-icon {
+  padding: 4px;
+}
+
+.luatikz-ve-icon {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  display: block;
+}
+
+.luatikz-ve-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.luatikz-ve-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.luatikz-ve-btn.is-active {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  color: var(--text-accent, var(--interactive-accent));
+}
+
+.luatikz-ve-done {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 4px 14px;
+  font-weight: 600;
+}
+
+.luatikz-ve-done:hover {
+  background: var(--interactive-accent-hover, var(--interactive-accent));
+  color: var(--text-on-accent);
+}
+
+.luatikz-ve-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* --- panels ---------------------------------------------------------------- */
+
+.luatikz-ve-props {
+  width: 210px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 8px;
+  border-right: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.luatikz-ve-props-title {
+  font-weight: 600;
+  font-size: 0.85em;
+  margin-bottom: 6px;
+}
+
+.luatikz-ve-props-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 0.8em;
+}
+
+.luatikz-ve-props-label {
+  flex: 1;
+  color: var(--text-muted);
+}
+
+.luatikz-ve-props-select,
+.luatikz-ve-props-sides,
+.luatikz-ve-props-text {
+  max-width: 110px;
+  min-height: 30px;
+}
+
+.luatikz-ve-source {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+/* Layered source editor: a syntax-colored <pre> mirror sits behind the
+   transparent-text <textarea>; both share exact font metrics so glyphs align
+   and only the caret and selection come from the textarea itself. */
+.luatikz-ve-source-editor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.luatikz-ve-source-highlight,
+.luatikz-ve-source-text {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  resize: none;
+  border: none;
+  font-family: var(--font-monospace);
+  font-size: 0.78em;
+  line-height: 1.5;
+  padding: 8px;
+  white-space: pre;
+  tab-size: 2;
+  direction: ltr;
+  unicode-bidi: plaintext;
+  box-sizing: border-box;
+}
+
+.luatikz-ve-source-highlight {
+  overflow: hidden;
+  pointer-events: none;
+  background: transparent;
+  color: var(--code-normal, var(--text-normal));
+}
+
+.luatikz-ve-source-highlight code {
+  font: inherit;
+  background: transparent;
+  padding: 0;
+  display: block;
+  white-space: inherit;
+}
+
+/* The textarea must stay glass in every state: themes give textarea:hover /
+   :focus an opaque form-field background, which would cover the color mirror
+   and make the code seem to vanish the moment the pointer enters the panel. */
+.luatikz-ve-source-text,
+.luatikz-ve-source-text:hover,
+.luatikz-ve-source-text:focus,
+.luatikz-ve-source-text:focus-visible,
+.luatikz-ve-source-text:active {
+  overflow: auto;
+  background: transparent !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text-normal);
+  box-shadow: none !important;
+  border: none !important;
+  outline: none;
+}
+
+/* Token colors follow the theme's code palette. */
+.luatikz-tzk-comment { color: var(--code-comment, var(--text-faint)); }
+.luatikz-tzk-command { color: var(--code-keyword, var(--color-purple, #a656d0)); }
+.luatikz-tzk-keyword { color: var(--code-property, var(--color-cyan, #2a9d9d)); }
+.luatikz-tzk-number { color: var(--code-value, var(--color-orange, #c07a2d)); }
+.luatikz-tzk-bracket { color: var(--code-punctuation, var(--text-muted)); }
+.luatikz-tzk-brace { color: var(--code-punctuation, var(--text-muted)); }
+.luatikz-tzk-operator { color: var(--code-operator, var(--text-muted)); }
+
+/* Hover / selection tints driven by canvas interaction. */
+.luatikz-tzk-hover {
+  background: var(--text-highlight-bg, rgba(255, 208, 0, 0.28));
+  border-radius: 2px;
+}
+
+.luatikz-tzk-selected {
+  background: var(--text-selection, rgba(104, 134, 197, 0.3));
+  border-radius: 2px;
+}
+
+.luatikz-ve-canvas.is-hover-object {
+  cursor: move;
+}
+
+.luatikz-ve-source-diagnostics {
+  max-height: 30%;
+  overflow-y: auto;
+  padding: 4px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.luatikz-ve-diagnostic {
+  font-size: 0.72em;
+  color: var(--text-muted);
+  padding: 2px 0;
+}
+
+.luatikz-ve-diagnostic.is-error {
+  color: var(--text-error);
+}
+
+.luatikz-ve-diagnostic.is-warning {
+  color: var(--text-warning, var(--text-muted));
+}
+
+/* --- canvas ---------------------------------------------------------------- */
+
+.luatikz-ve-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.luatikz-ve-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+  background: var(--background-primary);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.luatikz-ve-canvas.is-pan-tool {
+  cursor: grab;
+}
+
+.luatikz-ve-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.luatikz-ve-grid-line {
+  stroke: var(--background-modifier-border);
+  stroke-width: 0.5;
+}
+
+.luatikz-ve-grid-axis {
+  stroke: var(--text-faint);
+  stroke-width: 0.75;
+}
+
+.luatikz-ve-ghost {
+  stroke: var(--text-faint);
+  opacity: 0.55;
+  stroke-dasharray: 3 3;
+}
+
+/* Compiled background layer: the real diagram, drawn under the interaction
+   layers. When it is present, the approximate ghosts disappear and the
+   wireframe object layer dims to a subtle "this is editable" affordance —
+   except the object currently being dragged, which pops to full strength. */
+.luatikz-ve-layer-compiled {
+  pointer-events: none;
+}
+
+.luatikz-ve-canvas.has-underlay .luatikz-ve-layer-ghost {
+  display: none;
+}
+
+.luatikz-ve-canvas.has-underlay .luatikz-ve-object:not(.is-live) {
+  opacity: 0.3;
+}
+
+.luatikz-ve-canvas.has-underlay .luatikz-ve-object:not(.is-live) text {
+  display: none;
+}
+
+/* Brightness-boost dark style applies its filter to the compiled output in
+   the editor exactly as the preview does (invert-style output arrives from
+   the renderer already inverted). */
+.luatikz-visual-editor.luatikz-dark-brightness-boost .luatikz-ve-underlay svg,
+.luatikz-visual-editor.luatikz-dark-brightness-boost .luatikz-ve-compiled-img {
+  filter: brightness(1.28) contrast(1.06);
+}
+
+.luatikz-ve-draft-shape {
+  stroke: var(--interactive-accent);
+  opacity: 0.9;
+}
+
+.luatikz-ve-selection-box {
+  stroke: var(--interactive-accent);
+  opacity: 0.9;
+}
+
+.luatikz-ve-handle {
+  fill: var(--background-primary);
+  stroke: var(--interactive-accent);
+  cursor: grab;
+}
+
+.luatikz-ve-handle-control {
+  fill: var(--interactive-accent);
+  opacity: 0.75;
+}
+
+/* --- compiled (authoritative) preview card --------------------------------- */
+
+.luatikz-ve-compiled {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 190px;
+  max-height: 45%;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.15));
+  padding: 4px;
+  display: none;
+}
+
+.luatikz-ve-compiled.has-output,
+.luatikz-ve-compiled.is-rendering,
+.luatikz-ve-compiled.has-error {
+  display: block;
+}
+
+.luatikz-ve-compiled-img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0 auto;
+}
+
+.luatikz-ve-compiled.is-rendering::after {
+  content: 'rendering…';
+  position: absolute;
+  right: 8px;
+  top: 4px;
+  font-size: 0.65em;
+  color: var(--text-muted);
+  animation: luatikz-ve-pulse 1.2s ease-in-out infinite;
+}
+
+.luatikz-ve-compiled.has-error {
+  border-color: var(--text-error);
+}
+
+@keyframes luatikz-ve-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* --- status bar ------------------------------------------------------------ */
+
+.luatikz-ve-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-wrap: wrap;
+}
+
+.luatikz-ve-grid-step {
+  min-height: 34px;
+}
+
+.luatikz-ve-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* --- text input overlay ---------------------------------------------------- */
+
+.luatikz-ve-text-input {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.2));
+}
+
+.luatikz-ve-text-input-field {
+  min-width: 130px;
+  min-height: 34px;
+}
+
+/* --- touch and small screens ------------------------------------------------ */
+
+@media (pointer: coarse) {
+  .luatikz-ve-btn,
+  .luatikz-ve-grid-step,
+  .luatikz-preview-edit-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+@media (max-width: 760px) {
+  .tikzjax-hebrew-local-inline-preview.luatikz-edit-mode {
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .luatikz-ve-toolbar {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .luatikz-ve-toolgroup,
+  .luatikz-ve-actiongroup {
+    flex-wrap: nowrap;
+  }
+
+  /* Panels become overlay drawers so the canvas stays dominant. */
+  .luatikz-ve-props {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 25;
+    width: min(260px, 80vw);
+    box-shadow: var(--shadow-s, 0 2px 12px rgba(0, 0, 0, 0.3));
+  }
+
+  .luatikz-ve-source {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    z-index: 25;
+    width: auto;
+    height: min(45%, 280px);
+    border-left: none;
+    border-top: 1px solid var(--background-modifier-border);
+    box-shadow: var(--shadow-s, 0 -2px 12px rgba(0, 0, 0, 0.3));
+  }
+
+  .luatikz-ve-main {
+    position: relative;
+  }
+
+  .luatikz-ve-compiled {
+    width: 130px;
+    max-height: 30%;
+  }
+}

@@ -22,3 +22,13 @@ declare module '@codemirror/closebrackets' {
 	import type { Extension } from '@codemirror/state';
 	export function closeBrackets(): Extension;
 }
+
+declare module '@codemirror/commands' {
+	import type { AnnotationType } from '@codemirror/state';
+	/**
+	 * History-isolation annotation: dispatching a transaction with
+	 * `isolateHistory.of('full')` keeps it from merging with neighboring
+	 * changes into one undo step. Provided by Obsidian at runtime.
+	 */
+	export const isolateHistory: AnnotationType<'before' | 'after' | 'full'>;
+}

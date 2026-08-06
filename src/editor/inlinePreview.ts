@@ -18,6 +18,9 @@ import {
 	type TikzGeometryMap,
 } from '../latex/tikzStatementGeometry';
 import { isMobileApp } from '../utils/platform';
+import { VisualTikzEditor, type VisualEditorHost } from '../visual/visualEditor';
+import { bodyOffsetToPosition } from '../visual/sourcePatches';
+import type { FloatingPreviewMode, SourcePatch } from '../visual/sceneTypes';
 
 const RENDER_DEBOUNCE_MS = 200;
 /** Pointer slack, in screen px, for deciding what the pointer is over. */
@@ -148,6 +151,8 @@ export function resolveTikzBlock(
 
 export class InlinePreviewManager {
 	enabled = false;
+	/** 'preview' is the compact floating preview; 'edit' the expanded editor. */
+	mode: FloatingPreviewMode = 'preview';
 	private container: HTMLElement | null = null;
 	private timer: number | null = null;
 	private lastGoodDataUrl: string | null = null;
@@ -164,6 +169,8 @@ export class InlinePreviewManager {
 	private geometryMapSource: string | null = null;
 	private geometryMap: TikzGeometryMap | null = null;
 	private hoverFrame: number | null = null;
+	private visualEditor: VisualTikzEditor | null = null;
+	private editButton: HTMLElement | null = null;
 
 	constructor(
 		private readonly getActiveMarkdownView: () => MarkdownView | null,
@@ -179,6 +186,7 @@ export class InlinePreviewManager {
 	}
 
 	disable(): void {
+		this.exitEditMode({ skipRerender: true });
 		this.clearHoverHighlight();
 		this.enabled = false;
 		this.lastGoodDataUrl = null;
@@ -247,6 +255,11 @@ export class InlinePreviewManager {
 			return;
 		}
 
+		if (this.mode === 'edit') {
+			// The visual editor owns the container body; nothing to redraw here.
+			return;
+		}
+
 		const block = this.resolveBlock(view);
 		if (!block) {
 			this.hide();
@@ -286,7 +299,9 @@ export class InlinePreviewManager {
 	}
 
 	private isTransientSession(): boolean {
-		return this.previewInteractionActive || this.isOverlayOpen();
+		// Edit mode keeps the block pinned no matter where focus goes: the
+		// user is interacting with the canvas, not the Markdown cursor.
+		return this.mode === 'edit' || this.previewInteractionActive || this.isOverlayOpen();
 	}
 
 	private isOverlayOpen(): boolean {
@@ -354,9 +369,11 @@ export class InlinePreviewManager {
 
 	private hide(): void {
 		if (this.container) {
+			this.exitEditMode({ skipRerender: true });
 			this.clearHoverHighlight();
 			this.container.remove();
 			this.container = null;
+			this.editButton = null;
 			this.resizeListenersAttached = false;
 		}
 	}
@@ -485,13 +502,31 @@ export class InlinePreviewManager {
 		this.applyDefaultSize(this.container);
 		this.attachResizeHandles(this.container);
 		this.attachPreviewInteractionHandlers(this.container);
+		this.attachEditButton(this.container);
 		this.container.createDiv({ cls: 'tikzjax-hebrew-local-inline-preview-body' });
 		return this.container;
 	}
 
+	/** Unobtrusive Edit toggle shown on the compact preview. */
+	private attachEditButton(container: HTMLElement): void {
+		const button = container.createEl('button', {
+			cls: 'luatikz-preview-edit-btn',
+			text: 'Edit',
+		});
+		button.setAttr('type', 'button');
+		button.setAttr('aria-label', 'Edit diagram visually');
+		button.setAttr('title', 'Edit diagram visually');
+		button.addEventListener('click', event => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.enterEditMode();
+		});
+		this.editButton = button;
+	}
+
 	private attachPreviewInteractionHandlers(container: HTMLElement): void {
 		container.addEventListener('mousedown', (event) => {
-			if (!this.isPickSurfaceEvent(event)) {
+			if (this.mode === 'edit' || !this.isPickSurfaceEvent(event)) {
 				return;
 			}
 			this.previewInteractionActive = true;
@@ -753,6 +788,285 @@ export class InlinePreviewManager {
 		showTikzErrorHighlightFromResult(this.app, sourcePath, result);
 	}
 
+	/* ---------------------------------------------------------------------- */
+	/* edit mode                                                               */
+	/* ---------------------------------------------------------------------- */
+
+	/** Expand the floating preview into the full visual editor. */
+	enterEditMode(): void {
+		if (this.mode === 'edit' || !this.enabled) {
+			return;
+		}
+		const view = this.getViewForPreview();
+		if (!view) {
+			return;
+		}
+		const block = this.resolveBlock(view);
+		if (!block) {
+			new Notice('Place the cursor inside a tikz fence to edit it visually.');
+			return;
+		}
+
+		this.clearHoverHighlight();
+		this.mode = 'edit';
+		const container = this.ensureContainer(view);
+		const compactRect = container.getBoundingClientRect();
+		container.addClass('luatikz-edit-mode');
+		this.editButton?.addClass('luatikz-ve-hidden');
+
+		const body = this.previewBody(view);
+		body.empty();
+		body.removeClass('luatikz-pick-mode');
+
+		this.visualEditor = new VisualTikzEditor(this.buildVisualHost(), body, block.source);
+		applyDarkPresentationClass(
+			this.visualEditor.root,
+			this.getSettings().darkModeStyle,
+			this.isDarkTheme(),
+		);
+		if (this.lastGoodDataUrl && this.lastRenderSource) {
+			this.visualEditor.setCompileResult(
+				{ ok: true, dataUrl: this.lastGoodDataUrl, svgText: this.lastGoodSvgText ?? undefined },
+				false,
+			);
+		}
+		this.animateModeTransition(container, compactRect);
+		// Kick a compile so the authoritative card fills in.
+		this.scheduleUpdate(0);
+	}
+
+	/** Collapse back to the compact preview. */
+	exitEditMode(options: { skipRerender?: boolean } = {}): void {
+		if (this.mode !== 'edit') {
+			return;
+		}
+		this.mode = 'preview';
+		const fullRect = this.container?.getBoundingClientRect() ?? null;
+		this.visualEditor?.destroy();
+		this.visualEditor = null;
+		if (this.container) {
+			this.container.removeClass('luatikz-edit-mode');
+			this.editButton?.removeClass('luatikz-ve-hidden');
+			if (fullRect && !options.skipRerender) {
+				this.animateModeTransition(this.container, fullRect);
+			}
+		}
+		if (!options.skipRerender) {
+			this.lastRenderSource = null;
+			this.scheduleUpdate(0);
+		}
+	}
+
+	/**
+	 * FLIP transition between the compact preview box and the expanded
+	 * editor: the container visually grows out of (or shrinks back into) the
+	 * floating preview, making it read as the same window changing size.
+	 * Skipped when the platform lacks the Web Animations API or the user
+	 * prefers reduced motion.
+	 */
+	private animateModeTransition(container: HTMLElement, fromRect: DOMRect): void {
+		const win = container.ownerDocument.defaultView;
+		if (!win || typeof container.animate !== 'function') {
+			return;
+		}
+		if (win.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+			return;
+		}
+		const toRect = container.getBoundingClientRect();
+		if (!toRect.width || !toRect.height || !fromRect.width || !fromRect.height) {
+			return;
+		}
+		const dx = fromRect.left - toRect.left;
+		const dy = fromRect.top - toRect.top;
+		const sx = fromRect.width / toRect.width;
+		const sy = fromRect.height / toRect.height;
+		if (Math.abs(dx) < 1 && Math.abs(dy) < 1
+			&& Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) {
+			return;
+		}
+		try {
+			container.animate(
+				[
+					{
+						transformOrigin: 'top left',
+						transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
+					},
+					{ transformOrigin: 'top left', transform: 'none' },
+				],
+				{ duration: 240, easing: 'cubic-bezier(0.25, 0.1, 0.25, 1)' },
+			);
+		} catch {
+			// Older WebViews: the mode switch simply happens without motion.
+		}
+	}
+
+	/** Recompute the pinned block's end fence after our own body edits. */
+	private refreshPinnedBlockAfterEdit(editor: Editor): void {
+		if (!this.pinnedBlock) {
+			return;
+		}
+		const startLine = this.pinnedBlock.startLine;
+		if (startLine < 0 || startLine >= editor.lineCount()) {
+			return;
+		}
+		const open = editor.getLine(startLine).trim();
+		if (!open.startsWith('```tikz') && !open.startsWith('```luatikz')) {
+			return;
+		}
+		for (let line = startLine + 1; line < editor.lineCount(); line++) {
+			if (editor.getLine(line).trim() === '```') {
+				this.pinnedBlock = {
+					startLine,
+					endLine: line,
+					source: editor.getRange(
+						{ line: startLine + 1, ch: 0 },
+						{ line, ch: 0 },
+					),
+				};
+				return;
+			}
+		}
+	}
+
+	private currentEditBlock(): TikzBlock | null {
+		const view = this.getViewForPreview();
+		if (!view || !this.pinnedBlock) {
+			return null;
+		}
+		const revived = revalidateTikzBlock(view.editor, this.pinnedBlock);
+		if (revived) {
+			this.pinnedBlock = revived;
+		}
+		return revived;
+	}
+
+	private buildVisualHost(): VisualEditorHost {
+		return {
+			getBlock: () => this.currentEditBlock(),
+			applyPatches: (expectedBody, patches) => this.applyVisualPatches(expectedBody, patches),
+			requestCompile: () => this.scheduleUpdate(),
+			requestExit: () => this.exitEditMode(),
+			undo: () => {
+				const view = this.getViewForPreview();
+				if (!view) {
+					return;
+				}
+				view.editor.undo();
+				this.refreshPinnedBlockAfterEdit(view.editor);
+				const block = this.currentEditBlock();
+				if (block) {
+					this.visualEditor?.syncFromBlock(block);
+				}
+				this.scheduleUpdate();
+			},
+			redo: () => {
+				const view = this.getViewForPreview();
+				if (!view) {
+					return;
+				}
+				view.editor.redo();
+				this.refreshPinnedBlockAfterEdit(view.editor);
+				const block = this.currentEditBlock();
+				if (block) {
+					this.visualEditor?.syncFromBlock(block);
+				}
+				this.scheduleUpdate();
+			},
+		};
+	}
+
+	/**
+	 * Write visual-editor patches into the fence as one history-isolated
+	 * transaction. Refuses to write when the fence body no longer matches what
+	 * the patches were computed against.
+	 */
+	private applyVisualPatches(expectedBody: string, patches: SourcePatch[]): boolean {
+		const view = this.getViewForPreview();
+		if (!view || !this.pinnedBlock || !patches.length) {
+			return false;
+		}
+		const editor = view.editor;
+		const block = revalidateTikzBlock(editor, this.pinnedBlock);
+		if (!block || block.source !== expectedBody) {
+			return false;
+		}
+		this.pinnedBlock = block;
+
+		const sorted = [...patches].sort((a, b) => a.oldSpan.from - b.oldSpan.from);
+		const bodyBaseLine = block.startLine + 1;
+		const toPos = (offset: number): EditorPosition => {
+			const pos = bodyOffsetToPosition(expectedBody, offset);
+			return { line: bodyBaseLine + pos.line, ch: pos.ch };
+		};
+
+		const applied = this.dispatchIsolated(editor, block, sorted)
+			|| this.dispatchViaTransaction(editor, sorted, toPos);
+		if (!applied) {
+			return false;
+		}
+
+		this.refreshPinnedBlockAfterEdit(editor);
+		return true;
+	}
+
+	/** Preferred path: CodeMirror dispatch with an isolated history step. */
+	private dispatchIsolated(
+		editor: Editor,
+		block: TikzBlock,
+		patches: SourcePatch[],
+	): boolean {
+		const cm = (editor as Editor & { cm?: import('@codemirror/view').EditorView }).cm;
+		if (!cm?.state || typeof cm.dispatch !== 'function') {
+			return false;
+		}
+		try {
+			const bodyDocLine = block.startLine + 2;
+			if (bodyDocLine > cm.state.doc.lines) {
+				return false;
+			}
+			const base = cm.state.doc.line(bodyDocLine).from;
+			// Verify the doc really contains the body where we think it is.
+			const end = base + block.source.length;
+			if (end > cm.state.doc.length
+				|| cm.state.doc.sliceString(base, end) !== block.source) {
+				return false;
+			}
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const { isolateHistory } = require('@codemirror/commands') as typeof import('@codemirror/commands');
+			cm.dispatch({
+				changes: patches.map(patch => ({
+					from: base + patch.oldSpan.from,
+					to: base + patch.oldSpan.to,
+					insert: patch.replacement,
+				})),
+				annotations: isolateHistory.of('full'),
+			});
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	/** Fallback path: Obsidian's editor transaction API. */
+	private dispatchViaTransaction(
+		editor: Editor,
+		patches: SourcePatch[],
+		toPos: (offset: number) => EditorPosition,
+	): boolean {
+		try {
+			editor.transaction({
+				changes: patches.map(patch => ({
+					from: toPos(patch.oldSpan.from),
+					to: toPos(patch.oldSpan.to),
+					text: patch.replacement,
+				})),
+			});
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
 	async updateFromActiveEditor(): Promise<void> {
 		if (!this.enabled) {
 			return;
@@ -769,23 +1083,44 @@ export class InlinePreviewManager {
 
 		const block = this.resolveBlock(view);
 		if (!block) {
+			if (this.mode === 'edit') {
+				// The fence disappeared entirely (file switch, fence deleted).
+				this.exitEditMode({ skipRerender: true });
+			}
 			this.hide();
 			return;
 		}
 
+		if (this.mode === 'edit') {
+			this.visualEditor?.syncFromBlock(block);
+		}
+
 		const prepared = prepareTikzBlock(block.source);
 		if (!prepared.renderSource.trim()) {
+			if (this.mode === 'edit') {
+				this.visualEditor?.setCompileResult(null, false);
+				return;
+			}
 			this.showMessage(view, 'Nothing to render.');
 			return;
 		}
 
 		if (prepared.renderSource === this.lastRenderSource && this.lastGoodDataUrl) {
+			if (this.mode === 'edit') {
+				this.visualEditor?.setCompileResult(
+					{ ok: true, dataUrl: this.lastGoodDataUrl, svgText: this.lastGoodSvgText ?? undefined },
+					false,
+				);
+				return;
+			}
 			this.showOutput(view, prepared.diagramAlign);
 			return;
 		}
 
 		const token = ++this.renderToken;
-		if (!this.lastGoodDataUrl) {
+		if (this.mode === 'edit') {
+			this.visualEditor?.setCompileResult(null, true);
+		} else if (!this.lastGoodDataUrl) {
 			this.showMessage(view, 'Rendering…');
 		}
 
@@ -803,7 +1138,20 @@ export class InlinePreviewManager {
 			this.lastGoodDataUrl = result.dataUrl;
 			this.lastGoodSvgText = result.svgText ?? null;
 			clearTikzErrorHighlight(view.editor);
+			if (this.mode === 'edit') {
+				this.visualEditor?.setCompileResult(result, false);
+				return;
+			}
 			this.showOutput(view, prepared.diagramAlign);
+			return;
+		}
+
+		if (this.mode === 'edit') {
+			// Keep the editable scene and the last-good compiled output; surface
+			// the error text and highlight the offending source line.
+			this.visualEditor?.setCompileResult(result, false);
+			const sourcePath = view.file?.path;
+			showTikzErrorHighlightFromResult(this.app, sourcePath, result);
 			return;
 		}
 

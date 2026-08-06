@@ -140,7 +140,7 @@ function scanStatements(source: string): RawStatement[] {
 /* lengths and picture scale                                                   */
 /* -------------------------------------------------------------------------- */
 
-const UNIT_TO_CM: Record<string, number> = {
+export const UNIT_TO_CM: Record<string, number> = {
 	cm: 1,
 	mm: 0.1,
 	pt: 1 / 28.452756,
