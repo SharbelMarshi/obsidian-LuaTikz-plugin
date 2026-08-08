@@ -10,7 +10,7 @@
  * real — that mapping is where an off-by-one silently corrupts user notes.
  */
 import assert from 'node:assert/strict';
-import { loadSrcModules, OBSIDIAN_STUB } from './loadSrc.mjs';
+import { loadSrcModules, installObsidianDomHelpers, OBSIDIAN_STUB } from './loadSrc.mjs';
 
 let JSDOM;
 try {
@@ -22,6 +22,7 @@ try {
 
 const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true });
 const { window } = dom;
+installObsidianDomHelpers(window);
 
 for (const key of [
 	'window', 'document', 'HTMLElement', 'Element', 'Node', 'SVGElement', 'SVGSVGElement',

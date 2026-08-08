@@ -62,6 +62,32 @@ function escapeRe(value) {
 }
 
 /** Minimal stand-in for the parts of the obsidian runtime src/ imports as values. */
+/**
+ * Install Obsidian's DOM helper augmentations (`createEl`) on a jsdom window
+ * so production code can use them unconditionally, as it does in the app.
+ */
+export function installObsidianDomHelpers(window) {
+	const proto = window.HTMLElement.prototype;
+	if (typeof proto.createEl === 'function') {
+		return;
+	}
+	proto.createEl = function createEl(tag, options) {
+		const el = this.ownerDocument.createElement(tag);
+		if (typeof options === 'string') {
+			el.className = options;
+		} else if (options) {
+			if (options.cls) {
+				el.className = Array.isArray(options.cls) ? options.cls.join(' ') : options.cls;
+			}
+			if (options.text !== undefined) {
+				el.textContent = String(options.text);
+			}
+		}
+		this.appendChild(el);
+		return el;
+	};
+}
+
 export const OBSIDIAN_STUB = `
 import { StateField } from '@codemirror/state';
 export const editorEditorField = StateField.define({ create: () => null, update: v => v });
@@ -88,4 +114,5 @@ export class Setting {
 export const normalizePath = p => p.replace(/\\\\/g, '/').replace(/\\/{2,}/g, '/');
 export const Platform = { isMobileApp: false };
 export const debounce = (fn) => fn;
+export const requireApiVersion = () => false;
 `;

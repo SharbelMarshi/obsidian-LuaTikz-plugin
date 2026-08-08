@@ -81,33 +81,39 @@ function stringifyConsoleArgs(args: readonly unknown[]): string {
 		.join(' ');
 }
 
+type ConsoleChannel = 'log' | 'warn' | 'error';
+const CONSOLE_CHANNELS: readonly ConsoleChannel[] = ['log', 'warn', 'error'];
+
+/**
+ * Run `task` with the console channels TikZJax writes to temporarily
+ * redirected into a buffer. Nothing here logs to the console — the opposite:
+ * TikZJax's internal chatter is silenced during the run and surfaces only
+ * through the plugin's own error report when a compile fails. The original
+ * console methods are restored unconditionally afterwards.
+ */
 async function captureConsoleOutput<T>(
 	task: () => Promise<T>,
 ): Promise<{ result: T; logs: string }> {
 	const captured: string[] = [];
-	const originalLog = console.log.bind(console) as ConsoleWriteFn;
-	const originalWarn = console.warn.bind(console) as ConsoleWriteFn;
-	const originalError = console.error.bind(console) as ConsoleWriteFn;
-
-	// Capture only — TikZJax's internal chatter is not re-emitted to the
-	// console; it surfaces through the plugin's own error report instead.
-	console.log = (...args: unknown[]): void => {
-		captured.push(stringifyConsoleArgs(args));
-	};
-	console.warn = (...args: unknown[]): void => {
-		captured.push(stringifyConsoleArgs(args));
-	};
-	console.error = (...args: unknown[]): void => {
-		captured.push(stringifyConsoleArgs(args));
-	};
+	const channels = console as unknown as Record<ConsoleChannel, ConsoleWriteFn>;
+	const originals: Partial<Record<ConsoleChannel, ConsoleWriteFn>> = {};
+	for (const channel of CONSOLE_CHANNELS) {
+		originals[channel] = channels[channel];
+		channels[channel] = (...args: unknown[]): void => {
+			captured.push(stringifyConsoleArgs(args));
+		};
+	}
 
 	try {
 		const result = await task();
 		return { result, logs: captured.join('\n') };
 	} finally {
-		console.log = originalLog;
-		console.warn = originalWarn;
-		console.error = originalError;
+		for (const channel of CONSOLE_CHANNELS) {
+			const original = originals[channel];
+			if (original) {
+				channels[channel] = original;
+			}
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import {
 	PluginSettingTab,
 	Setting,
 	debounce,
+	requireApiVersion,
 	type SettingDefinitionItem,
 	type TextAreaComponent,
 } from 'obsidian';
@@ -267,7 +268,7 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 								latexWrapperOptionsFromSettings(this.plugin.settings),
 							);
 							void this.persistSetting('customPreamble', preamble).then(() => {
-								this.update();
+								this.refreshDeclarativeTab();
 								new Notice('Loaded the generated preamble — it is yours to edit now.');
 							});
 						},
@@ -277,7 +278,7 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 						desc: 'Clear Custom preamble and return to the managed preamble.',
 						action: () => {
 							void this.persistSetting('customPreamble', '').then(() => {
-								this.update();
+								this.refreshDeclarativeTab();
 								new Notice('Using the managed preamble.');
 							});
 						},
@@ -381,6 +382,18 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 			return;
 		}
 		void this.applyControlChange(key, value);
+	}
+
+	/**
+	 * Re-render the declarative tab after a programmatic value change. Only
+	 * ever reached from actions the 1.13+ declarative renderer created, but
+	 * guarded so the 1.13-only `update()` API is never touched on older
+	 * Obsidian versions.
+	 */
+	private refreshDeclarativeTab(): void {
+		if (requireApiVersion('1.13.0')) {
+			(this as { update?: () => void }).update?.();
+		}
 	}
 
 	private async applyControlChange(key: string, value: unknown): Promise<void> {

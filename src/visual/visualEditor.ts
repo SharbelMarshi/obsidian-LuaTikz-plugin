@@ -427,22 +427,12 @@ export class VisualTikzEditor {
 		cls?: string,
 		parent?: HTMLElement,
 	): HTMLElementTagNameMap[K] {
-		// Obsidian's createEl helper when available (it always is inside the
-		// app); plain DOM otherwise (jsdom in tests).
+		// Obsidian's createEl helper — always present in the app; the test
+		// harness installs the same augmentation on jsdom.
 		const host = parent ?? this.doc.body;
-		if (typeof host.createEl === 'function') {
-			const node = host.createEl(tag, cls ? { cls } : undefined);
-			if (!parent) {
-				node.remove();
-			}
-			return node;
-		}
-		const node = this.doc.createElement(tag);
-		if (cls) {
-			node.className = cls;
-		}
-		if (parent) {
-			parent.appendChild(node);
+		const node = host.createEl(tag, cls ? { cls } : undefined);
+		if (!parent) {
+			node.remove();
 		}
 		return node;
 	}

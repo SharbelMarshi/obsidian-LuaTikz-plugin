@@ -4,7 +4,7 @@ Fast LuaLaTeX TikZ rendering with full library support, live preview, a visual t
 
 Render `tikz` and `luatikz` fenced code blocks in Obsidian. Desktop can use local LuaLaTeX or TikZJax; mobile uses TikZJax.
 
-Enable **LuaTikZ** under Settings → Community plugins. The release ships as `main.js`, `manifest.json`, and `styles.css`. TikZJax is bundled into `main.js` (~7 MB).
+Enable **LuaTikZ** under Settings → Community plugins. The release ships as `main.js`, `manifest.json`, and `styles.css`. 
 
 ![Floating live preview](<floating preview feature.png>)
 

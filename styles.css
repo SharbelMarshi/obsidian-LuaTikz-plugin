@@ -816,8 +816,10 @@
   display: flex;
 }
 
-.luatikz-ve-hidden {
-  display: none !important;
+/* Doubled class outranks every single-class display rule (panels, drawers,
+   the shape menu) purely by specificity. */
+.luatikz-ve-hidden.luatikz-ve-hidden {
+  display: none;
 }
 
 /* --- editor frame --------------------------------------------------------- */
@@ -1204,18 +1206,18 @@ button.luatikz-ve-swatch:disabled,
 /* The textarea must stay glass in every state: themes give textarea:hover /
    :focus an opaque form-field background, which would cover the color mirror
    and make the code seem to vanish the moment the pointer enters the panel. */
-.luatikz-ve-source-text,
-.luatikz-ve-source-text:hover,
-.luatikz-ve-source-text:focus,
-.luatikz-ve-source-text:focus-visible,
-.luatikz-ve-source-text:active {
+.luatikz-visual-editor .luatikz-ve-source-editor textarea.luatikz-ve-source-text,
+.luatikz-visual-editor .luatikz-ve-source-editor textarea.luatikz-ve-source-text:hover,
+.luatikz-visual-editor .luatikz-ve-source-editor textarea.luatikz-ve-source-text:focus,
+.luatikz-visual-editor .luatikz-ve-source-editor textarea.luatikz-ve-source-text:focus-visible,
+.luatikz-visual-editor .luatikz-ve-source-editor textarea.luatikz-ve-source-text:active {
   overflow: auto;
-  background: transparent !important;
-  color: transparent !important;
+  background: transparent;
+  color: transparent;
   -webkit-text-fill-color: transparent;
   caret-color: var(--text-normal);
-  box-shadow: none !important;
-  border: none !important;
+  box-shadow: none;
+  border: none;
   outline: none;
 }
 
