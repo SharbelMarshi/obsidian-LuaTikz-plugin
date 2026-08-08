@@ -1,3 +1,4 @@
+import { TIKZ_COLOR_NAMES } from './tikzColors';
 import type { DashStyle, ObjectStyle } from './sceneTypes';
 
 /**
@@ -58,12 +59,8 @@ const DASH_TOKENS = new Set([
 	'dashed', 'dotted', 'densely dashed', 'densely dotted', 'loosely dashed',
 	'loosely dotted', 'solid',
 ]);
-/** Colors TikZ understands without any library. */
-export const TIKZ_COLOR_NAMES = [
-	'black', 'white', 'red', 'green', 'blue', 'cyan', 'magenta', 'yellow',
-	'orange', 'purple', 'brown', 'gray', 'darkgray', 'lightgray', 'pink',
-	'lime', 'olive', 'teal', 'violet',
-] as const;
+
+export { TIKZ_COLOR_NAMES } from './tikzColors';
 
 const COLOR_NAME_SET = new Set<string>(TIKZ_COLOR_NAMES);
 
@@ -232,7 +229,12 @@ function editTokens(edit: StyleEdit): Array<{ cls: TokenClass; token: string | n
 		out.push({ cls: 'dash', token: edit.dash && edit.dash !== 'solid' ? edit.dash : null });
 	}
 	if (edit.strokeColor !== undefined) {
-		out.push({ cls: 'stroke', token: edit.strokeColor ? edit.strokeColor : null });
+		// Named colors and mixes work as bare tokens; anything else (inline
+		// xcolor RGB expressions) must be written as `draw=…` to stay valid.
+		const stroke = edit.strokeColor
+			? (edit.strokeColor.startsWith('{') ? `draw=${edit.strokeColor}` : edit.strokeColor)
+			: null;
+		out.push({ cls: 'stroke', token: stroke });
 	}
 	if (edit.fillColor !== undefined) {
 		out.push({ cls: 'fill', token: edit.fillColor ? `fill=${edit.fillColor}` : null });

@@ -9,8 +9,11 @@ import {
 import type { TikzBlock, RenderImageResult } from '../core/types';
 import { parseTikzScene, insertionPicture } from './tikzSceneParser';
 import {
+	containmentHit,
+	hitTestCandidates,
 	hitTestHandles,
 	hitTestScene,
+	pointInsideGeometry,
 	resolveLockedGhosts,
 	resolveObjectGeometry,
 	resolveSceneGeometry,
@@ -58,9 +61,12 @@ import {
 	type FreehandDraft,
 } from './freehand';
 import {
+	buildOptionsPrefix,
 	coordinateTokenPatch,
 	deleteObjectPatches,
 	duplicateObjectPatches,
+	formatPoint,
+	numberTokenPatch,
 	generateArc,
 	generateCircle,
 	generateCurvePath,
@@ -82,11 +88,31 @@ import {
 } from './tikzWriter';
 import { catmullRomToBezier } from './freehand';
 import { parseOptionStyle, type StyleEdit } from './tikzOptions';
+import {
+	hexToTikzColor,
+	rgbToHex,
+	tikzColorToRgb,
+	TIKZ_COLOR_NAMES,
+	XCOLOR_RGB,
+} from './tikzColors';
+import {
+	applyLinear,
+	applyToPoint,
+	colXScale,
+	colYScale,
+	invertTransform,
+	rotationDeg,
+	uniformScale,
+} from './pictureTransform';
+import { recognizeStroke, type RecognizedShape } from './shapeRecognition';
+import { compileFunction, sampleFunctionRuns } from './functionPlot';
 import type {
 	EditorToolId,
 	ObjectStyle,
+	PictureTransform,
 	SceneNodeObject,
 	SceneObject,
+	ScenePathObject,
 	SourcePatch,
 	TikzScene,
 } from './sceneTypes';
@@ -134,18 +160,25 @@ const TOOL_BUTTONS: ToolButtonSpec[] = [
 	{ tool: 'path', label: 'Path', icon: 'path', key: 'P' },
 	{ tool: 'bezier', label: 'Bézier', icon: 'bezier', key: 'B' },
 	{ tool: 'freehand', label: 'Freehand', icon: 'freehand', key: 'F' },
+	{ tool: 'text', label: 'Text node', icon: 'text', key: 'T' },
+	{ tool: 'math', label: 'Math node', icon: 'math' },
+	{ tool: 'plot', label: 'Function plot', icon: 'plot' },
+];
+
+/** Shape tools grouped behind the single Shapes menu button. */
+const SHAPE_TOOL_BUTTONS: ToolButtonSpec[] = [
 	{ tool: 'rect', label: 'Rectangle', icon: 'rect', key: 'R' },
 	{ tool: 'rounded-rect', label: 'Rounded rectangle', icon: 'rounded-rect' },
+	{ tool: 'triangle', label: 'Triangle', icon: 'triangle' },
 	{ tool: 'circle', label: 'Circle', icon: 'circle', key: 'C' },
 	{ tool: 'ellipse', label: 'Ellipse', icon: 'ellipse', key: 'E' },
 	{ tool: 'arc', label: 'Arc', icon: 'arc' },
-	{ tool: 'grid-path', label: 'Grid path', icon: 'grid-path' },
 	{ tool: 'diamond', label: 'Diamond', icon: 'diamond' },
 	{ tool: 'polygon', label: 'Polygon', icon: 'polygon' },
 	{ tool: 'star', label: 'Star', icon: 'star' },
-	{ tool: 'text', label: 'Text node', icon: 'text', key: 'T' },
-	{ tool: 'math', label: 'Math node', icon: 'math' },
+	{ tool: 'grid-path', label: 'Grid path', icon: 'grid-path' },
 ];
+
 
 const KEY_TO_TOOL: Record<string, EditorToolId> = {
 	v: 'select', h: 'pan', l: 'line', a: 'arrow', p: 'path', b: 'bezier',
@@ -153,12 +186,12 @@ const KEY_TO_TOOL: Record<string, EditorToolId> = {
 };
 
 type DragShapeTool =
-	| 'line' | 'arrow' | 'rect' | 'rounded-rect' | 'circle' | 'ellipse'
-	| 'arc' | 'grid-path' | 'diamond' | 'polygon' | 'star';
+	| 'line' | 'arrow' | 'rect' | 'rounded-rect' | 'triangle' | 'circle'
+	| 'ellipse' | 'arc' | 'grid-path' | 'diamond' | 'polygon' | 'star';
 
 type ActiveGesture =
 	| { kind: 'shape'; tool: DragShapeTool; start: TikzCoordinate; current: TikzCoordinate; shift: boolean }
-	| { kind: 'freehand'; draft: FreehandDraft }
+	| { kind: 'freehand'; draft: FreehandDraft; recognized: RecognizedShape | null }
 	| { kind: 'pen-click' }
 	| {
 		kind: 'move';
@@ -166,6 +199,13 @@ type ActiveGesture =
 		delta: { dx: number; dy: number };
 		objectIds: string[];
 		moved: boolean;
+		/** Every object under the pointer at drag start, best match first. */
+		candidates: string[];
+		/** The candidate that was (or became) selected on pointer-down. */
+		hitId: string | null;
+		/** True when the hit was already the sole selection — a repeated tap
+		 * then cycles to the next candidate underneath. */
+		wasSelected: boolean;
 	}
 	| {
 		kind: 'handle';
@@ -175,17 +215,101 @@ type ActiveGesture =
 		shift: boolean;
 	}
 	| {
+		kind: 'rotate';
+		pivot: TikzCoordinate;
+		/** Pointer angle at drag start, radians. */
+		startAngle: number;
+		/** Accumulated rotation, degrees CCW. */
+		angleDeg: number;
+	}
+	| {
 		kind: 'marquee';
 		start: TikzCoordinate;
 		current: TikzCoordinate;
 		additive: boolean;
-		/** Locked object under the pointer at drag start; selected on a tap. */
-		lockedCandidate: string | null;
+		/**
+		 * Object under the pointer at drag start (a locked ghost, or a shape
+		 * whose hollow interior was grabbed); selected on a tap without drag.
+		 */
+		tapCandidate: string | null;
 	}
 	| null;
 
 const CLICK_DRAG_THRESHOLD_CM = 0.06;
 const GRID_STEPS = [0.1, 0.25, 0.5, 1, 2];
+
+/** Hold the pointer still this long at the end of a freehand stroke to snap
+ * the stroke into the recognized shape. */
+export const FREEHAND_HOLD_MS = 600;
+
+/** Hebrew runs (letters plus internal spaces), including presentation forms. */
+const HEBREW_RUN_RE =
+	/[֐-׿יִ-ﭏ](?:[֐-׿יִ-ﭏ\s]*[֐-׿יִ-ﭏ])?/g;
+
+/**
+ * Wrap every Hebrew run in `\he{…}` so RTL text renders without the user
+ * knowing the macro. Text that already uses `\he{` is left alone — the user
+ * has taken manual control.
+ */
+export function wrapHebrewRuns(text: string): string {
+	if (text.includes('\\he{')) {
+		return text;
+	}
+	return text.replace(HEBREW_RUN_RE, run => `\\he{${run}}`);
+}
+
+/**
+ * A statement hidden by the Objects panel: every line commented out with a
+ * `%~` marker, so it survives in the source (and in git) but neither compiles
+ * nor renders. `text` is the statement with the markers stripped.
+ */
+export interface HiddenObjectEntry {
+	from: number;
+	to: number;
+	text: string;
+}
+
+const HIDDEN_LINE_RE = /^(\s*)%~(.*)$/;
+
+/** Find `%~`-marked statements; consecutive lines group until a `;`. */
+export function scanHiddenObjects(source: string): HiddenObjectEntry[] {
+	const entries: HiddenObjectEntry[] = [];
+	let current: { from: number; to: number; parts: string[] } | null = null;
+	const flush = () => {
+		if (current) {
+			entries.push({ from: current.from, to: current.to, text: current.parts.join('\n') });
+			current = null;
+		}
+	};
+	let offset = 0;
+	for (const line of source.split('\n')) {
+		const match = HIDDEN_LINE_RE.exec(line);
+		if (match) {
+			const content = match[1] + match[2];
+			if (!current) {
+				current = { from: offset, to: offset + line.length, parts: [content] };
+			} else {
+				current.to = offset + line.length;
+				current.parts.push(content);
+			}
+			if (match[2].trimEnd().endsWith(';')) {
+				flush();
+			}
+		} else {
+			flush();
+		}
+		offset += line.length + 1;
+	}
+	flush();
+	return entries;
+}
+
+/** Stroke/fill color picker: named swatches plus a free color input. */
+interface ColorControl {
+	/** Reflect a TikZ color expression (or null for default/none) in the UI. */
+	set(value: string | null | undefined): void;
+	setDisabled(disabled: boolean): void;
+}
 
 export class VisualTikzEditor {
 	readonly root: HTMLElement;
@@ -216,6 +340,8 @@ export class VisualTikzEditor {
 	private panLast: { x: number; y: number } | null = null;
 
 	private gesture: ActiveGesture = null;
+	private freehandHoldTimer: number | null = null;
+	private freehandHoldAnchor: TikzCoordinate | null = null;
 	/** Multi-click path/bezier draft, persists across clicks. */
 	private clickDraft: { tool: 'path' | 'bezier'; points: TikzCoordinate[]; hover: TikzCoordinate | null } | null = null;
 	private pendingSync: TikzBlock | null = null;
@@ -232,7 +358,13 @@ export class VisualTikzEditor {
 	private layerOverlay!: SVGGElement;
 	private canvasWrap!: HTMLElement;
 	private toolButtons = new Map<EditorToolId, HTMLButtonElement>();
+	private shapesButton!: HTMLButtonElement;
+	private shapesButtonIconName: EditorIconName = 'shapes';
+	private shapeMenu!: HTMLElement;
+	private shapeMenuItems = new Map<EditorToolId, HTMLButtonElement>();
 	private propsPanel!: HTMLElement;
+	private objectsPanel!: HTMLElement;
+	private objectsList!: HTMLElement;
 	private sourcePanel!: HTMLElement;
 	private sourceTextarea!: HTMLTextAreaElement;
 	private sourceHighlightCode!: HTMLElement;
@@ -272,6 +404,7 @@ export class VisualTikzEditor {
 		this.root = this.buildDom(container);
 		this.setTool('select');
 		this.togglePanel('props', false);
+		this.togglePanel('objects', false);
 		this.togglePanel('source', false);
 		this.router = new GestureRouter(this.buildGestureHost(), {
 			fingerDraw: () => this.fingerDraw,
@@ -353,6 +486,11 @@ export class VisualTikzEditor {
 		toolbar.setAttribute('aria-label', 'Drawing tools');
 		const toolGroup = this.el('div', 'luatikz-ve-toolgroup', toolbar);
 		for (const spec of TOOL_BUTTONS) {
+			// The Shapes menu button sits between the drawing tools and the
+			// text tools.
+			if (spec.tool === 'text') {
+				this.buildShapeMenu(toolbar, toolGroup);
+			}
 			const btn = this.button(
 				toolGroup,
 				spec.label,
@@ -374,6 +512,7 @@ export class VisualTikzEditor {
 		this.button(actionGroup, 'Duplicate', 'luatikz-ve-duplicate', () => this.duplicateSelection(), { icon: 'duplicate', title: 'Duplicate selection (Ctrl/Cmd+D)' });
 		this.button(actionGroup, 'Delete', 'luatikz-ve-delete', () => this.deleteSelection(), { icon: 'delete', title: 'Delete selection (Del)' });
 		this.button(actionGroup, 'Style', 'luatikz-ve-props-toggle', () => this.togglePanel('props'), { toggle: true, icon: 'style', title: 'Style panel' });
+		this.button(actionGroup, 'Objects', 'luatikz-ve-objects-toggle', () => this.togglePanel('objects'), { toggle: true, icon: 'objects', title: 'Objects panel' });
 		this.button(actionGroup, 'Source', 'luatikz-ve-source-toggle', () => this.togglePanel('source'), { toggle: true, icon: 'source', title: 'TikZ source panel' });
 		this.button(actionGroup, 'Done', 'luatikz-ve-done mod-cta', () => this.host.requestExit(), { title: 'Return to preview (Done)' });
 
@@ -406,6 +545,11 @@ export class VisualTikzEditor {
 		this.compiledCard.setAttribute('aria-label', 'Compiled preview');
 		this.compiledImg = this.el('img', 'luatikz-ve-compiled-img', this.compiledCard);
 		this.compiledImg.alt = 'Compiled TikZ output';
+
+		this.objectsPanel = this.el('div', 'luatikz-ve-objects', main);
+		this.objectsPanel.setAttribute('aria-label', 'Objects in the diagram');
+		this.el('div', 'luatikz-ve-objects-title', this.objectsPanel).textContent = 'Objects';
+		this.objectsList = this.el('div', 'luatikz-ve-objects-list', this.objectsPanel);
 
 		this.sourcePanel = this.el('div', 'luatikz-ve-source', main);
 		this.sourcePanel.setAttribute('aria-label', 'TikZ source');
@@ -494,9 +638,64 @@ export class VisualTikzEditor {
 		return root;
 	}
 
+	/** One toolbar button for every shape tool, expanding into a menu. */
+	private buildShapeMenu(toolbar: HTMLElement, toolGroup: HTMLElement): void {
+		this.shapesButton = this.button(
+			toolGroup,
+			'Shapes',
+			'luatikz-ve-tool-btn luatikz-ve-shapes-btn',
+			() => this.toggleShapeMenu(),
+			{ toggle: true, icon: 'shapes', title: 'Shapes' },
+		);
+		this.shapesButton.setAttribute('aria-haspopup', 'menu');
+		this.shapesButton.setAttribute('aria-expanded', 'false');
+
+		this.shapeMenu = this.el('div', 'luatikz-ve-shape-menu luatikz-ve-hidden', toolbar);
+		this.shapeMenu.setAttribute('role', 'menu');
+		this.shapeMenu.setAttribute('aria-label', 'Shape tools');
+		for (const spec of SHAPE_TOOL_BUTTONS) {
+			const item = this.el('button', 'luatikz-ve-shape-item', this.shapeMenu);
+			item.type = 'button';
+			item.setAttribute('role', 'menuitemradio');
+			item.setAttribute('aria-checked', 'false');
+			const icon = iconEl(this.doc, spec.icon);
+			if (icon) {
+				item.appendChild(icon);
+			}
+			this.el('span', 'luatikz-ve-shape-item-label', item).textContent = spec.label;
+			item.title = spec.key ? `${spec.label} (${spec.key})` : spec.label;
+			item.dataset.tool = spec.tool;
+			item.addEventListener('click', () => this.setTool(spec.tool), { signal: this.ac.signal });
+			this.shapeMenuItems.set(spec.tool, item);
+		}
+
+		// Any pointer press outside the menu and its button dismisses it.
+		this.doc.addEventListener('pointerdown', event => {
+			if (this.shapeMenuOpen
+				&& event.target instanceof this.doc.defaultView!.Node
+				&& !this.shapeMenu.contains(event.target)
+				&& !this.shapesButton.contains(event.target)) {
+				this.toggleShapeMenu(false);
+			}
+		}, { signal: this.ac.signal, capture: true });
+	}
+
+	get shapeMenuOpen(): boolean {
+		return !this.shapeMenu.classList.contains('luatikz-ve-hidden');
+	}
+
+	toggleShapeMenu(force?: boolean): void {
+		const open = force ?? !this.shapeMenuOpen;
+		this.shapeMenu.classList.toggle('luatikz-ve-hidden', !open);
+		this.shapesButton.setAttribute('aria-expanded', String(open));
+		if (open) {
+			this.shapeMenu.style.left = `${this.shapesButton.offsetLeft}px`;
+		}
+	}
+
 	private propsControls: {
-		stroke?: HTMLSelectElement;
-		fill?: HTMLSelectElement;
+		stroke?: ColorControl;
+		fill?: ColorControl;
 		width?: HTMLSelectElement;
 		dash?: HTMLSelectElement;
 		arrows?: HTMLSelectElement;
@@ -506,6 +705,8 @@ export class VisualTikzEditor {
 		sides?: HTMLInputElement;
 		smoothing?: HTMLInputElement;
 	} = {};
+
+	private propsScopeEl: HTMLElement | null = null;
 
 	private propsSelect(
 		parent: HTMLElement,
@@ -525,19 +726,107 @@ export class VisualTikzEditor {
 		return select;
 	}
 
+	/**
+	 * A color row: a clear swatch (default/none), every base TikZ color as a
+	 * clickable swatch, and a free `<input type=color>` that writes an inline
+	 * xcolor RGB expression for colors outside the named set.
+	 */
+	private propsColorRow(
+		parent: HTMLElement,
+		label: string,
+		clearLabel: string,
+		onChange: (value: string | null) => void,
+	): ColorControl {
+		const row = this.el('div', 'luatikz-ve-props-row luatikz-ve-props-colorrow', parent);
+		this.el('span', 'luatikz-ve-props-label', row).textContent = label;
+		const grid = this.el('div', 'luatikz-ve-swatches', row);
+		const swatches = new Map<string, HTMLButtonElement>();
+
+		const clearBtn = this.el('button', 'luatikz-ve-swatch luatikz-ve-swatch-clear', grid);
+		clearBtn.type = 'button';
+		clearBtn.title = clearLabel;
+		clearBtn.setAttribute('aria-label', `${label}: ${clearLabel}`);
+
+		const custom = this.el('input', 'luatikz-ve-swatch-custom', grid);
+		custom.type = 'color';
+		custom.title = 'Custom color';
+		custom.setAttribute('aria-label', `${label}: custom color`);
+
+		const setActive = (active: string | null) => {
+			clearBtn.classList.toggle('is-active', active === null);
+			for (const [name, btn] of swatches) {
+				btn.classList.toggle('is-active', active === name);
+			}
+			custom.classList.toggle('is-active', active === '__custom__');
+		};
+
+		clearBtn.addEventListener('click', () => {
+			setActive(null);
+			onChange(null);
+		}, { signal: this.ac.signal });
+
+		for (const name of TIKZ_COLOR_NAMES) {
+			const btn = this.el('button', 'luatikz-ve-swatch', grid);
+			btn.type = 'button';
+			btn.title = name;
+			btn.dataset.color = name;
+			btn.setAttribute('aria-label', `${label}: ${name}`);
+			const rgb = XCOLOR_RGB[name];
+			btn.style.setProperty('--luatikz-swatch', rgbToHex(rgb));
+			btn.addEventListener('click', () => {
+				setActive(name);
+				onChange(name);
+			}, { signal: this.ac.signal });
+			swatches.set(name, btn);
+			grid.appendChild(btn);
+		}
+		// Keep the custom input as the last cell of the grid.
+		grid.appendChild(custom);
+		custom.addEventListener('change', () => {
+			const color = hexToTikzColor(custom.value);
+			if (color) {
+				setActive(swatches.has(color) ? color : '__custom__');
+				onChange(color);
+			}
+		}, { signal: this.ac.signal });
+
+		return {
+			set: value => {
+				if (!value) {
+					setActive(null);
+					return;
+				}
+				if (swatches.has(value)) {
+					setActive(value);
+					return;
+				}
+				const rgb = tikzColorToRgb(value);
+				if (rgb) {
+					custom.value = rgbToHex(rgb);
+					setActive('__custom__');
+				} else {
+					setActive(null);
+				}
+			},
+			setDisabled: disabled => {
+				clearBtn.disabled = disabled;
+				custom.disabled = disabled;
+				for (const btn of swatches.values()) {
+					btn.disabled = disabled;
+				}
+			},
+		};
+	}
+
 	private buildPropsPanel(): void {
 		const panel = this.propsPanel;
 		this.el('div', 'luatikz-ve-props-title', panel).textContent = 'Style';
+		this.propsScopeEl = this.el('div', 'luatikz-ve-props-scope', panel);
 
-		const colorValues: Array<[string, string]> = [
-			['', 'Default'], ['black', 'Black'], ['red', 'Red'], ['blue', 'Blue'],
-			['green', 'Green'], ['orange', 'Orange'], ['purple', 'Purple'],
-			['teal', 'Teal'], ['gray', 'Gray'], ['brown', 'Brown'],
-		];
-		this.propsControls.stroke = this.propsSelect(panel, 'Stroke', colorValues,
-			value => this.applyStyle({ strokeColor: value || null }));
-		this.propsControls.fill = this.propsSelect(panel, 'Fill', [['', 'None'], ...colorValues.slice(1)],
-			value => this.applyStyle({ fillColor: value || null }));
+		this.propsControls.stroke = this.propsColorRow(panel, 'Stroke', 'Default',
+			value => this.applyStyle({ strokeColor: value }));
+		this.propsControls.fill = this.propsColorRow(panel, 'Fill', 'None',
+			value => this.applyStyle({ fillColor: value }));
 		this.propsControls.width = this.propsSelect(panel, 'Width', [
 			['default', 'Default'], ['thin', 'Thin'], ['thick', 'Thick'], ['very thick', 'Very thick'],
 		], value => this.applyStyle({ lineWidth: value as ObjectStyle['lineWidth'] }));
@@ -620,6 +909,7 @@ export class VisualTikzEditor {
 		}
 		this.destroyed = true;
 		this.router.cancelActive();
+		this.clearFreehandHold();
 		this.closeTextInput(false);
 		if (this.rafHandle !== null) {
 			const win = this.doc.defaultView;
@@ -703,6 +993,7 @@ export class VisualTikzEditor {
 		this.renderSourceHighlight();
 		this.renderDiagnostics();
 		this.updatePropsFromSelection();
+		this.refreshObjectsPanel();
 	}
 
 	/** Compiled result from the authoritative pipeline (or an error). */
@@ -735,8 +1026,13 @@ export class VisualTikzEditor {
 		const firstUnderlay = this.underlayText === null;
 		const built = buildCompiledUnderlay(this.doc, svgText);
 		this.layerCompiled.textContent = '';
-		if (!built) {
-			this.underlayText = null;
+		if (!built || !built.bbox) {
+			// Output without the calibration bbox (TikZJax on mobile) cannot
+			// be aligned to the canvas coordinate system — a 1:1 embed lands
+			// at arbitrary DVI coordinates and reads as a duplicate of every
+			// object beside the wireframe. Skip the underlay entirely; the
+			// compiled card still shows the real render.
+			this.underlayText = built ? svgText : null;
 			this.underlayBoundsCm = null;
 			this.svg.classList.remove('has-underlay');
 			return;
@@ -938,8 +1234,43 @@ export class VisualTikzEditor {
 		const handles = this.tool === 'select'
 			? selected.flatMap(geometry => geometry.handles)
 			: [];
-		renderSelectionOverlay(context, this.layerOverlay, selected, handles);
+		renderSelectionOverlay(
+			context, this.layerOverlay, selected, handles,
+			this.rotateHandleInfo()?.grip ?? null,
+		);
 		this.renderDraft(context);
+	}
+
+	/**
+	 * Rotation grip above the selection: position plus the pivot (selection
+	 * center). Null when the Select tool is inactive or nothing rotatable is
+	 * selected.
+	 */
+	private rotateHandleInfo(): { grip: TikzCoordinate; pivot: TikzCoordinate } | null {
+		if (this.tool !== 'select') {
+			return null;
+		}
+		const selected = this.selectedGeometries()
+			.filter(geometry => geometry.object.type !== 'locked' && geometry.bounds);
+		if (!selected.length) {
+			return null;
+		}
+		let minX = Number.POSITIVE_INFINITY;
+		let minY = Number.POSITIVE_INFINITY;
+		let maxX = Number.NEGATIVE_INFINITY;
+		let maxY = Number.NEGATIVE_INFINITY;
+		for (const geometry of selected) {
+			const bounds = geometry.bounds!;
+			minX = Math.min(minX, bounds.minX);
+			minY = Math.min(minY, bounds.minY);
+			maxX = Math.max(maxX, bounds.maxX);
+			maxY = Math.max(maxY, bounds.maxY);
+		}
+		const pivot = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+		return {
+			pivot,
+			grip: { x: pivot.x, y: maxY + this.pxToCm(26) },
+		};
 	}
 
 	private draftPrimitives(): ScenePrimitive[] {
@@ -968,6 +1299,9 @@ export class VisualTikzEditor {
 			return primitives;
 		}
 		if (gesture.kind === 'freehand') {
+			if (gesture.recognized) {
+				return this.recognizedPrimitives(gesture.recognized);
+			}
 			for (const segment of freehandPreviewSegments(
 				gesture.draft, this.freehandSmoothingPx, this.pxToCm(1),
 			)) {
@@ -1021,13 +1355,16 @@ export class VisualTikzEditor {
 					}
 					break;
 				}
+				case 'triangle':
 				case 'polygon':
 				case 'star': {
 					const radius = Math.hypot(current.x - start.x, current.y - start.y);
 					if (radius > 1e-3) {
-						const points = tool === 'polygon'
-							? polygonPoints(start, radius, this.polygonSides)
-							: starPoints(start, radius, 0.5, this.starSpikes);
+						const points = tool === 'triangle'
+							? polygonPoints(start, radius, 3)
+							: tool === 'polygon'
+								? polygonPoints(start, radius, this.polygonSides)
+								: starPoints(start, radius, 0.5, this.starSpikes);
 						for (let index = 0; index < points.length; index++) {
 							primitives.push({
 								kind: 'segment',
@@ -1103,6 +1440,25 @@ export class VisualTikzEditor {
 			btn.classList.toggle('is-active', active);
 			btn.setAttribute('aria-pressed', String(active));
 		}
+		const shapeSpec = SHAPE_TOOL_BUTTONS.find(spec => spec.tool === tool);
+		this.shapesButton.classList.toggle('is-active', !!shapeSpec);
+		this.shapesButton.setAttribute('aria-pressed', String(!!shapeSpec));
+		// The Shapes button adopts the active shape's icon.
+		const iconName: EditorIconName = shapeSpec ? shapeSpec.icon : 'shapes';
+		if (iconName !== this.shapesButtonIconName) {
+			this.shapesButtonIconName = iconName;
+			this.shapesButton.querySelector('svg')?.remove();
+			const icon = iconEl(this.doc, iconName);
+			if (icon) {
+				this.shapesButton.insertBefore(icon, this.shapesButton.firstChild);
+			}
+		}
+		for (const [id, item] of this.shapeMenuItems) {
+			const active = id === tool;
+			item.classList.toggle('is-active', active);
+			item.setAttribute('aria-checked', String(active));
+		}
+		this.toggleShapeMenu(false);
 		this.svg.classList.toggle('is-pan-tool', tool === 'pan');
 		this.dirtyOverlay = true;
 		this.requestRender();
@@ -1118,30 +1474,42 @@ export class VisualTikzEditor {
 		this.dirtyOverlay = true;
 		this.updatePropsFromSelection();
 		this.renderSourceHighlight();
+		this.refreshObjectsPanel();
 		this.requestRender();
 	}
 
 	private updatePropsFromSelection(): void {
-		const selected = this.selectedGeometries();
-		const first = selected[0]?.object;
 		const controls = this.propsControls;
-		if (!first || first.type === 'locked') {
-			if (controls.nodeText) {
-				controls.nodeText.value = '';
+		const selected = this.selectedGeometries();
+		const editable = selected.filter(geometry => geometry.object.type !== 'locked');
+		const lockedOnly = selected.length > 0 && editable.length === 0;
+
+		if (this.propsScopeEl) {
+			this.propsScopeEl.textContent = selected.length === 0
+				? 'No selection — sets the style for new objects.'
+				: lockedOnly
+					? 'Source-only statement — style it in the Source panel.'
+					: `Editing ${editable.length} selected object${editable.length === 1 ? '' : 's'}.`;
+		}
+		controls.stroke?.setDisabled(lockedOnly);
+		controls.fill?.setDisabled(lockedOnly);
+		for (const control of [
+			controls.width, controls.dash, controls.arrows,
+			controls.opacity, controls.rounded, controls.nodeText,
+		]) {
+			if (control) {
+				control.disabled = lockedOnly;
 			}
-			return;
 		}
-		const style = parseOptionStyle(first.options);
-		if (controls.stroke) {
-			controls.stroke.value = style.strokeColor && [...controls.stroke.options].some(o => o.value === style.strokeColor)
-				? style.strokeColor
-				: '';
-		}
-		if (controls.fill) {
-			controls.fill.value = style.fillColor && [...controls.fill.options].some(o => o.value === style.fillColor)
-				? style.fillColor
-				: '';
-		}
+
+		const first = editable[0]?.object;
+		// With a selection the panel mirrors its first editable object; with
+		// none it mirrors the defaults that edits would change.
+		const style = first && first.type !== 'locked'
+			? parseOptionStyle(first.options)
+			: selected.length ? {} : { ...this.styleDefaults };
+		controls.stroke?.set(style.strokeColor ?? null);
+		controls.fill?.set(style.fillColor ?? null);
 		if (controls.width) {
 			controls.width.value = style.lineWidth ?? 'default';
 		}
@@ -1158,7 +1526,7 @@ export class VisualTikzEditor {
 			controls.rounded.checked = !!style.roundedCorners;
 		}
 		if (controls.nodeText) {
-			controls.nodeText.value = first.type === 'node' ? first.text : '';
+			controls.nodeText.value = first && first.type === 'node' ? first.text : '';
 		}
 	}
 
@@ -1209,14 +1577,11 @@ export class VisualTikzEditor {
 	}
 
 	deleteSelection(): void {
-		// Locked statements are never deleted — the editor must not destroy
-		// source it cannot rebuild.
-		const selected = this.selectedGeometries()
-			.filter(geometry => geometry.object.type !== 'locked');
+		// Every selected object can be deleted — including source-only ones:
+		// deletion is span-based, needs no understanding of the statement, and
+		// is one normal undo step.
+		const selected = this.selectedGeometries();
 		if (!selected.length) {
-			if (this.selection.size) {
-				this.announce('Locked objects are source-only; edit them in the source panel.');
-			}
 			return;
 		}
 		const patches = selected.flatMap(geometry =>
@@ -1315,7 +1680,10 @@ export class VisualTikzEditor {
 		if (!object.textSpan) {
 			return;
 		}
-		this.commitPatches([{ oldSpan: object.textSpan, replacement: text }]);
+		// Math bodies keep their $…$ untouched; plain text gets Hebrew runs
+		// wrapped in \he{} automatically.
+		const replacement = text.includes('$') ? text : wrapHebrewRuns(text);
+		this.commitPatches([{ oldSpan: object.textSpan, replacement }]);
 	}
 
 	/* ---------------------------------------------------------------------- */
@@ -1436,7 +1804,7 @@ export class VisualTikzEditor {
 			this.selectStart(pointer, point);
 			return;
 		}
-		if (this.tool === 'text' || this.tool === 'math') {
+		if (this.tool === 'text' || this.tool === 'math' || this.tool === 'plot') {
 			this.gesture = { kind: 'pen-click' };
 			return;
 		}
@@ -1448,7 +1816,9 @@ export class VisualTikzEditor {
 			this.gesture = {
 				kind: 'freehand',
 				draft: createFreehandDraft(point, this.pxToCm(1), pointer.pressure ?? 0.5),
+				recognized: null,
 			};
+			this.armFreehandHold(point);
 			this.dirtyOverlay = true;
 			this.requestRender();
 			return;
@@ -1467,6 +1837,17 @@ export class VisualTikzEditor {
 
 	private selectStart(pointer: PointerLike, point: TikzCoordinate): void {
 		const tolerance = this.hitToleranceCm(pointer.pointerType);
+		const rotateInfo = this.rotateHandleInfo();
+		if (rotateInfo && Math.hypot(point.x - rotateInfo.grip.x, point.y - rotateInfo.grip.y)
+			< Math.max(tolerance, this.pxToCm(12))) {
+			this.gesture = {
+				kind: 'rotate',
+				pivot: rotateInfo.pivot,
+				startAngle: Math.atan2(point.y - rotateInfo.pivot.y, point.x - rotateInfo.pivot.x),
+				angleDeg: 0,
+			};
+			return;
+		}
 		const selectedHandles = this.selectedGeometries().flatMap(geometry => geometry.handles);
 		const handle = hitTestHandles(selectedHandles, point, Math.max(tolerance, this.pxToCm(10)));
 		if (handle) {
@@ -1482,10 +1863,14 @@ export class VisualTikzEditor {
 		}
 
 		// Editable objects win over locked ghosts occupying the same spot.
-		const hit = hitTestScene(this.geometries, point, tolerance)
+		const candidateSet = hitTestCandidates(this.geometries, point, tolerance);
+		const cycleIds = [...candidateSet.stroke, ...candidateSet.contained]
+			.map(geometry => geometry.object.id);
+		const hit = candidateSet.stroke[0]
 			?? hitTestScene(this.geometries, point, tolerance, { includeLocked: true });
 		if (hit && hit.object.type !== 'locked') {
 			const id = hit.object.id;
+			const wasSelected = !pointer.shiftKey && this.selection.size === 1 && this.selection.has(id);
 			if (pointer.shiftKey) {
 				const next = new Set(this.selection);
 				if (next.has(id)) {
@@ -1504,20 +1889,50 @@ export class VisualTikzEditor {
 				objectIds: [...this.selection].filter(objectId =>
 					this.geometries.find(geometry => geometry.object.id === objectId)?.object.type !== 'locked'),
 				moved: false,
+				candidates: cycleIds,
+				hitId: id,
+				wasSelected,
 			};
 			return;
 		}
 
-		// Empty canvas or a locked ghost: always allow a box selection. A
-		// plain tap (no drag) on the ghost selects it and explains the lock.
+		// Grabbing the inside of an already-selected shape moves the selection
+		// instead of starting a box selection over it.
+		if (!pointer.shiftKey) {
+			const insideSelected = this.selectedGeometries().some(geometry =>
+				geometry.object.type !== 'locked' && pointInsideGeometry(point, geometry));
+			if (insideSelected) {
+				const soleId = this.selection.size === 1 ? [...this.selection][0] : null;
+				this.gesture = {
+					kind: 'move',
+					start: point,
+					delta: { dx: 0, dy: 0 },
+					objectIds: [...this.selection].filter(objectId =>
+						this.geometries.find(geometry => geometry.object.id === objectId)?.object.type !== 'locked'),
+					moved: false,
+					candidates: cycleIds,
+					hitId: soleId,
+					wasSelected: soleId !== null,
+				};
+				return;
+			}
+		}
+
+		// Empty canvas, a locked ghost, or a shape's hollow interior: a drag
+		// becomes a box selection; a plain tap (no drag) selects what is under
+		// the pointer — including a shape grabbed by its interior — and
+		// explains the lock for locked ghosts.
+		const contained = hit
+			?? containmentHit(this.geometries, point)
+			?? containmentHit(this.geometries, point, { includeLocked: true });
 		this.gesture = {
 			kind: 'marquee',
 			start: point,
 			current: point,
 			additive: !!pointer.shiftKey,
-			lockedCandidate: hit ? hit.object.id : null,
+			tapCandidate: contained ? contained.object.id : null,
 		};
-		if (!pointer.shiftKey && !hit) {
+		if (!pointer.shiftKey && !contained) {
 			this.setSelection([]);
 		}
 	}
@@ -1536,9 +1951,20 @@ export class VisualTikzEditor {
 				gesture.current = this.snapDrawPoint(point, !!pointer.shiftKey, gesture.start);
 				gesture.shift = !!pointer.shiftKey;
 				break;
-			case 'freehand':
+			case 'freehand': {
 				appendFreehandPoint(gesture.draft, point, pointer.pressure ?? 0.5);
+				// A real move re-arms the hold-to-snap timer and discards any
+				// already-recognized shape — the user was not done after all.
+				const anchor = this.freehandHoldAnchor;
+				if (!anchor || Math.hypot(point.x - anchor.x, point.y - anchor.y) > this.pxToCm(9)) {
+					this.armFreehandHold(point);
+					if (gesture.recognized) {
+						gesture.recognized = null;
+						this.announce('Shape snap cancelled — keep drawing.');
+					}
+				}
 				break;
+			}
 			case 'move': {
 				const raw = { dx: point.x - gesture.start.x, dy: point.y - gesture.start.y };
 				if (!gesture.moved
@@ -1559,6 +1985,23 @@ export class VisualTikzEditor {
 				this.applyHandlePreview(gesture);
 				return;
 			}
+			case 'rotate': {
+				const angle = Math.atan2(point.y - gesture.pivot.y, point.x - gesture.pivot.x);
+				let deg = ((angle - gesture.startAngle) * 180) / Math.PI;
+				while (deg > 180) {
+					deg -= 360;
+				}
+				while (deg < -180) {
+					deg += 360;
+				}
+				if (pointer.shiftKey) {
+					deg = Math.round(deg / 15) * 15;
+				}
+				gesture.angleDeg = deg;
+				this.applyRotatePreview(gesture);
+				this.announce(`Rotate ${Math.round(deg)}°`);
+				return;
+			}
 			case 'marquee':
 				gesture.current = point;
 				break;
@@ -1575,6 +2018,13 @@ export class VisualTikzEditor {
 			const vertex = geometry?.handles.find(handle => handle.kind === 'vertex');
 			if (vertex) {
 				return vertex.posCm;
+			}
+		}
+		// Handle-less objects (native plots) snap by their bounds corner.
+		for (const id of objectIds) {
+			const geometry = this.geometries.find(entry => entry.object.id === id);
+			if (geometry?.bounds) {
+				return { x: geometry.bounds.minX, y: geometry.bounds.minY };
 			}
 		}
 		return null;
@@ -1597,6 +2047,21 @@ export class VisualTikzEditor {
 			group.classList.remove('is-live');
 		}
 		this.layerOverlay.removeAttribute('transform');
+	}
+
+	/** Live rotation preview: SVG rotate about the pivot (pt space, y down). */
+	private applyRotatePreview(
+		gesture: Extract<NonNullable<ActiveGesture>, { kind: 'rotate' }>,
+	): void {
+		const cx = gesture.pivot.x * PT_PER_CM;
+		const cy = -gesture.pivot.y * PT_PER_CM;
+		const transform = `rotate(${-gesture.angleDeg} ${cx} ${cy})`;
+		for (const id of this.selection) {
+			const group = this.layerObjects.querySelector(`[data-luatikz-object-id="${id}"]`);
+			group?.setAttribute('transform', transform);
+			group?.classList.add('is-live');
+		}
+		this.layerOverlay.setAttribute('transform', transform);
 	}
 
 	private applyHandlePreview(gesture: Extract<NonNullable<ActiveGesture>, { kind: 'handle' }>): void {
@@ -1624,6 +2089,12 @@ export class VisualTikzEditor {
 		renderSelectionOverlay(context, this.layerOverlay, [previewGeometry], previewGeometry.handles);
 	}
 
+	/** Display point → the picture's source coordinates (inverse transform). */
+	private toPictureSpace(transform: PictureTransform, point: TikzCoordinate): TikzCoordinate {
+		const inverse = invertTransform(transform);
+		return inverse ? applyToPoint(inverse, point) : point;
+	}
+
 	/** Clone the object with one dragged token updated (display-only). */
 	private previewObjectWithHandle(
 		object: SceneObject,
@@ -1631,14 +2102,14 @@ export class VisualTikzEditor {
 		target: TikzCoordinate,
 	): SceneObject | null {
 		const picture = this.scene.pictures[object.pictureIndex];
-		const preScale = {
-			x: target.x / (picture.scale.x || 1),
-			y: target.y / (picture.scale.y || 1),
-		};
+		let source = this.toPictureSpace(picture.transform, target);
+		if (object.type === 'path' && object.optionShift) {
+			source = { x: source.x - object.optionShift.x, y: source.y - object.optionShift.y };
+		}
 		if (object.type === 'node') {
 			return {
 				...object,
-				at: { ...object.at, resolved: preScale },
+				at: { ...object.at, resolved: source },
 			};
 		}
 		if (object.type !== 'path') {
@@ -1649,13 +2120,13 @@ export class VisualTikzEditor {
 				return element;
 			}
 			if (element.kind === 'coord' && handle.token === 'coord') {
-				return { ...element, coord: { ...element.coord, resolved: preScale } };
+				return { ...element, coord: { ...element.coord, resolved: source } };
 			}
 			if (element.kind === 'curveTo' && handle.token === 'c1') {
-				return { ...element, c1: { ...element.c1, resolved: preScale } };
+				return { ...element, c1: { ...element.c1, resolved: source } };
 			}
 			if (element.kind === 'curveTo' && handle.token === 'c2' && element.c2) {
-				return { ...element, c2: { ...element.c2, resolved: preScale } };
+				return { ...element, c2: { ...element.c2, resolved: source } };
 			}
 			if (element.kind === 'circle' && handle.token === 'radius') {
 				const geometry = this.geometries.find(entry => entry.object.id === object.id);
@@ -1665,7 +2136,7 @@ export class VisualTikzEditor {
 				if (!center) {
 					return element;
 				}
-				const scaleAvg = (Math.abs(picture.scale.x) + Math.abs(picture.scale.y)) / 2 || 1;
+				const scaleAvg = uniformScale(picture.transform) || 1;
 				const displayRadius = Math.hypot(target.x - center.posCm.x, target.y - center.posCm.y);
 				const cm = Math.max(displayRadius / scaleAvg, 0.02);
 				return {
@@ -1698,10 +2169,23 @@ export class VisualTikzEditor {
 				break;
 			}
 			case 'freehand': {
+				this.clearFreehandHold();
+				if (gesture.recognized) {
+					this.commitRecognizedShape(gesture.recognized);
+					break;
+				}
+				const transform = insertionPicture(this.scene).transform;
+				const draft = {
+					...gesture.draft,
+					points: gesture.draft.points.map(sample => ({
+						...sample,
+						...this.toPictureSpace(transform, sample),
+					})),
+				};
 				const statement = generateFreehandStatement(
-					gesture.draft,
+					draft,
 					this.freehandSmoothingPx,
-					this.pxToCm(1),
+					this.pxToCm(1) / (uniformScale(transform) || 1),
 					this.styleDefaults,
 				);
 				if (statement) {
@@ -1712,6 +2196,19 @@ export class VisualTikzEditor {
 			}
 			case 'move': {
 				this.clearMovePreview();
+				// A repeated tap on the same spot digs through stacked
+				// objects: select the next candidate under the pointer.
+				if (!gesture.moved && gesture.wasSelected && gesture.hitId
+					&& gesture.candidates.length > 1) {
+					const index = gesture.candidates.indexOf(gesture.hitId);
+					const next = gesture.candidates[(index + 1) % gesture.candidates.length];
+					if (next && next !== gesture.hitId) {
+						this.setSelection([next]);
+						const position = gesture.candidates.indexOf(next) + 1;
+						this.announce(`Selected object ${position} of ${gesture.candidates.length} under the pointer — tap again for the next one.`);
+					}
+					break;
+				}
 				if (gesture.moved
 					&& (Math.abs(gesture.delta.dx) > 1e-6 || Math.abs(gesture.delta.dy) > 1e-6)) {
 					const patches: SourcePatch[] = [];
@@ -1721,11 +2218,11 @@ export class VisualTikzEditor {
 							continue;
 						}
 						const picture = this.scene.pictures[geometry.object.pictureIndex];
-						patches.push(...translateObjectPatches(
-							geometry.object,
-							gesture.delta.dx / (picture.scale.x || 1),
-							gesture.delta.dy / (picture.scale.y || 1),
-						));
+						const inverse = invertTransform(picture.transform);
+						const delta = inverse
+							? applyLinear(inverse, { x: gesture.delta.dx, y: gesture.delta.dy })
+							: { x: gesture.delta.dx, y: gesture.delta.dy };
+						patches.push(...translateObjectPatches(geometry.object, delta.x, delta.y));
 					}
 					this.commitPatches(patches);
 				}
@@ -1734,6 +2231,13 @@ export class VisualTikzEditor {
 			case 'handle':
 				this.commitHandleDrag(gesture);
 				break;
+			case 'rotate': {
+				this.clearMovePreview();
+				if (Math.abs(gesture.angleDeg) > 0.5) {
+					this.rotateSelection(gesture.angleDeg, gesture.pivot);
+				}
+				break;
+			}
 			case 'marquee': {
 				const minX = Math.min(gesture.start.x, gesture.current.x);
 				const maxX = Math.max(gesture.start.x, gesture.current.x);
@@ -1756,12 +2260,22 @@ export class VisualTikzEditor {
 						next.add(geometry.object.id);
 					}
 					this.setSelection(next);
-				} else if (gesture.lockedCandidate) {
-					const locked = this.geometries.find(geometry =>
-						geometry.object.id === gesture.lockedCandidate);
-					this.setSelection([gesture.lockedCandidate]);
-					if (locked && locked.object.type === 'locked') {
-						this.announce(`Locked object: ${locked.object.reason}. It stays in the source.`);
+				} else if (gesture.tapCandidate) {
+					const id = gesture.tapCandidate;
+					const target = this.geometries.find(geometry => geometry.object.id === id);
+					if (gesture.additive) {
+						const next = new Set(this.selection);
+						if (next.has(id)) {
+							next.delete(id);
+						} else {
+							next.add(id);
+						}
+						this.setSelection(next);
+					} else {
+						this.setSelection([id]);
+					}
+					if (target && target.object.type === 'locked') {
+						this.announce(`${target.object.reason}. You can delete it, or edit it in the Source panel.`);
 					}
 				} else if (!gesture.additive) {
 					this.setSelection([]);
@@ -1774,6 +2288,8 @@ export class VisualTikzEditor {
 				}
 				if (this.tool === 'text' || this.tool === 'math') {
 					this.openTextInput(this.snapDrawPoint(point, false), this.tool === 'math');
+				} else if (this.tool === 'plot') {
+					this.openPlotInput(point);
 				} else if (this.tool === 'path' || this.tool === 'bezier') {
 					this.clickDraftAddPoint(this.snapDrawPoint(point, !!pointer.shiftKey, this.clickDraft?.points.at(-1)));
 				}
@@ -1788,7 +2304,8 @@ export class VisualTikzEditor {
 	private toolCancel(): void {
 		const gesture = this.gesture;
 		this.gesture = null;
-		if (gesture?.kind === 'move') {
+		this.clearFreehandHold();
+		if (gesture?.kind === 'move' || gesture?.kind === 'rotate') {
 			this.clearMovePreview();
 		}
 		if (gesture?.kind === 'handle') {
@@ -1805,59 +2322,281 @@ export class VisualTikzEditor {
 		if (size < CLICK_DRAG_THRESHOLD_CM) {
 			return;
 		}
+		// The user draws in display space; the statement is written in the
+		// insertion picture's own coordinates so scale/rotate/shift options
+		// re-place it exactly where it was drawn.
+		const transform = insertionPicture(this.scene).transform;
+		const toSource = (point: TikzCoordinate) => this.toPictureSpace(transform, point);
+		const lengthScale = uniformScale(transform) || 1;
 		const style = this.styleDefaults;
 		let statement: string | null = null;
 		switch (tool) {
 			case 'line':
-				statement = generateLine(start, end, { ...style, arrows: style.arrows ?? '' });
+				statement = generateLine(toSource(start), toSource(end), { ...style, arrows: style.arrows ?? '' });
 				break;
 			case 'arrow':
-				statement = generateLine(start, end, { ...style, arrows: style.arrows || '->' });
+				statement = generateLine(toSource(start), toSource(end), { ...style, arrows: style.arrows || '->' });
 				break;
 			case 'rect':
-				statement = generateRectangle(start, end, style);
+				statement = generateRectangle(toSource(start), toSource(end), style);
 				break;
 			case 'rounded-rect':
-				statement = generateRectangle(start, end, { ...style, roundedCorners: true });
+				statement = generateRectangle(toSource(start), toSource(end), { ...style, roundedCorners: true });
 				break;
 			case 'circle':
-				statement = generateCircle(start, size, style);
+				statement = generateCircle(toSource(start), size / lengthScale, style);
 				break;
 			case 'ellipse': {
-				const rx = Math.abs(end.x - start.x);
-				const ry = Math.abs(end.y - start.y);
+				const rx = Math.abs(end.x - start.x) / (colXScale(transform) || 1);
+				const ry = Math.abs(end.y - start.y) / (colYScale(transform) || 1);
 				if (rx > 1e-3 && ry > 1e-3) {
-					statement = generateEllipse(start, rx, ry, style);
+					statement = generateEllipse(toSource(start), rx, ry, style);
 				}
 				break;
 			}
 			case 'arc': {
 				const arc = this.arcFromChord(start, end);
 				if (arc) {
-					statement = generateArc(start, arc.startAngle, arc.endAngle, arc.radius, style);
+					const rotation = rotationDeg(transform);
+					statement = generateArc(
+						toSource(start),
+						arc.startAngle - rotation,
+						arc.endAngle - rotation,
+						arc.radius / lengthScale,
+						style,
+					);
 				}
 				break;
 			}
 			case 'grid-path':
-				statement = generateGridPath(start, end, Math.max(this.gridStepCm, 0.25), style);
+				statement = generateGridPath(toSource(start), toSource(end), Math.max(this.gridStepCm, 0.25), style);
 				break;
 			case 'diamond': {
 				const rx = Math.abs(end.x - start.x);
 				const ry = Math.abs(end.y - start.y);
 				if (rx > 1e-3 && ry > 1e-3) {
-					statement = generatePolyline(diamondPoints(start, rx, ry), true, style);
+					statement = generatePolyline(diamondPoints(start, rx, ry).map(toSource), true, style);
 				}
 				break;
 			}
+			case 'triangle':
+				statement = generatePolyline(polygonPoints(start, size, 3).map(toSource), true, style);
+				break;
 			case 'polygon':
-				statement = generatePolyline(polygonPoints(start, size, this.polygonSides), true, style);
+				statement = generatePolyline(polygonPoints(start, size, this.polygonSides).map(toSource), true, style);
 				break;
 			case 'star':
-				statement = generatePolyline(starPoints(start, size, 0.5, this.starSpikes), true, style);
+				statement = generatePolyline(starPoints(start, size, 0.5, this.starSpikes).map(toSource), true, style);
 				break;
 		}
 		if (statement) {
 			this.commitNewStatement(statement);
+		}
+	}
+
+	/* ---------------------------------------------------------------------- */
+	/* rotation                                                                */
+	/* ---------------------------------------------------------------------- */
+
+	/**
+	 * Rotate the selection by `thetaDeg` CCW around `pivot` (display cm) by
+	 * rewriting coordinate tokens: each point maps display→rotated→back
+	 * through the picture transform, so rotation works inside transformed
+	 * pictures too. Arcs rotate via their angle tokens; `rectangle` paths
+	 * become explicit closed polylines (an axis-aligned rectangle cannot
+	 * represent its own rotation).
+	 */
+	private rotateSelection(thetaDeg: number, pivot: TikzCoordinate): void {
+		const rad = (thetaDeg * Math.PI) / 180;
+		const cos = Math.cos(rad);
+		const sin = Math.sin(rad);
+		const patches: SourcePatch[] = [];
+		let skipped = 0;
+
+		for (const geometry of this.selectedGeometries()) {
+			const object = geometry.object;
+			if (object.type === 'locked') {
+				skipped++;
+				continue;
+			}
+			const picture = this.scene.pictures[object.pictureIndex];
+			const transform = picture.transform;
+			const inverse = invertTransform(transform);
+			const mapPoint = (source: TikzCoordinate): TikzCoordinate => {
+				const display = applyToPoint(transform, source);
+				const rotated = {
+					x: pivot.x + (display.x - pivot.x) * cos - (display.y - pivot.y) * sin,
+					y: pivot.y + (display.x - pivot.x) * sin + (display.y - pivot.y) * cos,
+				};
+				return inverse ? applyToPoint(inverse, rotated) : rotated;
+			};
+
+			if (object.type === 'node') {
+				patches.push(coordinateTokenPatch(object.at, mapPoint(object.at.resolved), { x: 0, y: 0 }));
+				continue;
+			}
+			if (object.elements.some(element => element.kind === 'plot')) {
+				// A plot's shape lives in its expression; rotation cannot be
+				// expressed by rewriting coordinates.
+				skipped++;
+				continue;
+			}
+			if (object.elements.some(element => element.kind === 'rectangleTo' || element.kind === 'gridTo')) {
+				const rewritten = this.rotatedRectStatement(object, mapPoint);
+				if (rewritten) {
+					patches.push({ oldSpan: object.span, replacement: rewritten });
+				} else {
+					skipped++;
+				}
+				continue;
+			}
+			const bases = penPositionsBefore(object);
+			object.elements.forEach((element, index) => {
+				const base = mapPoint(bases[index] ?? { x: 0, y: 0 });
+				if (element.kind === 'coord') {
+					patches.push(coordinateTokenPatch(element.coord, mapPoint(element.coord.resolved), base));
+				} else if (element.kind === 'curveTo') {
+					patches.push(coordinateTokenPatch(element.c1, mapPoint(element.c1.resolved), base));
+					if (element.c2) {
+						patches.push(coordinateTokenPatch(element.c2, mapPoint(element.c2.resolved), base));
+					}
+				} else if (element.kind === 'arc') {
+					patches.push(numberTokenPatch(element.startAngle, element.startAngle.value + thetaDeg));
+					patches.push(numberTokenPatch(element.endAngle, element.endAngle.value + thetaDeg));
+				}
+			});
+		}
+
+		if (patches.length && this.commitPatches(patches)) {
+			this.announce(`Rotated by ${Math.round(thetaDeg)}°${skipped ? ` (${skipped} object${skipped === 1 ? '' : 's'} skipped)` : ''}.`);
+		} else if (skipped) {
+			this.announce('Selection could not be rotated — grids and source-only objects stay as they are.');
+		}
+	}
+
+	/** `(a) rectangle (b)` rewritten as the rotated closed polyline. */
+	private rotatedRectStatement(
+		object: ScenePathObject,
+		mapPoint: (point: TikzCoordinate) => TikzCoordinate,
+	): string | null {
+		const elements = object.elements;
+		if (elements.length !== 3
+			|| elements[0].kind !== 'coord'
+			|| elements[1].kind !== 'rectangleTo'
+			|| elements[2].kind !== 'coord') {
+			return null;
+		}
+		const a = elements[0].coord.resolved;
+		const b = elements[2].coord.resolved;
+		const corners = [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }]
+			.map(mapPoint)
+			.map(point => ({
+				x: Math.round(point.x * 100) / 100,
+				y: Math.round(point.y * 100) / 100,
+			}));
+		const options = object.options ? `[${object.options}]` : '';
+		const command = object.command ?? 'draw';
+		return `\\${command}${options} ${corners.map(formatPoint).join(' -- ')} -- cycle;`;
+	}
+
+	/* ---------------------------------------------------------------------- */
+	/* freehand hold-to-snap                                                   */
+	/* ---------------------------------------------------------------------- */
+
+	private armFreehandHold(anchor: TikzCoordinate): void {
+		this.freehandHoldAnchor = anchor;
+		const win = this.doc.defaultView;
+		if (!win) {
+			return;
+		}
+		if (this.freehandHoldTimer !== null) {
+			win.clearTimeout(this.freehandHoldTimer);
+		}
+		this.freehandHoldTimer = win.setTimeout(() => {
+			this.freehandHoldTimer = null;
+			this.recognizeFreehandNow();
+		}, FREEHAND_HOLD_MS);
+	}
+
+	private clearFreehandHold(): void {
+		if (this.freehandHoldTimer !== null) {
+			this.doc.defaultView?.clearTimeout(this.freehandHoldTimer);
+			this.freehandHoldTimer = null;
+		}
+		this.freehandHoldAnchor = null;
+	}
+
+	/**
+	 * Try to snap the in-flight freehand stroke into a clean shape. Fired by
+	 * the hold timer; also callable directly (tests). Returns whether a shape
+	 * was recognized.
+	 */
+	recognizeFreehandNow(): boolean {
+		const gesture = this.gesture;
+		if (!gesture || gesture.kind !== 'freehand') {
+			return false;
+		}
+		const shape = recognizeStroke(gesture.draft.points, this.pxToCm(8));
+		if (!shape) {
+			return false;
+		}
+		gesture.recognized = shape;
+		this.announce(`${shape.kind === 'polygon' && shape.points.length === 3 ? 'triangle' : shape.kind} detected — release to keep it, move to keep drawing.`);
+		this.dirtyOverlay = true;
+		this.requestRender();
+		return true;
+	}
+
+	private recognizedPrimitives(shape: RecognizedShape): ScenePrimitive[] {
+		switch (shape.kind) {
+			case 'line':
+				return [{ kind: 'segment', a: shape.a, b: shape.b }];
+			case 'rect':
+				return [{ kind: 'rect', a: shape.a, b: shape.b }];
+			case 'circle':
+				return [{ kind: 'circle', center: shape.center, rx: shape.radius, ry: shape.radius }];
+			case 'ellipse':
+				return [{ kind: 'circle', center: shape.center, rx: shape.rx, ry: shape.ry }];
+			case 'polygon':
+				return shape.points.map((point, index) => ({
+					kind: 'segment' as const,
+					a: point,
+					b: shape.points[(index + 1) % shape.points.length],
+				}));
+		}
+	}
+
+	private commitRecognizedShape(shape: RecognizedShape): void {
+		const transform = insertionPicture(this.scene).transform;
+		const toSource = (point: TikzCoordinate) => this.toPictureSpace(transform, point);
+		const lengthScale = uniformScale(transform) || 1;
+		const style = this.styleDefaults;
+		let statement: string | null = null;
+		switch (shape.kind) {
+			case 'line':
+				statement = generateLine(toSource(shape.a), toSource(shape.b), { ...style, arrows: style.arrows ?? '' });
+				break;
+			case 'rect':
+				statement = generateRectangle(toSource(shape.a), toSource(shape.b), style);
+				break;
+			case 'circle':
+				statement = generateCircle(toSource(shape.center), shape.radius / lengthScale, style);
+				break;
+			case 'ellipse':
+				statement = generateEllipse(
+					toSource(shape.center),
+					shape.rx / (colXScale(transform) || 1),
+					shape.ry / (colYScale(transform) || 1),
+					style,
+				);
+				break;
+			case 'polygon':
+				statement = generatePolyline(shape.points.map(toSource), true, style);
+				break;
+		}
+		if (statement) {
+			this.commitNewStatement(statement);
+			this.announce(`Freehand stroke snapped to ${shape.kind}.`);
 		}
 	}
 
@@ -1888,13 +2627,13 @@ export class VisualTikzEditor {
 		}
 		const object = geometry.object;
 		const picture = this.scene.pictures[object.pictureIndex];
-		const preScale = {
-			x: gesture.current.x / (picture.scale.x || 1),
-			y: gesture.current.y / (picture.scale.y || 1),
-		};
+		let source = this.toPictureSpace(picture.transform, gesture.current);
+		if (object.type === 'path' && object.optionShift) {
+			source = { x: source.x - object.optionShift.x, y: source.y - object.optionShift.y };
+		}
 
 		if (object.type === 'node') {
-			this.commitPatches([coordinateTokenPatch(object.at, preScale, { x: 0, y: 0 })]);
+			this.commitPatches([coordinateTokenPatch(object.at, source, { x: 0, y: 0 })]);
 			return;
 		}
 		if (object.type !== 'path') {
@@ -1909,24 +2648,26 @@ export class VisualTikzEditor {
 		const bases = penPositionsBefore(object);
 		const base = bases[gesture.handle.elementIndex] ?? { x: 0, y: 0 };
 		if (element.kind === 'coord' && gesture.handle.token === 'coord') {
-			this.commitPatches([coordinateTokenPatch(element.coord, preScale, base)]);
+			this.commitPatches([coordinateTokenPatch(element.coord, source, base)]);
 			return;
 		}
 		if (element.kind === 'curveTo' && gesture.handle.token === 'c1') {
-			this.commitPatches([coordinateTokenPatch(element.c1, preScale, base)]);
+			this.commitPatches([coordinateTokenPatch(element.c1, source, base)]);
 			return;
 		}
 		if (element.kind === 'curveTo' && gesture.handle.token === 'c2' && element.c2) {
-			this.commitPatches([coordinateTokenPatch(element.c2, preScale, base)]);
+			this.commitPatches([coordinateTokenPatch(element.c2, source, base)]);
 			return;
 		}
 		if (element.kind === 'circle' && gesture.handle.token === 'radius') {
-			// Radius handle sits on the +x rim; new radius = distance to center.
+			// Radius handle sits on the rim; new radius = display distance to
+			// the center, mapped back through the picture's length scale.
 			const centerHandle = geometry.handles
 				.filter(handle => handle.kind === 'vertex' && handle.elementIndex < gesture.handle.elementIndex)
 				.pop();
 			const center = centerHandle?.posCm ?? { x: 0, y: 0 };
-			const radius = Math.hypot(gesture.current.x - center.x, gesture.current.y - center.y);
+			const displayRadius = Math.hypot(gesture.current.x - center.x, gesture.current.y - center.y);
+			const radius = displayRadius / (uniformScale(picture.transform) || 1);
 			if (radius > 0.02) {
 				this.commitPatches([lengthTokenPatch(element.radius, radius)]);
 			}
@@ -1973,13 +2714,15 @@ export class VisualTikzEditor {
 			this.requestRender();
 			return;
 		}
+		const transform = insertionPicture(this.scene).transform;
+		const toSource = (point: TikzCoordinate) => this.toPictureSpace(transform, point);
 		if (draft.tool === 'path') {
-			this.commitNewStatement(generatePolyline(draft.points, closed, this.styleDefaults));
+			this.commitNewStatement(generatePolyline(draft.points.map(toSource), closed, this.styleDefaults));
 		} else {
 			const segments = catmullRomToBezier(draft.points);
 			this.commitNewStatement(generateCurvePath(
-				draft.points,
-				segments.map(segment => ({ c1: segment.c1, c2: segment.c2 })),
+				draft.points.map(toSource),
+				segments.map(segment => ({ c1: toSource(segment.c1), c2: toSource(segment.c2) })),
 				this.styleDefaults,
 			));
 		}
@@ -2033,10 +2776,17 @@ export class VisualTikzEditor {
 				return;
 			}
 			if (existing && existing.textSpan) {
-				const body = math || /^\$.*\$$/.test(existing.text) ? `$${value}$` : value;
+				const isMathBody = math || /^\$.*\$$/.test(existing.text);
+				const body = isMathBody ? `$${value}$` : wrapHebrewRuns(value);
 				this.commitPatches([{ oldSpan: existing.textSpan, replacement: body }]);
 			} else {
-				this.commitNewStatement(generateNode(at, value, math, this.styleDefaults));
+				const transform = insertionPicture(this.scene).transform;
+				this.commitNewStatement(generateNode(
+					this.toPictureSpace(transform, at),
+					math ? value : wrapHebrewRuns(value),
+					math,
+					this.styleDefaults,
+				));
 			}
 		};
 
@@ -2062,6 +2812,93 @@ export class VisualTikzEditor {
 			this.textInputOverlay.remove();
 			this.textInputOverlay = null;
 		}
+	}
+
+	/**
+	 * Function plotter: f(x) plus a domain — the curve is committed as an
+	 * ordinary editable Bézier path, so it drags and restyles like anything
+	 * else. Discontinuities split the plot into separate paths.
+	 */
+	private openPlotInput(at: TikzCoordinate): void {
+		this.closeTextInput(false);
+		const overlay = this.el('div', 'luatikz-ve-text-input luatikz-ve-plot-input', this.canvasWrap);
+		const fnInput = this.el('input', 'luatikz-ve-text-input-field', overlay);
+		fnInput.type = 'text';
+		fnInput.placeholder = 'f(x) — e.g. sin(x)';
+		fnInput.setAttribute('aria-label', 'Function of x');
+		const fromInput = this.el('input', 'luatikz-ve-plot-range', overlay);
+		fromInput.type = 'number';
+		fromInput.value = '-2';
+		fromInput.setAttribute('aria-label', 'Domain start');
+		const toInput = this.el('input', 'luatikz-ve-plot-range', overlay);
+		toInput.type = 'number';
+		toInput.value = '2';
+		toInput.setAttribute('aria-label', 'Domain end');
+		const confirm = this.el('button', 'luatikz-ve-btn luatikz-ve-text-confirm', overlay);
+		confirm.type = 'button';
+		confirm.textContent = 'Plot';
+		confirm.setAttribute('aria-label', 'Insert the plot');
+
+		const rect = this.svg.getBoundingClientRect();
+		const wrapRect = this.canvasWrap.getBoundingClientRect();
+		const pt = cmToPt(at);
+		const scale = this.pxPerPt();
+		const left = rect.left - wrapRect.left + (pt.x - this.viewBox.x) * scale;
+		const top = rect.top - wrapRect.top + (pt.y - this.viewBox.y) * scale;
+		overlay.style.left = `${Math.max(4, Math.min(left, wrapRect.width - 260))}px`;
+		overlay.style.top = `${Math.max(4, Math.min(top, wrapRect.height - 44))}px`;
+
+		const commit = () => {
+			const fn = compileFunction(fnInput.value);
+			if (!fn) {
+				this.announce('Could not read the function — try e.g. sin(x), x^2 - 1, or exp(-x).');
+				return;
+			}
+			const from = Number.parseFloat(fromInput.value);
+			const to = Number.parseFloat(toInput.value);
+			if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) {
+				this.announce('The range needs two different finite numbers.');
+				return;
+			}
+			// Sampling is only used to find the finite sub-domains (poles,
+			// sqrt of negatives); the committed source is a native TikZ plot
+			// that the compiler evaluates at full resolution.
+			const runs = sampleFunctionRuns(fn, from, to, 48);
+			if (!runs.length) {
+				this.announce('The function has no finite values in that range.');
+				return;
+			}
+			this.closeTextInput(false);
+			const expr = fn.toTikz();
+			const styleOptions = buildOptionsPrefix(this.styleDefaults);
+			const styleInner = styleOptions ? `${styleOptions.slice(1, -1)}, ` : '';
+			const round = (value: number) => Math.round(value * 100) / 100;
+			const statements = runs.map(run => {
+				const a = round(run[0].x);
+				const b = round(run[run.length - 1].x);
+				return `\\draw[${styleInner}domain=${a}:${b}, samples=120, smooth] plot (\\x, {${expr}});`;
+			});
+			this.commitNewStatement(statements.join('\n'));
+			this.announce(`Plotted ${fnInput.value.trim()} from ${Math.min(from, to)} to ${Math.max(from, to)}.`);
+		};
+
+		const keyHandler = (event: KeyboardEvent) => {
+			if (event.key === 'Enter') {
+				event.preventDefault();
+				commit();
+			} else if (event.key === 'Escape') {
+				event.preventDefault();
+				this.closeTextInput(false);
+			}
+			event.stopPropagation();
+		};
+		fnInput.addEventListener('keydown', keyHandler, { signal: this.ac.signal });
+		fromInput.addEventListener('keydown', keyHandler, { signal: this.ac.signal });
+		toInput.addEventListener('keydown', keyHandler, { signal: this.ac.signal });
+		confirm.addEventListener('click', commit, { signal: this.ac.signal });
+
+		this.textInputOverlay = overlay;
+		fnInput.focus();
 	}
 
 	/* ---------------------------------------------------------------------- */
@@ -2139,10 +2976,10 @@ export class VisualTikzEditor {
 				const isMath = /^\s*\$.*\$\s*$/.test(object.text);
 				this.setSelection([object.id]);
 				this.openTextInput(
-					{
-						x: object.at.resolved.x * this.scene.pictures[object.pictureIndex].scale.x,
-						y: object.at.resolved.y * this.scene.pictures[object.pictureIndex].scale.y,
-					},
+					applyToPoint(
+						this.scene.pictures[object.pictureIndex].transform,
+						object.at.resolved,
+					),
 					isMath,
 					object,
 				);
@@ -2190,13 +3027,22 @@ export class VisualTikzEditor {
 				this.pasteClipboard();
 				return;
 			}
+			// Before the meta bail-out: on macOS "delete" is Cmd+Backspace for
+			// many users, and plain Backspace/Delete must keep working too.
+			if (key === 'Delete' || key === 'Backspace') {
+				event.preventDefault();
+				this.deleteSelection();
+				return;
+			}
 			if (meta) {
 				return;
 			}
 
 			if (key === 'Escape') {
 				event.preventDefault();
-				if (this.textInputOverlay) {
+				if (this.shapeMenuOpen) {
+					this.toggleShapeMenu(false);
+				} else if (this.textInputOverlay) {
 					this.closeTextInput(false);
 				} else if (this.clickDraft) {
 					this.cancelClickDraft();
@@ -2206,11 +3052,6 @@ export class VisualTikzEditor {
 				} else if (this.selection.size) {
 					this.setSelection([]);
 				}
-				return;
-			}
-			if (key === 'Delete' || key === 'Backspace') {
-				event.preventDefault();
-				this.deleteSelection();
 				return;
 			}
 			if (key === 'Enter' && this.clickDraft) {
@@ -2230,11 +3071,9 @@ export class VisualTikzEditor {
 						continue;
 					}
 					const picture = this.scene.pictures[geometry.object.pictureIndex];
-					patches.push(...translateObjectPatches(
-						geometry.object,
-						dx / (picture.scale.x || 1),
-						dy / (picture.scale.y || 1),
-					));
+					const inverse = invertTransform(picture.transform);
+					const delta = inverse ? applyLinear(inverse, { x: dx, y: dy }) : { x: dx, y: dy };
+					patches.push(...translateObjectPatches(geometry.object, delta.x, delta.y));
 				}
 				this.commitPatches(patches);
 				return;
@@ -2251,11 +3090,11 @@ export class VisualTikzEditor {
 	/* panels                                                                  */
 	/* ---------------------------------------------------------------------- */
 
-	togglePanel(panel: 'props' | 'source', force?: boolean): void {
-		const target = panel === 'props' ? this.propsPanel : this.sourcePanel;
-		const toggle = this.root.querySelector<HTMLButtonElement>(
-			panel === 'props' ? '.luatikz-ve-props-toggle' : '.luatikz-ve-source-toggle',
-		);
+	togglePanel(panel: 'props' | 'source' | 'objects', force?: boolean): void {
+		const target = panel === 'props' ? this.propsPanel
+			: panel === 'objects' ? this.objectsPanel
+				: this.sourcePanel;
+		const toggle = this.root.querySelector<HTMLButtonElement>(`.luatikz-ve-${panel}-toggle`);
 		const open = force ?? target.classList.contains('luatikz-ve-hidden');
 		target.classList.toggle('luatikz-ve-hidden', !open);
 		toggle?.setAttribute('aria-pressed', String(open));
@@ -2265,6 +3104,9 @@ export class VisualTikzEditor {
 			this.lastHighlightKey = '';
 			this.renderSourceHighlight();
 		}
+		if (panel === 'objects' && open) {
+			this.refreshObjectsPanel();
+		}
 	}
 
 	get sourcePanelOpen(): boolean {
@@ -2273,6 +3115,91 @@ export class VisualTikzEditor {
 
 	get propsPanelOpen(): boolean {
 		return !this.propsPanel.classList.contains('luatikz-ve-hidden');
+	}
+
+	get objectsPanelOpen(): boolean {
+		return !this.objectsPanel.classList.contains('luatikz-ve-hidden');
+	}
+
+	/* ---------------------------------------------------------------------- */
+	/* objects panel                                                           */
+	/* ---------------------------------------------------------------------- */
+
+	private objectLabel(text: string): string {
+		const flat = text.replace(/\s+/g, ' ').trim();
+		return flat.length > 34 ? `${flat.slice(0, 34)}…` : flat;
+	}
+
+	refreshObjectsPanel(): void {
+		if (!this.objectsList || !this.objectsPanelOpen) {
+			return;
+		}
+		this.objectsList.textContent = '';
+		for (const object of this.scene.objects) {
+			this.appendObjectRow(object);
+		}
+		for (const hidden of scanHiddenObjects(this.scene.source)) {
+			this.appendHiddenRow(hidden);
+		}
+		if (!this.objectsList.childElementCount) {
+			this.el('div', 'luatikz-ve-objects-empty', this.objectsList).textContent = 'Nothing drawn yet.';
+		}
+	}
+
+	private appendObjectRow(object: SceneObject): void {
+		const row = this.el('div', 'luatikz-ve-object-row', this.objectsList);
+		if (this.selection.has(object.id)) {
+			row.classList.add('is-selected');
+		}
+		const visible = this.el('input', 'luatikz-ve-object-visible', row);
+		visible.type = 'checkbox';
+		visible.checked = true;
+		visible.setAttribute('aria-label', 'Visible — untick to hide');
+		visible.addEventListener('change', () => this.hideObject(object), { signal: this.ac.signal });
+		const label = this.el('button', 'luatikz-ve-object-label', row);
+		label.type = 'button';
+		label.textContent = this.objectLabel(
+			this.scene.source.slice(object.span.from, object.span.to),
+		);
+		label.title = 'Select this object';
+		label.addEventListener('click', () => this.setSelection([object.id]), { signal: this.ac.signal });
+		const remove = this.button(row, 'Delete', 'luatikz-ve-object-delete', () => {
+			this.selection.delete(object.id);
+			this.commitPatches(deleteObjectPatches(this.scene.source, object));
+			this.announce('Deleted 1 object.');
+		}, { icon: 'delete', title: 'Delete this object' });
+		remove.classList.add('luatikz-ve-btn-icon');
+	}
+
+	private appendHiddenRow(hidden: HiddenObjectEntry): void {
+		const row = this.el('div', 'luatikz-ve-object-row is-hidden', this.objectsList);
+		const visible = this.el('input', 'luatikz-ve-object-visible', row);
+		visible.type = 'checkbox';
+		visible.checked = false;
+		visible.setAttribute('aria-label', 'Hidden — tick to show');
+		visible.addEventListener('change', () => {
+			this.commitPatches([{ oldSpan: { from: hidden.from, to: hidden.to }, replacement: hidden.text }]);
+			this.announce('Object visible again.');
+		}, { signal: this.ac.signal });
+		const label = this.el('span', 'luatikz-ve-object-label is-muted', row);
+		label.textContent = this.objectLabel(hidden.text);
+		this.button(row, 'Delete', 'luatikz-ve-object-delete', () => {
+			let to = hidden.to;
+			if (this.scene.source[to] === '\n') {
+				to += 1;
+			}
+			this.commitPatches([{ oldSpan: { from: hidden.from, to }, replacement: '' }]);
+			this.announce('Hidden object deleted.');
+		}, { icon: 'delete', title: 'Delete this hidden object' });
+	}
+
+	/** Comment the statement out with `%~` markers — hidden but preserved. */
+	private hideObject(object: SceneObject): void {
+		const text = this.scene.source.slice(object.span.from, object.span.to);
+		const replacement = text.split('\n').map(line => `%~${line}`).join('\n');
+		this.selection.delete(object.id);
+		this.commitPatches([{ oldSpan: { ...object.span }, replacement }]);
+		this.announce('Object hidden — tick it in the Objects panel to bring it back.');
 	}
 
 	private onSourcePanelInput(): void {
@@ -2363,6 +3290,7 @@ export class VisualTikzEditor {
 		const point = this.clientToCm(clientX, clientY);
 		const hit = point
 			? hitTestScene(this.geometries, point, this.hitToleranceCm('mouse'), { includeLocked: true })
+				?? containmentHit(this.geometries, point, { includeLocked: true })
 			: null;
 		const id = hit ? hit.object.id : null;
 		if (id === this.hoveredObjectId) {

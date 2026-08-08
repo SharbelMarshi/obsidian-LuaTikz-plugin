@@ -88,7 +88,7 @@ assert.equal(arcLegacy.radius.cm, 2);
 
 // --- locking, never guessing ------------------------------------------------
 
-const lockedBody = `\\begin{tikzpicture}[rotate=30]
+const lockedBody = `\\begin{tikzpicture}[cm={1,0,0,1,(0,0)}]
   \\draw (0,0) -- (1,1);
 \\end{tikzpicture}
 \\begin{tikzpicture}
@@ -105,10 +105,73 @@ const lockedBody = `\\begin{tikzpicture}[rotate=30]
 
 const lockedScene = parseTikzScene(lockedBody);
 assert.equal(lockedScene.pictures.length, 2);
-assert.equal(lockedScene.pictures[0].editable, false, 'rotate must lock the picture');
+assert.equal(lockedScene.pictures[0].editable, false, 'cm= must lock the picture');
 
 const p0 = lockedScene.objects.filter(object => object.pictureIndex === 0);
 assert.equal(p0[0].type, 'locked');
+assert.match(p0[0].reason, /"cm=/, 'lock reason must name the offending option');
+
+// Mappable transforms no longer lock: rotate/shift/scale pictures are editable
+// and carry the full affine transform.
+const rotated = parseTikzScene(
+	'\\begin{tikzpicture}[rotate=90]\n\\draw (1,0) -- (2,0);\n\\end{tikzpicture}',
+);
+assert.equal(rotated.pictures[0].editable, true, 'rotate must stay editable');
+assert.equal(rotated.objects[0].type, 'path');
+const rt = rotated.pictures[0].transform;
+assert.ok(Math.abs(rt.a) < 1e-9 && Math.abs(rt.b - 1) < 1e-9, 'rotate=90 transform');
+
+const shifted = parseTikzScene(
+	'\\begin{tikzpicture}[shift={(1,2)}, scale=2]\n\\draw (0,0) -- (1,0);\n\\end{tikzpicture}',
+);
+assert.equal(shifted.pictures[0].editable, true, 'shift must stay editable');
+assert.deepEqual(
+	{ tx: shifted.pictures[0].transform.tx, ty: shifted.pictures[0].transform.ty },
+	{ tx: 1, ty: 2 },
+);
+assert.equal(shifted.pictures[0].transform.a, 2);
+
+// Unit-vector overrides are affine too: x=1cm/y=1cm is exactly the default,
+// x=0.5cm halves the x axis, and coordinate forms set full columns.
+const unitDefault = parseTikzScene(
+	'\\begin{tikzpicture}[x=1cm, y=1cm]\n\\draw (0,0) -- (1,0);\n\\end{tikzpicture}',
+);
+assert.equal(unitDefault.pictures[0].editable, true, 'x=1cm must stay editable');
+assert.deepEqual(unitDefault.pictures[0].transform, { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 });
+assert.equal(unitDefault.objects[0].type, 'path');
+
+const unitHalf = parseTikzScene(
+	'\\begin{tikzpicture}[x=0.5cm, y={(0cm,2cm)}]\n\\draw (0,0) -- (1,0);\n\\end{tikzpicture}',
+);
+assert.equal(unitHalf.pictures[0].editable, true);
+assert.equal(unitHalf.pictures[0].transform.a, 0.5);
+assert.equal(unitHalf.pictures[0].transform.d, 2);
+
+// Native function plots are editable path objects: the expression must
+// compile under pgfmath semantics, domain/samples/shift come from options.
+const plotScene = parseTikzScene(
+	'\\begin{tikzpicture}\n\\draw[thick, domain=0:2, samples=40, shift={(1, -0.5)}] plot (\\x, {0.5*sin(deg(\\x))});\n\\end{tikzpicture}',
+);
+assert.equal(plotScene.objects[0].type, 'path', 'supported plot form is editable');
+assert.equal(plotScene.objects[0].elements[0].kind, 'plot');
+assert.deepEqual(plotScene.objects[0].plotDomain, { from: 0, to: 2 });
+assert.equal(plotScene.objects[0].plotSamples, 40);
+assert.deepEqual(plotScene.objects[0].optionShift, { x: 1, y: -0.5 });
+
+const plotLocked = parseTikzScene(
+	'\\begin{tikzpicture}\n\\draw plot coordinates {(0,0) (1,1)};\n\\draw plot (\\x, {undefinedfn(\\x)});\n\\end{tikzpicture}',
+);
+assert.equal(plotLocked.objects[0].type, 'locked', 'coordinate-list plots stay source-only');
+assert.equal(plotLocked.objects[1].type, 'locked', 'unknown functions stay source-only');
+
+const rotateAround = parseTikzScene(
+	'\\begin{tikzpicture}[rotate around={90:(1,1)}]\n\\draw (1,1) -- (2,1);\n\\end{tikzpicture}',
+);
+assert.equal(rotateAround.pictures[0].editable, true, 'rotate around must stay editable');
+const ra = rotateAround.pictures[0].transform;
+// (1,1) is the fixed point of the rotation.
+assert.ok(Math.abs(ra.a * 1 + ra.c * 1 + ra.tx - 1) < 1e-9);
+assert.ok(Math.abs(ra.b * 1 + ra.d * 1 + ra.ty - 1) < 1e-9);
 
 const p1 = lockedScene.objects.filter(object => object.pictureIndex === 1);
 const reasons = p1.map(object => (object.type === 'locked' ? object.reason : 'editable'));

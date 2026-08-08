@@ -5,8 +5,11 @@ import {
 	type TikzPtBBox,
 } from '../utils/coordinatePick';
 import { parseOptionStyle } from './tikzOptions';
+import { tikzColorToCss } from './tikzColors';
 import type { ObjectGeometry, ObjectHandle, ScenePrimitive } from './sceneGeometry';
 import { gridLinePositions, type ViewBox } from './editorViewport';
+
+export { tikzColorToCss } from './tikzColors';
 
 /**
  * Immediate-mode SVG rendering of the editor scene.
@@ -48,77 +51,6 @@ export function cmToPt(point: TikzCoordinate): { x: number; y: number } {
 }
 
 const fmt = (value: number): string => String(Math.round(value * 1000) / 1000);
-
-/* -------------------------------------------------------------------------- */
-/* colors                                                                      */
-/* -------------------------------------------------------------------------- */
-
-const XCOLOR_RGB: Record<string, [number, number, number]> = {
-	black: [0, 0, 0],
-	white: [255, 255, 255],
-	red: [255, 0, 0],
-	green: [0, 255, 0],
-	blue: [0, 0, 255],
-	cyan: [0, 255, 255],
-	magenta: [255, 0, 255],
-	yellow: [255, 255, 0],
-	orange: [255, 128, 0],
-	purple: [191, 0, 64],
-	brown: [191, 128, 64],
-	gray: [128, 128, 128],
-	grey: [128, 128, 128],
-	darkgray: [64, 64, 64],
-	darkgrey: [64, 64, 64],
-	lightgray: [191, 191, 191],
-	lightgrey: [191, 191, 191],
-	pink: [255, 191, 191],
-	lime: [191, 255, 0],
-	olive: [128, 128, 0],
-	teal: [0, 128, 128],
-	violet: [128, 0, 128],
-};
-
-function mix(a: [number, number, number], b: [number, number, number], pct: number): [number, number, number] {
-	const t = Math.max(0, Math.min(100, pct)) / 100;
-	return [
-		a[0] * t + b[0] * (1 - t),
-		a[1] * t + b[1] * (1 - t),
-		a[2] * t + b[2] * (1 - t),
-	];
-}
-
-/**
- * Approximate CSS color for a TikZ color expression (`red`, `blue!30`,
- * `red!50!blue`). Unknown expressions fall back to the theme text color so
- * the object stays visible; the compiled preview shows the real color.
- * Plain black also maps to the theme text color for dark-mode legibility.
- */
-export function tikzColorToCss(expression: string | undefined): string {
-	if (!expression) {
-		return 'var(--text-normal)';
-	}
-	const parts = expression.split('!').map(part => part.trim());
-	let rgb = XCOLOR_RGB[parts[0]];
-	if (!rgb) {
-		return 'var(--text-normal)';
-	}
-	for (let index = 1; index < parts.length; index += 2) {
-		const pct = Number.parseFloat(parts[index]);
-		if (!Number.isFinite(pct)) {
-			return 'var(--text-normal)';
-		}
-		const otherName = parts[index + 1] ?? 'white';
-		const other = XCOLOR_RGB[otherName];
-		if (!other) {
-			return 'var(--text-normal)';
-		}
-		rgb = mix(rgb, other, pct);
-	}
-	if (rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0) {
-		return 'var(--text-normal)';
-	}
-	return `rgb(${Math.round(rgb[0])}, ${Math.round(rgb[1])}, ${Math.round(rgb[2])})`;
-}
 
 const LINE_WIDTH_PT: Record<string, number> = {
 	'ultra thin': 0.1,
@@ -564,6 +496,7 @@ export function renderSelectionOverlay(
 	layer: SVGGElement,
 	selected: readonly ObjectGeometry[],
 	handles: readonly ObjectHandle[],
+	rotateHandle: { x: number; y: number } | null = null,
 ): void {
 	layer.textContent = '';
 	const px = 1 / Math.max(context.pxPerPt, 1e-6);
@@ -584,6 +517,26 @@ export function renderSelectionOverlay(
 			'stroke-width': fmt(px),
 			'stroke-dasharray': `${fmt(4 * px)} ${fmt(3 * px)}`,
 			fill: 'none',
+		}));
+	}
+
+	if (rotateHandle) {
+		// Stem from the selection's top edge up to the rotation grip.
+		const grip = cmToPt(rotateHandle);
+		layer.appendChild(svgEl(context.doc, 'line', {
+			x1: fmt(grip.x),
+			y1: fmt(grip.y + 14 * px),
+			x2: fmt(grip.x),
+			y2: fmt(grip.y),
+			class: 'luatikz-ve-rotate-stem',
+			'stroke-width': fmt(px),
+		}));
+		layer.appendChild(svgEl(context.doc, 'circle', {
+			cx: fmt(grip.x),
+			cy: fmt(grip.y),
+			r: fmt(handlePt * 0.65),
+			class: 'luatikz-ve-handle luatikz-ve-handle-rotate',
+			'stroke-width': fmt(px),
 		}));
 	}
 

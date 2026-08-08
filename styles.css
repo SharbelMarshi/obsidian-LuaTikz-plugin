@@ -838,6 +838,7 @@
 }
 
 .luatikz-ve-toolbar {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -845,6 +846,53 @@
   padding: 6px 8px;
   border-bottom: 1px solid var(--background-modifier-border);
   flex-wrap: wrap;
+}
+
+/* Shapes dropdown: one toolbar button expanding into a shape list. */
+.luatikz-ve-shape-menu {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 168px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  margin-top: 2px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+  box-shadow: var(--shadow-s, 0 4px 18px rgba(0, 0, 0, 0.18));
+}
+
+.luatikz-ve-shape-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 0.82em;
+  text-align: start;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.luatikz-ve-shape-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.luatikz-ve-shape-item.is-active {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  color: var(--text-accent);
+}
+
+.luatikz-ve-shape-item .luatikz-ve-icon {
+  flex: 0 0 auto;
 }
 
 .luatikz-ve-toolgroup,
@@ -939,7 +987,14 @@
 .luatikz-ve-props-title {
   font-weight: 600;
   font-size: 0.85em;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+/* What the panel currently applies to (selection vs defaults vs locked). */
+.luatikz-ve-props-scope {
+  font-size: 0.72em;
+  color: var(--text-faint);
+  margin-bottom: 8px;
 }
 
 .luatikz-ve-props-row {
@@ -962,6 +1017,69 @@
   min-height: 30px;
 }
 
+/* --- stroke/fill color palette --------------------------------------------- */
+
+.luatikz-ve-props-colorrow {
+  display: block;
+}
+
+.luatikz-ve-props-colorrow .luatikz-ve-props-label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.luatikz-ve-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+button.luatikz-ve-swatch {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--luatikz-swatch, transparent);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+/* "Default"/"None": a diagonal slash on an empty well. */
+button.luatikz-ve-swatch-clear {
+  background:
+    linear-gradient(
+      to top right,
+      transparent 44%,
+      var(--text-faint) 45%,
+      var(--text-faint) 55%,
+      transparent 56%
+    );
+}
+
+.luatikz-ve-swatch-custom {
+  width: 28px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+button.luatikz-ve-swatch.is-active,
+.luatikz-ve-swatch-custom.is-active {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+button.luatikz-ve-swatch:disabled,
+.luatikz-ve-swatch-custom:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .luatikz-ve-source {
   width: 300px;
   flex-shrink: 0;
@@ -969,6 +1087,76 @@
   flex-direction: column;
   border-left: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
+}
+
+/* Objects panel: one row per statement with visibility + delete. */
+.luatikz-ve-objects {
+  width: 250px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 8px;
+  border-left: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.luatikz-ve-objects-title {
+  font-size: 0.8em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.luatikz-ve-object-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 2px 4px;
+  border-radius: 7px;
+}
+
+.luatikz-ve-object-row.is-selected {
+  background: var(--background-modifier-hover);
+}
+
+.luatikz-ve-object-row.is-hidden .luatikz-ve-object-label {
+  opacity: 0.55;
+}
+
+.luatikz-ve-object-visible {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.luatikz-ve-object-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: start;
+  background: transparent;
+  border: none;
+  padding: 6px 2px;
+  font-size: 0.78em;
+  font-family: var(--font-monospace);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.luatikz-ve-object-delete {
+  flex: 0 0 auto;
+}
+
+.luatikz-ve-objects-empty {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  padding: 8px 4px;
 }
 
 /* Layered source editor: a syntax-colored <pre> mirror sits behind the
@@ -1259,6 +1447,21 @@
   box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.2));
 }
 
+/* Function plotter dialog: f(x) plus a from/to domain. */
+.luatikz-ve-plot-input .luatikz-ve-text-input-field {
+  min-width: 130px;
+}
+
+.luatikz-ve-plot-range {
+  width: 58px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.85em;
+}
+
 .luatikz-ve-text-input-field {
   min-width: 130px;
   min-height: 34px;
@@ -1310,7 +1513,19 @@
     box-shadow: var(--shadow-s, 0 2px 12px rgba(0, 0, 0, 0.3));
   }
 
-  .luatikz-ve-source {
+  /* Bigger touch targets for the color palette. */
+  button.luatikz-ve-swatch {
+    width: 26px;
+    height: 26px;
+  }
+
+  .luatikz-ve-swatch-custom {
+    width: 34px;
+    height: 26px;
+  }
+
+  .luatikz-ve-source,
+  .luatikz-ve-objects {
     position: absolute;
     left: 0;
     right: 0;
@@ -1322,6 +1537,16 @@
     border-left: none;
     border-top: 1px solid var(--background-modifier-border);
     box-shadow: var(--shadow-s, 0 -2px 12px rgba(0, 0, 0, 0.3));
+  }
+
+  /* Comfortable touch rows in the objects drawer. */
+  .luatikz-ve-object-row {
+    min-height: 44px;
+  }
+
+  .luatikz-ve-object-visible {
+    width: 20px;
+    height: 20px;
   }
 
   .luatikz-ve-main {

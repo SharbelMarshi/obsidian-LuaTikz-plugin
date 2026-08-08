@@ -36,6 +36,12 @@ export const EDITOR_ICONS = defineIcons({
 	freehand: [p('M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z')],
 	rect: [{ tag: 'rect', x: 4, y: 6, width: 16, height: 12 }],
 	'rounded-rect': [{ tag: 'rect', x: 4, y: 6, width: 16, height: 12, rx: 4 }],
+	triangle: [p('M12 4l9 16H3z')],
+	shapes: [
+		p('M8.2 3L13.4 11.5H3z'),
+		{ tag: 'rect', x: 3, y: 14, width: 7, height: 7 },
+		{ tag: 'circle', cx: 17.2, cy: 17.2, r: 4.3 },
+	],
 	circle: [{ tag: 'circle', cx: 12, cy: 12, r: 8 }],
 	ellipse: [{ tag: 'ellipse', cx: 12, cy: 12, rx: 9, ry: 6 }],
 	arc: [p('M5 19A14 14 0 0 1 19 5')],
@@ -45,6 +51,8 @@ export const EDITOR_ICONS = defineIcons({
 	star: [p('M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 5.9-5.3-3-5.3 3 1.2-5.9L3.4 9.3l6-.7z')],
 	text: [p('M5 5h14M12 5v14M9 19h6')],
 	math: [p('M18 5H6l7 7-7 7h12')],
+	plot: [p('M3 3v18h18'), p('M5 17c2.5-9 4.5-9 7-2s4.5 7 7-2')],
+	objects: [p('M12 2l9 5-9 5-9-5z'), p('M3 12l9 5 9-5'), p('M3 17l9 5 9-5')],
 	undo: [p('M9 14L4 9l5-5'), p('M4 9h9a7 7 0 0 1 7 7v3')],
 	redo: [p('M15 14l5-5-5-5'), p('M20 9h-9a7 7 0 0 0-7 7v3')],
 	duplicate: [

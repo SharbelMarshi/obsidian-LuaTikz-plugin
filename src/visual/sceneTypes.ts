@@ -74,6 +74,9 @@ export type PathElement =
 		span: SourceSpan;
 	}
 	| { kind: 'cycle' }
+	/** Native `plot (\x, {expr})` with a pgfmath expression this editor can
+	 * evaluate; domain/samples come from the statement options. */
+	| { kind: 'plot'; expr: string; exprSpan: SourceSpan; span: SourceSpan }
 	/** Anything preserved verbatim inside an otherwise editable path (inline nodes). */
 	| { kind: 'raw'; span: SourceSpan };
 
@@ -91,6 +94,13 @@ export interface ScenePathObject extends SceneObjectBase {
 	/** Inner text of the leading `[...]`; null when there is none. */
 	optionsSpan: SourceSpan | null;
 	options: string;
+	/** `domain=a:b` from the options — the plot evaluation range. */
+	plotDomain: { from: number; to: number } | null;
+	/** `samples=n` from the options. */
+	plotSamples: number | null;
+	/** Statement-level `shift={(x,y)}` option; applied to all geometry and
+	 * rewritten (instead of coordinate tokens) when dragging a plot. */
+	optionShift: { x: number; y: number } | null;
 	elements: PathElement[];
 }
 
@@ -116,6 +126,20 @@ export interface SceneLockedObject extends SceneObjectBase {
 
 export type SceneObject = ScenePathObject | SceneNodeObject | SceneLockedObject;
 
+/**
+ * Affine picture transform: display = [[a, c], [b, d]] · p + (tx, ty), in
+ * TikZ cm with Y up. Built by composing the environment's transform options
+ * (`scale`, `rotate`, `shift`, …) in their written order.
+ */
+export interface PictureTransform {
+	a: number;
+	b: number;
+	c: number;
+	d: number;
+	tx: number;
+	ty: number;
+}
+
 export interface ScenePicture {
 	index: number;
 	/** Offset just after `\begin{tikzpicture}` and its options. */
@@ -124,13 +148,18 @@ export interface ScenePicture {
 	bodyTo: number;
 	/** Inner text of the environment options `[...]`. */
 	optionsText: string;
-	/** Axis scale from `scale`/`xscale`/`yscale`; other transforms lock the picture. */
+	/** Axis scale from `scale`/`xscale`/`yscale` only; geometry uses `transform`. */
 	scale: { x: number; y: number };
+	/** Full affine mapping from source coordinates to display cm. */
+	transform: PictureTransform;
 	/**
-	 * False when the picture options carry transforms this editor cannot map
-	 * (rotate, shift, unit vector changes); all contained objects stay locked.
+	 * False when the picture options change the coordinate system in a way
+	 * this editor cannot mirror (`cm=`, unit-vector overrides, …); all
+	 * contained objects stay source-only.
 	 */
 	editable: boolean;
+	/** The option token that made the picture non-editable, when one did. */
+	lockedOption: string | null;
 	/** True when the fence body has no tikzpicture environment at all. */
 	implicit: boolean;
 }
@@ -164,6 +193,7 @@ export type EditorToolId =
 	| 'freehand'
 	| 'rect'
 	| 'rounded-rect'
+	| 'triangle'
 	| 'circle'
 	| 'ellipse'
 	| 'arc'
@@ -172,7 +202,8 @@ export type EditorToolId =
 	| 'polygon'
 	| 'star'
 	| 'text'
-	| 'math';
+	| 'math'
+	| 'plot';
 
 export type DashStyle = 'solid' | 'dashed' | 'dotted';
 

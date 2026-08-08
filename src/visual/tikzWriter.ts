@@ -273,6 +273,44 @@ export function numberTokenPatch(token: NumberToken, value: number): SourcePatch
  * tokens are translation-invariant and stay untouched, which keeps the patch
  * minimal and the relative structure of the path intact.
  */
+const SHIFT_TOKEN_RE = /(?:^|[,\s])(shift\s*=\s*\{\(\s*-?\d*\.?\d+\s*,\s*-?\d*\.?\d+\s*\)\})/;
+
+/**
+ * Translate a path whose geometry has no coordinate tokens to rewrite (a
+ * native `plot`): update or insert the statement's `shift={(x,y)}` option.
+ */
+function shiftOptionPatch(
+	object: ScenePathObject,
+	dxCm: number,
+	dyCm: number,
+): SourcePatch {
+	const current = object.optionShift ?? { x: 0, y: 0 };
+	const token = `shift={${formatPoint({
+		x: round2(current.x + dxCm),
+		y: round2(current.y + dyCm),
+	})}}`;
+	if (object.optionsSpan) {
+		const match = SHIFT_TOKEN_RE.exec(object.options);
+		if (match) {
+			const start = object.optionsSpan.from + match.index + match[0].indexOf(match[1]);
+			return {
+				oldSpan: { from: start, to: start + match[1].length },
+				replacement: token,
+			};
+		}
+		return {
+			oldSpan: { from: object.optionsSpan.to, to: object.optionsSpan.to },
+			replacement: object.options.trim() ? `, ${token}` : token,
+		};
+	}
+	// No option group at all: insert one right after the command name.
+	const insertAt = object.span.from + 1 + object.command.length;
+	return {
+		oldSpan: { from: insertAt, to: insertAt },
+		replacement: `[${token}]`,
+	};
+}
+
 export function translateObjectPatches(
 	object: SceneObject,
 	dxCm: number,
@@ -298,6 +336,13 @@ export function translateObjectPatches(
 	if (object.type === 'node') {
 		moveToken(object.at);
 		return patches;
+	}
+
+	// Plot statements move through their shift option — the expression and
+	// domain stay exactly as written. The shift moves the whole statement, so
+	// coordinate tokens (if any share the path) are left untouched.
+	if (object.elements.some(element => element.kind === 'plot')) {
+		return [shiftOptionPatch(object, dxCm, dyCm)];
 	}
 
 	for (const element of object.elements) {

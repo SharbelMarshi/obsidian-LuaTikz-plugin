@@ -32,12 +32,13 @@ for (const key of [
 	Object.defineProperty(globalThis, key, { value: window[key], configurable: true, writable: true });
 }
 
-const { editor: editorModule, patcher, pick, sceneSvg } = await loadSrcModules(
+const { editor: editorModule, patcher, pick, sceneSvg, colors } = await loadSrcModules(
 	{
 		editor: 'src/visual/visualEditor.ts',
 		patcher: 'src/visual/sourcePatches.ts',
 		pick: 'src/utils/coordinatePick.ts',
 		sceneSvg: 'src/visual/sceneSvg.ts',
+		colors: 'src/visual/tikzColors.ts',
 	},
 	{ external: ['@codemirror/commands'], stubs: { obsidian: OBSIDIAN_STUB } },
 );
@@ -160,12 +161,27 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	assert.ok(toolbar);
 	assert.equal(toolbar.getAttribute('role'), 'toolbar');
 	const toolButtons = editor.root.querySelectorAll('.luatikz-ve-tool-btn');
-	assert.equal(toolButtons.length, 18, 'all required tools present');
+	assert.equal(toolButtons.length, 11, 'primary tools + the Shapes menu button');
 	for (const btn of toolButtons) {
 		assert.ok(btn.getAttribute('aria-label'), 'icon buttons need aria-label');
 		assert.ok(btn.hasAttribute('aria-pressed'));
 		assert.ok(btn.querySelector('svg.luatikz-ve-icon'), `tool button without icon: ${btn.getAttribute('aria-label')}`);
 	}
+	// All shape tools live in the Shapes menu, triangle included.
+	const shapeItems = editor.root.querySelectorAll('.luatikz-ve-shape-item');
+	assert.equal(shapeItems.length, 10, 'all shape tools in the menu');
+	const shapeTools = [...shapeItems].map(item => item.dataset.tool);
+	assert.ok(shapeTools.includes('triangle'), 'triangle tool present');
+	// The menu opens from its button, picking an item activates the tool.
+	const shapesBtn = editor.root.querySelector('.luatikz-ve-shapes-btn');
+	assert.ok(shapesBtn, 'Shapes menu button present');
+	assert.ok(editor.root.querySelector('.luatikz-ve-shape-menu').classList.contains('luatikz-ve-hidden'));
+	shapesBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+	assert.equal(editor.shapeMenuOpen, true, 'menu opens');
+	editor.root.querySelector('[data-tool="triangle"]').dispatchEvent(new window.Event('click', { bubbles: true }));
+	assert.equal(editor.tool, 'triangle', 'menu item activates the tool');
+	assert.equal(editor.shapeMenuOpen, false, 'menu closes after picking');
+	assert.equal(shapesBtn.getAttribute('aria-pressed'), 'true', 'Shapes button reflects the active shape');
 	// Done keeps a readable text label; the icon-only buttons carry tooltips.
 	assert.equal(editor.root.querySelector('.luatikz-ve-done').textContent, 'Done');
 	assert.ok(editor.root.querySelector('.luatikz-ve-undo svg'), 'action buttons use icons');
@@ -284,6 +300,15 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 
 	editor.root.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
 	assert.equal((state.body.match(/\\draw/g) ?? []).length, 1, 'delete removes the selection');
+
+	// Cmd+Backspace (macOS delete) must also delete the selection.
+	router.handlePointerDown(mouse(3, { x: 3, y: 1 }, svg));
+	router.handlePointerUp(mouse(3, { x: 3, y: 1 }, svg));
+	assert.equal(editor.selectionIds.length, 1, 'remaining duplicate is selectable');
+	editor.root.dispatchEvent(new window.KeyboardEvent('keydown', {
+		key: 'Backspace', metaKey: true, bubbles: true,
+	}));
+	assert.equal((state.body.match(/\\draw/g) ?? []).length, 0, 'Cmd+Backspace deletes the selection');
 	editor.destroy();
 }
 
@@ -296,7 +321,7 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 		'\\draw (4,-1) circle[radius=0.5cm];',
 		'\\end{tikzpicture}',
 	].join('\n');
-	const { editor, svg } = makeEditor(body);
+	const { editor, state, svg } = makeEditor(body);
 	editor.setTool('select');
 	const router = editor.gestureRouter;
 
@@ -312,11 +337,27 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	router.handlePointerUp(mouse(2, { x: 5.5, y: 3 }, svg));
 	assert.equal(editor.selectionIds.length, 2);
 
-	// A box only partially covering the circle must not select it.
-	router.handlePointerDown(mouse(3, { x: 3.8, y: -0.8 }, svg));
+	// A box only partially covering the circle must not select it. (Starts
+	// outside every shape: starting inside a selected shape would move it.)
+	editor.root.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+	router.handlePointerDown(mouse(3, { x: 3.3, y: -1.9 }, svg));
 	router.handlePointerMove(mouse(3, { x: 4.2, y: -0.2 }, svg));
 	router.handlePointerUp(mouse(3, { x: 4.2, y: -0.2 }, svg));
 	assert.deepEqual(editor.selectionIds, [], 'partially covered objects stay unselected');
+
+	// A plain tap inside the circle's hollow interior selects it.
+	router.handlePointerDown(mouse(4, { x: 4, y: -1 }, svg));
+	router.handlePointerUp(mouse(4, { x: 4, y: -1 }, svg));
+	assert.deepEqual(editor.selectionIds, ['p0:s1'], 'tap inside a shape must select it');
+
+	// Dragging from inside the selected circle moves it (snapped by 0.5).
+	router.handlePointerDown(mouse(5, { x: 4, y: -1 }, svg));
+	router.handlePointerMove(mouse(5, { x: 4.52, y: -0.48 }, svg));
+	router.handlePointerUp(mouse(5, { x: 4.52, y: -0.48 }, svg));
+	assert.ok(
+		state.body.includes('(4.50, -0.50) circle'),
+		`interior drag must move the selected shape: ${state.body}`,
+	);
 	editor.destroy();
 }
 
@@ -340,19 +381,19 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	router.handlePointerUp(mouse(1, { x: 0.5, y: 2.5 }, svg));
 	assert.deepEqual(editor.selectionIds, ['p0:s1'], 'marquee must work from a locked ghost');
 
-	// A plain tap on the ghost selects it and explains the lock…
+	// A plain tap on the ghost selects it and explains its limits…
 	router.handlePointerDown(mouse(2, { x: 3, y: 0.02 }, svg));
 	router.handlePointerUp(mouse(2, { x: 3, y: 0.02 }, svg));
 	assert.deepEqual(editor.selectionIds, ['p0:s0']);
 	assert.match(
 		editor.root.querySelector('[role="status"]').textContent,
-		/Locked object/,
+		/Source panel/,
 	);
 
-	// …and Delete must never touch a locked statement.
-	const before = state.body;
+	// …and Delete removes it like any other selected object.
 	editor.root.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
-	assert.equal(state.body, before, 'locked source must survive Delete');
+	assert.ok(!state.body.includes('bend left'), 'delete must remove source-only statements too');
+	assert.ok(state.body.includes('(1,1) -- (2,2)'), 'other statements stay untouched');
 	editor.destroy();
 }
 
@@ -374,6 +415,272 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	editor.destroy();
 }
 
+/* --- transformed pictures: drag maps back through the inverse -------------------- */
+
+{
+	// rotate=90 displays (1,0)--(2,0) vertically at x=0; dragging the line
+	// 0.5 to the right on screen must translate the SOURCE by (0, -0.5).
+	const body = '\\begin{tikzpicture}[rotate=90]\n\\draw (1,0) -- (2,0);\n\\end{tikzpicture}';
+	const { editor, state, svg } = makeEditor(body);
+	const router = editor.gestureRouter;
+	editor.setTool('select');
+
+	router.handlePointerDown(mouse(1, { x: 0, y: 1.5 }, svg));
+	router.handlePointerUp(mouse(1, { x: 0, y: 1.5 }, svg));
+	assert.equal(editor.selectionIds.length, 1, 'rotated-picture object must be selectable');
+
+	router.handlePointerDown(mouse(2, { x: 0, y: 1.5 }, svg));
+	router.handlePointerMove(mouse(2, { x: 0.52, y: 1.51 }, svg));
+	router.handlePointerUp(mouse(2, { x: 0.52, y: 1.51 }, svg));
+	assert.ok(
+		state.body.includes('(1.00, -0.50) -- (2.00, -0.50)'),
+		`rotated drag must inverse-map the delta: ${state.body}`,
+	);
+	editor.destroy();
+}
+
+{
+	// scale=2 displays (1,1)--(2,1) at (2,2)--(4,2); a 0.5 display drag is a
+	// 0.25 source translation.
+	const body = '\\begin{tikzpicture}[scale=2]\n\\draw (1,1) -- (2,1);\n\\end{tikzpicture}';
+	const { editor, state, svg } = makeEditor(body);
+	const router = editor.gestureRouter;
+	editor.setTool('select');
+
+	router.handlePointerDown(mouse(1, { x: 3, y: 2 }, svg));
+	router.handlePointerUp(mouse(1, { x: 3, y: 2 }, svg));
+	router.handlePointerDown(mouse(2, { x: 3, y: 2 }, svg));
+	router.handlePointerMove(mouse(2, { x: 3.52, y: 2.01 }, svg));
+	router.handlePointerUp(mouse(2, { x: 3.52, y: 2.01 }, svg));
+	assert.ok(
+		state.body.includes('(1.25, 1.00) -- (2.25, 1.00)'),
+		`scaled drag must divide the delta by the scale: ${state.body}`,
+	);
+	editor.destroy();
+}
+
+/* --- triangle tool ---------------------------------------------------------------- */
+
+{
+	const { editor, state, svg } = makeEditor(EMPTY);
+	const router = editor.gestureRouter;
+	editor.setTool('triangle');
+	router.handlePointerDown(mouse(1, { x: 2, y: 2 }, svg));
+	router.handlePointerMove(mouse(1, { x: 2, y: 3 }, svg));
+	router.handlePointerUp(mouse(1, { x: 2, y: 3 }, svg));
+	assert.ok(state.body.includes('-- cycle'), `triangle closes: ${state.body}`);
+	const pairs = state.body.match(/\(-?\d+\.\d+, -?\d+\.\d+\)/g) ?? [];
+	assert.equal(pairs.length, 3, `triangle has three vertices: ${state.body}`);
+	assert.ok(state.body.includes('(2.00, 3.00)'), 'apex at the drag end');
+	editor.destroy();
+}
+
+/* --- Hebrew auto-wrap in text nodes ---------------------------------------------- */
+
+{
+	const { editor, state, svg } = makeEditor(EMPTY);
+	const router = editor.gestureRouter;
+	const typeNode = (text, at) => {
+		editor.setTool('text');
+		router.handlePointerDown(mouse(9, at, svg));
+		router.handlePointerUp(mouse(9, at, svg));
+		const input = editor.root.querySelector('.luatikz-ve-text-input-field');
+		input.value = text;
+		input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+	};
+
+	typeNode('שלום עולם', { x: 1, y: 1 });
+	assert.ok(state.body.includes('{\\he{שלום עולם}}'), `hebrew wrapped: ${state.body}`);
+
+	typeNode('abc שלום def', { x: 2, y: 2 });
+	assert.ok(state.body.includes('{abc \\he{שלום} def}'), `mixed runs wrapped individually: ${state.body}`);
+
+	typeNode('\\he{שלום} כבר עטוף', { x: 3, y: 3 });
+	assert.ok(
+		state.body.includes('{\\he{שלום} כבר עטוף}'),
+		`manually wrapped text is left alone: ${state.body}`,
+	);
+
+	typeNode('plain latin', { x: 0.5, y: 0.5 });
+	assert.ok(state.body.includes('{plain latin}'), 'latin text untouched');
+	editor.destroy();
+}
+
+/* --- freehand hold-to-snap -------------------------------------------------------- */
+
+{
+	const { editor, state, svg } = makeEditor(EMPTY);
+	const router = editor.gestureRouter;
+	editor.setTool('freehand');
+	router.handlePointerDown(penAt(1, { x: 0, y: 0 }, svg));
+	for (let index = 1; index <= 20; index++) {
+		router.handlePointerMove(penAt(1, {
+			x: (3 * index) / 20,
+			y: index % 2 ? 0.02 : -0.02,
+		}, svg));
+	}
+	// The hold timer would fire this after FREEHAND_HOLD_MS of stillness.
+	assert.equal(editor.recognizeFreehandNow(), true, 'wobbly straight stroke recognized');
+	router.handlePointerUp(penAt(1, { x: 3, y: 0 }, svg));
+	assert.match(
+		state.body,
+		/\\draw \(0\.00, 0\.00\) -- \(3\.00, -?0\.02\);/,
+		`stroke snapped to a clean line: ${state.body}`,
+	);
+	assert.ok(!state.body.includes('controls'), 'no freehand bezier once snapped');
+	editor.destroy();
+}
+
+/* --- function plotter ------------------------------------------------------------- */
+
+{
+	const { editor, state, svg } = makeEditor(EMPTY);
+	const router = editor.gestureRouter;
+	editor.setTool('plot');
+	router.handlePointerDown(mouse(1, { x: 1, y: 1 }, svg));
+	router.handlePointerUp(mouse(1, { x: 1, y: 1 }, svg));
+	const overlay = editor.root.querySelector('.luatikz-ve-plot-input');
+	assert.ok(overlay, 'plot dialog opens');
+	const inputs = overlay.querySelectorAll('input');
+	inputs[0].value = 'x^2';
+	inputs[1].value = '-1';
+	inputs[2].value = '1';
+	overlay.querySelector('.luatikz-ve-text-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
+	assert.ok(
+		state.body.includes('\\draw[domain=-1:1, samples=120, smooth] plot (\\x, {\\x^2});'),
+		`plot committed as native TikZ plot: ${state.body}`,
+	);
+	const plotObject = editor.currentScene.objects.find(object => object.type === 'path');
+	assert.ok(plotObject, 'plot parses back as an editable path object');
+	assert.equal(plotObject.elements[0].kind, 'plot');
+	assert.deepEqual(plotObject.plotDomain, { from: -1, to: 1 });
+
+	// Dragging the curve writes a shift option — expression and domain stay
+	// exactly as written.
+	editor.setTool('select');
+	router.handlePointerDown(mouse(2, { x: 0, y: 0 }, svg));
+	router.handlePointerMove(mouse(2, { x: 0.52, y: 0.01 }, svg));
+	router.handlePointerUp(mouse(2, { x: 0.52, y: 0.01 }, svg));
+	assert.ok(
+		state.body.includes('shift={(0.50, 0.00)}'),
+		`plot drag adds a shift option: ${state.body}`,
+	);
+	assert.ok(state.body.includes('plot (\\x, {\\x^2})'), 'expression untouched by the drag');
+	editor.destroy();
+}
+
+/* --- rotation --------------------------------------------------------------------- */
+
+{
+	const body = '\\begin{tikzpicture}\n\\draw (1,0) -- (3,0);\n\\end{tikzpicture}';
+	const { editor, state, svg } = makeEditor(body);
+	const router = editor.gestureRouter;
+	editor.setTool('select');
+	router.handlePointerDown(mouse(1, { x: 2, y: 0 }, svg));
+	router.handlePointerUp(mouse(1, { x: 2, y: 0 }, svg));
+	assert.equal(editor.selectionIds.length, 1);
+
+	// The rotate grip sits 26 px above the selection's top edge. The editor
+	// derives px→cm from its internal viewBox (the svg attribute lags in
+	// jsdom because rAF never flushes), so compute the offset from that.
+	const gripOffsetCm = 26 / ((RECT.width / editor.currentViewBox.w) * PT_PER_CM);
+	const grip = { x: 2, y: gripOffsetCm };
+	// Dragging the grip a quarter turn (shift snaps to 15° steps).
+	router.handlePointerDown(mouse(2, grip, svg));
+	router.handlePointerMove(mouse(2, { x: 2 - gripOffsetCm, y: 0 }, svg, { shiftKey: true }));
+	router.handlePointerUp(mouse(2, { x: 2 - gripOffsetCm, y: 0 }, svg, { shiftKey: true }));
+	assert.ok(
+		state.body.includes('(2.00, -1.00) -- (2.00, 1.00)'),
+		`line rotated 90° about its center: ${state.body}`,
+	);
+	editor.destroy();
+}
+
+{
+	// Rectangles cannot express their own rotation: the statement is
+	// rewritten as a closed polyline through the rotated corners.
+	const body = '\\begin{tikzpicture}\n\\draw[thick] (0,0) rectangle (2,1);\n\\end{tikzpicture}';
+	const { editor, state, svg } = makeEditor(body);
+	const router = editor.gestureRouter;
+	editor.setTool('select');
+	router.handlePointerDown(mouse(1, { x: 1, y: 1 }, svg));
+	router.handlePointerUp(mouse(1, { x: 1, y: 1 }, svg));
+	assert.equal(editor.selectionIds.length, 1, 'rectangle selected via its edge');
+
+	const gripOffsetCm = 26 / ((RECT.width / editor.currentViewBox.w) * PT_PER_CM);
+	const grip = { x: 1, y: 1 + gripOffsetCm };
+	const radius = 0.5 + gripOffsetCm;
+	router.handlePointerDown(mouse(2, grip, svg));
+	router.handlePointerMove(mouse(2, { x: 1 - radius, y: 0.5 }, svg, { shiftKey: true }));
+	router.handlePointerUp(mouse(2, { x: 1 - radius, y: 0.5 }, svg, { shiftKey: true }));
+	assert.ok(!state.body.includes('rectangle'), `rectangle became a polyline: ${state.body}`);
+	assert.ok(state.body.includes('[thick]'), 'options survive the rewrite');
+	assert.ok(state.body.includes('-- cycle'), 'polyline closes');
+	// 90° CCW about (1, 0.5): (0,0) → (1.5, -0.5); (2,1) → (0.5, 1.5).
+	assert.ok(state.body.includes('(1.50, -0.50)'), state.body);
+	assert.ok(state.body.includes('(0.50, 1.50)'), state.body);
+	editor.destroy();
+}
+
+/* --- stacked objects: repeated tap cycles through candidates ---------------------- */
+
+{
+	const body = '\\begin{tikzpicture}\n\\draw (0,0) -- (2,0);\n\\draw (0,0) -- (2,0);\n\\end{tikzpicture}';
+	const { editor, svg } = makeEditor(body);
+	const router = editor.gestureRouter;
+	editor.setTool('select');
+	const tap = () => {
+		router.handlePointerDown(mouse(1, { x: 1, y: 0 }, svg));
+		router.handlePointerUp(mouse(1, { x: 1, y: 0 }, svg));
+	};
+	tap();
+	const first = editor.selectionIds[0];
+	tap();
+	const second = editor.selectionIds[0];
+	assert.notEqual(second, first, 'repeated tap selects the object underneath');
+	tap();
+	assert.equal(editor.selectionIds[0], first, 'third tap cycles back to the top');
+	editor.destroy();
+}
+
+/* --- objects panel: list, hide/show, delete --------------------------------------- */
+
+{
+	const body = '\\begin{tikzpicture}\n\\draw (0,0) -- (1,0);\n\\draw (0,1) -- (1,1);\n\\end{tikzpicture}';
+	const { editor, state } = makeEditor(body);
+	editor.togglePanel('objects', true);
+	let rows = editor.root.querySelectorAll('.luatikz-ve-object-row');
+	assert.equal(rows.length, 2, 'both statements listed');
+
+	// Untick the first row: the statement is commented out with %~ markers,
+	// disappears from the scene, but stays listed as a hidden row.
+	rows[0].querySelector('.luatikz-ve-object-visible')
+		.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.ok(state.body.includes('%~\\draw (0,0) -- (1,0);'), `hidden via marker: ${state.body}`);
+	assert.equal(editor.currentScene.objects.length, 1, 'hidden object leaves the scene');
+	rows = editor.root.querySelectorAll('.luatikz-ve-object-row');
+	assert.equal(rows.length, 2, 'hidden object still listed');
+	assert.ok(rows[1].classList.contains('is-hidden'), 'hidden row marked');
+
+	// Tick it back: the marker is stripped and the object returns.
+	rows[1].querySelector('.luatikz-ve-object-visible')
+		.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.ok(!state.body.includes('%~'), `restored: ${state.body}`);
+	assert.equal(editor.currentScene.objects.length, 2);
+
+	// Row click selects; the delete button removes the statement.
+	rows = editor.root.querySelectorAll('.luatikz-ve-object-row');
+	rows[0].querySelector('.luatikz-ve-object-label')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	assert.equal(editor.selectionIds.length, 1, 'row click selects the object');
+	rows = editor.root.querySelectorAll('.luatikz-ve-object-row');
+	rows[1].querySelector('.luatikz-ve-object-delete')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	assert.ok(!state.body.includes('(0,1) -- (1,1)'), `deleted from the panel: ${state.body}`);
+	assert.equal(editor.currentScene.objects.length, 1);
+	editor.destroy();
+}
+
 /* --- style updates through the properties panel --------------------------------- */
 
 {
@@ -383,10 +690,39 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	router.handlePointerDown(mouse(1, { x: 2, y: 1.5 }, svg));
 	router.handlePointerUp(mouse(1, { x: 2, y: 1.5 }, svg));
 
-	const strokeSelect = editor.root.querySelector('.luatikz-ve-props select');
-	strokeSelect.value = 'red';
-	strokeSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+	const redSwatch = editor.root.querySelector(
+		'.luatikz-ve-props-colorrow .luatikz-ve-swatch[data-color="red"]',
+	);
+	redSwatch.dispatchEvent(new window.Event('click', { bubbles: true }));
 	assert.ok(state.body.includes('\\draw[red] (1,1) -- (3,2);'), state.body);
+
+	// The custom color input writes a readable xcolor mix (`a!p!b`), never
+	// the inline {rgb,…} form, and the mix approximates the picked color.
+	const customInput = editor.root.querySelector(
+		'.luatikz-ve-props-colorrow .luatikz-ve-swatch-custom',
+	);
+	customInput.value = '#123456';
+	customInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+	const colorMatch = state.body.match(/\\draw\[(?:draw=)?([^\],]+)\] \(1,1\) -- \(3,2\);/);
+	assert.ok(colorMatch, `custom color written into options: ${state.body}`);
+	assert.ok(!colorMatch[1].includes('{'), `mix syntax, not inline rgb: ${colorMatch[1]}`);
+	assert.match(colorMatch[1], /^[a-z]+(!\d+(![a-z]+)?)*$/, colorMatch[1]);
+	const writtenRgb = colors.tikzColorToRgb(colorMatch[1]);
+	const colorError = Math.hypot(writtenRgb[0] - 18, writtenRgb[1] - 52, writtenRgb[2] - 86);
+	assert.ok(colorError < 45, `mix approximates #123456 (${colorMatch[1]}, off by ${colorError.toFixed(1)})`);
+
+	// A locked-only selection disables the style controls.
+	const lockedBody = '\\begin{tikzpicture}\n\\draw (0,0) to[bend left] (6,0);\n\\end{tikzpicture}';
+	const second = makeEditor(lockedBody);
+	second.editor.setTool('select');
+	second.editor.gestureRouter.handlePointerDown(mouse(1, { x: 3, y: 0.02 }, second.svg));
+	second.editor.gestureRouter.handlePointerUp(mouse(1, { x: 3, y: 0.02 }, second.svg));
+	assert.equal(second.editor.selectionIds.length, 1, 'tap must select the locked ghost');
+	const lockedSwatch = second.editor.root.querySelector(
+		'.luatikz-ve-props-colorrow .luatikz-ve-swatch[data-color="red"]',
+	);
+	assert.equal(lockedSwatch.disabled, true, 'locked selection must disable style swatches');
+	second.editor.destroy();
 	editor.destroy();
 }
 
@@ -646,6 +982,23 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	editor.setCompileResult({ ok: false, error: 'boom' }, false);
 	assert.ok(layer.querySelector('svg'), 'underlay must survive a failed compile');
 	assert.ok(svg.classList.contains('has-underlay'));
+	editor.destroy();
+}
+
+// Output without the calibration bbox (TikZJax on mobile) must NOT embed:
+// a 1:1 embed lands at arbitrary coordinates and shows every object twice
+// (the iPad "everything I draw is duplicated beside itself" bug).
+{
+	const { editor, svg } = makeEditor(EMPTY);
+	const tikzjaxSvg = [
+		'<svg xmlns="http://www.w3.org/2000/svg" viewBox="-72 -72 144 144" width="144" height="144">',
+		'<path d="M0 0 L50 50" stroke="black"/>',
+		'</svg>',
+	].join('');
+	editor.setCompileResult({ ok: true, dataUrl: 'data:x', svgText: tikzjaxSvg }, false);
+	const layer = editor.root.querySelector('.luatikz-ve-layer-compiled');
+	assert.equal(layer.querySelector('svg'), null, 'uncalibratable output must not embed');
+	assert.ok(!svg.classList.contains('has-underlay'), 'wireframe stays authoritative');
 	editor.destroy();
 }
 

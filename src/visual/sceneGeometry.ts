@@ -1,7 +1,18 @@
 import type { TikzCoordinate } from '../utils/coordinatePick';
 import { buildTikzGeometryMap } from '../latex/tikzStatementGeometry';
+import {
+	applyToPoint,
+	colXScale,
+	colYScale,
+	composeTransforms,
+	isAxisAligned,
+	rotationDeg,
+	uniformScale,
+} from './pictureTransform';
+import { compileFunction } from './functionPlot';
 import type {
 	CoordinateToken,
+	PictureTransform,
 	SceneNodeObject,
 	SceneObject,
 	ScenePathObject,
@@ -44,12 +55,63 @@ export interface ObjectGeometry {
 	bounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
 }
 
-function scalePoint(point: TikzCoordinate, scale: { x: number; y: number }): TikzCoordinate {
-	return { x: point.x * scale.x, y: point.y * scale.y };
-}
-
-function avgScale(scale: { x: number; y: number }): number {
-	return (Math.abs(scale.x) + Math.abs(scale.y)) / 2;
+/**
+ * Map one source-space primitive through the picture transform into display
+ * cm. Rects and grids stay their own kinds under axis-aligned transforms;
+ * under rotation/slant their corners become an explicit segment loop.
+ * Circles map to axis-aligned ellipses and arcs pick up the rotation angle —
+ * both exact for uniform scale + rotation, approximate under slant.
+ */
+function transformPrimitive(t: PictureTransform, primitive: ScenePrimitive): ScenePrimitive[] {
+	const map = (point: TikzCoordinate) => applyToPoint(t, point);
+	switch (primitive.kind) {
+		case 'segment':
+			return [{ kind: 'segment', a: map(primitive.a), b: map(primitive.b) }];
+		case 'bezier':
+			return [{
+				kind: 'bezier',
+				a: map(primitive.a),
+				c1: map(primitive.c1),
+				c2: map(primitive.c2),
+				b: map(primitive.b),
+			}];
+		case 'rect':
+		case 'grid': {
+			if (isAxisAligned(t)) {
+				return [{ kind: primitive.kind, a: map(primitive.a), b: map(primitive.b) }];
+			}
+			const corners = [
+				primitive.a,
+				{ x: primitive.b.x, y: primitive.a.y },
+				primitive.b,
+				{ x: primitive.a.x, y: primitive.b.y },
+			].map(map);
+			return corners.map((corner, index) => ({
+				kind: 'segment' as const,
+				a: corner,
+				b: corners[(index + 1) % corners.length],
+			}));
+		}
+		case 'circle':
+			return [{
+				kind: 'circle',
+				center: map(primitive.center),
+				rx: primitive.rx * colXScale(t),
+				ry: primitive.ry * colYScale(t),
+			}];
+		case 'arc': {
+			const rotation = rotationDeg(t);
+			return [{
+				kind: 'arc',
+				center: map(primitive.center),
+				radius: primitive.radius * uniformScale(t),
+				startDeg: primitive.startDeg + rotation,
+				endDeg: primitive.endDeg + rotation,
+			}];
+		}
+		case 'nodeMark':
+			return [{ kind: 'nodeMark', at: map(primitive.at), text: primitive.text }];
+	}
 }
 
 function isFilledObject(object: SceneObject): boolean {
@@ -67,7 +129,16 @@ function resolvePathGeometry(
 	object: ScenePathObject,
 	picture: ScenePicture,
 ): { primitives: ScenePrimitive[]; handles: ObjectHandle[] } {
-	const scale = picture.scale;
+	// A statement-level `shift={(x,y)}` option translates the whole path
+	// inside the picture's coordinate system.
+	const transform = object.optionShift
+		? composeTransforms(picture.transform, {
+			a: 1, b: 0, c: 0, d: 1,
+			tx: object.optionShift.x, ty: object.optionShift.y,
+		})
+		: picture.transform;
+	// Built in source coordinates; mapped through the picture transform at
+	// the end so rotation/slant handling lives in one place.
 	const primitives: ScenePrimitive[] = [];
 	const handles: ObjectHandle[] = [];
 
@@ -87,7 +158,7 @@ function resolvePathGeometry(
 		handles.push({
 			id: `${object.id}:${elementIndex}:${token}`,
 			kind,
-			posCm,
+			posCm: applyToPoint(transform, posCm),
 			elementIndex,
 			token,
 		});
@@ -97,7 +168,7 @@ function resolvePathGeometry(
 		const element = object.elements[index];
 		switch (element.kind) {
 			case 'coord': {
-				const point = scalePoint(element.coord.resolved, scale);
+				const point = element.coord.resolved;
 				pushHandle('vertex', point, index, 'coord');
 				if (pen && pendingOp) {
 					switch (pendingOp.kind) {
@@ -123,10 +194,8 @@ function resolvePathGeometry(
 							primitives.push({ kind: 'grid', a: pen, b: point });
 							break;
 						case 'curveTo': {
-							const c1 = scalePoint(pendingOp.c1.resolved, scale);
-							const c2 = pendingOp.c2
-								? scalePoint(pendingOp.c2.resolved, scale)
-								: c1;
+							const c1 = pendingOp.c1.resolved;
+							const c2 = pendingOp.c2 ? pendingOp.c2.resolved : c1;
 							primitives.push({ kind: 'bezier', a: pen, c1, c2, b: point });
 							break;
 						}
@@ -154,9 +223,9 @@ function resolvePathGeometry(
 				break;
 			case 'curveTo': {
 				pendingOp = { kind: 'curveTo', c1: element.c1, c2: element.c2 };
-				pushHandle('control', scalePoint(element.c1.resolved, scale), index, 'c1');
+				pushHandle('control', element.c1.resolved, index, 'c1');
 				if (element.c2) {
-					pushHandle('control', scalePoint(element.c2.resolved, scale), index, 'c2');
+					pushHandle('control', element.c2.resolved, index, 'c2');
 				}
 				break;
 			}
@@ -164,11 +233,8 @@ function resolvePathGeometry(
 				if (!pen) {
 					break;
 				}
-				const axis = avgScale(scale);
-				const rx = element.radius.cm * (element.yRadius ? Math.abs(scale.x) : axis);
-				const ry = element.yRadius
-					? element.yRadius.cm * Math.abs(scale.y)
-					: element.radius.cm * axis;
+				const rx = element.radius.cm;
+				const ry = element.yRadius ? element.yRadius.cm : element.radius.cm;
 				primitives.push({ kind: 'circle', center: pen, rx, ry });
 				pushHandle('radius', { x: pen.x + rx, y: pen.y }, index, 'radius');
 				break;
@@ -177,7 +243,7 @@ function resolvePathGeometry(
 				if (!pen) {
 					break;
 				}
-				const radius = element.radius.cm * avgScale(scale);
+				const radius = element.radius.cm;
 				const startRad = (element.startAngle.value * Math.PI) / 180;
 				const endRad = (element.endAngle.value * Math.PI) / 180;
 				const center: TikzCoordinate = {
@@ -203,19 +269,51 @@ function resolvePathGeometry(
 				}
 				break;
 			}
+			case 'plot': {
+				const compiled = compileFunction(element.expr, { tikz: true });
+				if (!compiled) {
+					break;
+				}
+				const domain = object.plotDomain ?? { from: -5, to: 5 };
+				const samples = Math.min(Math.max(object.plotSamples ?? 25, 2), 160);
+				let previous: TikzCoordinate | null = null;
+				for (let step = 0; step <= samples; step++) {
+					const x = domain.from + ((domain.to - domain.from) * step) / samples;
+					let y: number;
+					try {
+						y = compiled.evaluate(x);
+					} catch {
+						y = Number.NaN;
+					}
+					if (!Number.isFinite(y) || Math.abs(y) > 1000) {
+						previous = null;
+						continue;
+					}
+					const point = { x, y };
+					if (previous) {
+						primitives.push({ kind: 'segment', a: previous, b: point });
+					}
+					previous = point;
+					pen = point;
+				}
+				break;
+			}
 			case 'raw':
 				break;
 		}
 	}
 
-	return { primitives, handles };
+	return {
+		primitives: primitives.flatMap(primitive => transformPrimitive(transform, primitive)),
+		handles,
+	};
 }
 
 function resolveNodeGeometry(
 	object: SceneNodeObject,
 	picture: ScenePicture,
 ): { primitives: ScenePrimitive[]; handles: ObjectHandle[] } {
-	const at = scalePoint(object.at.resolved, picture.scale);
+	const at = applyToPoint(picture.transform, object.at.resolved);
 	return {
 		primitives: [{ kind: 'nodeMark', at, text: object.text }],
 		handles: [{
@@ -373,7 +471,7 @@ function bezierPoint(
 	};
 }
 
-const CURVE_SAMPLES = 16;
+const CURVE_SAMPLES = 24;
 
 function distanceToPrimitive(
 	point: TikzCoordinate,
@@ -493,6 +591,161 @@ export function hitTestScene(
 		}
 	}
 	return best;
+}
+
+/** True when the horizontal ray from `point` toward +x crosses segment a–b. */
+function rayCrossesEdge(point: TikzCoordinate, a: TikzCoordinate, b: TikzCoordinate): boolean {
+	if ((a.y > point.y) === (b.y > point.y)) {
+		return false;
+	}
+	const t = (point.y - a.y) / (b.y - a.y);
+	return a.x + t * (b.x - a.x) > point.x;
+}
+
+/**
+ * True when `point` lies inside the object's closed area: inside a rect/grid
+ * box, inside a circle/ellipse, or — for paths ending in `cycle` — inside the
+ * outline by even-odd ray casting. Open strokes have no inside.
+ */
+export function pointInsideGeometry(point: TikzCoordinate, geometry: ObjectGeometry): boolean {
+	const bounds = geometry.bounds;
+	if (
+		!bounds
+		|| point.x < bounds.minX || point.x > bounds.maxX
+		|| point.y < bounds.minY || point.y > bounds.maxY
+	) {
+		return false;
+	}
+	for (const primitive of geometry.primitives) {
+		if (primitive.kind === 'rect' || primitive.kind === 'grid') {
+			if (
+				point.x >= Math.min(primitive.a.x, primitive.b.x)
+				&& point.x <= Math.max(primitive.a.x, primitive.b.x)
+				&& point.y >= Math.min(primitive.a.y, primitive.b.y)
+				&& point.y <= Math.max(primitive.a.y, primitive.b.y)
+			) {
+				return true;
+			}
+		} else if (primitive.kind === 'circle') {
+			const nx = (point.x - primitive.center.x) / Math.max(primitive.rx, 1e-6);
+			const ny = (point.y - primitive.center.y) / Math.max(primitive.ry, 1e-6);
+			if (nx * nx + ny * ny <= 1) {
+				return true;
+			}
+		}
+	}
+	const object = geometry.object;
+	if (object.type !== 'path' || !object.elements.some(element => element.kind === 'cycle')) {
+		return false;
+	}
+	let crossings = 0;
+	for (const primitive of geometry.primitives) {
+		if (primitive.kind === 'segment') {
+			if (rayCrossesEdge(point, primitive.a, primitive.b)) {
+				crossings++;
+			}
+		} else if (primitive.kind === 'bezier') {
+			let previous = primitive.a;
+			for (let step = 1; step <= CURVE_SAMPLES; step++) {
+				const next = bezierPoint(step / CURVE_SAMPLES, primitive.a, primitive.c1, primitive.c2, primitive.b);
+				if (rayCrossesEdge(point, previous, next)) {
+					crossings++;
+				}
+				previous = next;
+			}
+		}
+	}
+	return crossings % 2 === 1;
+}
+
+/**
+ * Object whose closed area contains `point`, preferring the smallest one so
+ * nested shapes resolve to the innermost. Complements {@link hitTestScene}:
+ * stroke proximity wins first; this catches clicks in a shape's hollow
+ * interior, which users read as "on the object".
+ */
+export function containmentHit(
+	geometries: readonly ObjectGeometry[],
+	point: TikzCoordinate,
+	options: { includeLocked?: boolean } = {},
+): ObjectGeometry | null {
+	let best: ObjectGeometry | null = null;
+	let bestArea = Number.POSITIVE_INFINITY;
+	for (const geometry of geometries) {
+		if (geometry.object.type === 'locked' && !options.includeLocked) {
+			continue;
+		}
+		if (!geometry.bounds || !pointInsideGeometry(point, geometry)) {
+			continue;
+		}
+		const area = (geometry.bounds.maxX - geometry.bounds.minX)
+			* (geometry.bounds.maxY - geometry.bounds.minY);
+		if (area < bestArea) {
+			bestArea = area;
+			best = geometry;
+		}
+	}
+	return best;
+}
+
+export interface HitCandidates {
+	/** Objects whose stroke is within tolerance, best match first. */
+	stroke: ObjectGeometry[];
+	/** Objects whose closed interior contains the point, innermost first. */
+	contained: ObjectGeometry[];
+}
+
+/**
+ * Every object under the pointer, ranked: stroke hits by distance with a
+ * topmost bias (as in {@link hitTestScene}), then interior containment hits
+ * by area. Repeated taps can walk this list to reach objects buried under
+ * others — without it, stacked objects are unselectable by pointer.
+ */
+export function hitTestCandidates(
+	geometries: readonly ObjectGeometry[],
+	point: TikzCoordinate,
+	toleranceCm: number,
+	options: { includeLocked?: boolean } = {},
+): HitCandidates {
+	const topmostBias = toleranceCm * 0.35;
+	const strokes: Array<{ geometry: ObjectGeometry; distance: number; index: number }> = [];
+	for (let index = 0; index < geometries.length; index++) {
+		const geometry = geometries[index];
+		if (geometry.object.type === 'locked' && !options.includeLocked) {
+			continue;
+		}
+		const distance = distanceToObject(point, geometry);
+		if (distance <= toleranceCm) {
+			strokes.push({ geometry, distance, index });
+		}
+	}
+	strokes.sort((a, b) => (Math.abs(a.distance - b.distance) < topmostBias
+		? b.index - a.index
+		: a.distance - b.distance));
+	const seen = new Set(strokes.map(entry => entry.geometry.object.id));
+
+	const contained: Array<{ geometry: ObjectGeometry; area: number }> = [];
+	for (const geometry of geometries) {
+		if (geometry.object.type === 'locked' && !options.includeLocked) {
+			continue;
+		}
+		if (seen.has(geometry.object.id) || !geometry.bounds) {
+			continue;
+		}
+		if (pointInsideGeometry(point, geometry)) {
+			contained.push({
+				geometry,
+				area: (geometry.bounds.maxX - geometry.bounds.minX)
+					* (geometry.bounds.maxY - geometry.bounds.minY),
+			});
+		}
+	}
+	contained.sort((a, b) => a.area - b.area);
+
+	return {
+		stroke: strokes.map(entry => entry.geometry),
+		contained: contained.map(entry => entry.geometry),
+	};
 }
 
 /** Handle within `toleranceCm` of `point`, preferring vertices over controls. */

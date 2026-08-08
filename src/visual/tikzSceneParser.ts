@@ -1,4 +1,6 @@
 import { parsePictureScale, parseLengthCm } from '../latex/tikzStatementGeometry';
+import { IDENTITY_TRANSFORM, parsePictureTransform } from './pictureTransform';
+import { compileFunction } from './functionPlot';
 import type {
 	CoordinatePrefix,
 	CoordinateToken,
@@ -38,10 +40,6 @@ const STATEMENT_COMMANDS = new Set([
 	'node', 'coordinate', 'pic', 'clip', 'graph', 'datavisualization',
 	'useasboundingbox',
 ]);
-
-/** Picture options that make coordinate mapping unreliable → lock the picture. */
-const LOCKING_PICTURE_OPTION_RE =
-	/(?:^|[,\s])(?:rotate|shift|xshift|yshift|xslant|yslant|cm=|x=|y=|z=|transform)/;
 
 const BEGIN_PICTURE_RE = /\\begin\s*\{tikzpicture\}/g;
 
@@ -695,7 +693,44 @@ function parsePathExpression(
 			continue;
 		}
 
-		// `to`, `edge`, `plot`, polar coordinates, named coordinates, calc, …
+		const plotOpFrom = reader.cursor;
+		if (reader.eatWord('plot')) {
+			// Native function plot: exactly `plot (\x, {expr})`. Other plot
+			// forms (coordinates lists, files, [options]) stay source-only.
+			reader.skipTrivia();
+			if (!reader.eat('(')) {
+				return null;
+			}
+			reader.skipTrivia();
+			if (!(source[reader.cursor] === '\\' && source[reader.cursor + 1] === 'x')) {
+				return null;
+			}
+			reader.cursor += 2;
+			reader.skipTrivia();
+			if (!reader.eat(',')) {
+				return null;
+			}
+			reader.skipTrivia();
+			if (reader.peek() !== '{') {
+				return null;
+			}
+			const exprEnd = scanBalancedGroup(source, reader.cursor, end);
+			const exprSpan = { from: reader.cursor + 1, to: exprEnd - 1 };
+			reader.cursor = exprEnd;
+			reader.skipTrivia();
+			if (!reader.eat(')')) {
+				return null;
+			}
+			elements.push({
+				kind: 'plot',
+				expr: source.slice(exprSpan.from, exprSpan.to),
+				exprSpan,
+				span: { from: plotOpFrom, to: reader.cursor },
+			});
+			continue;
+		}
+
+		// `to`, `edge`, polar coordinates, named coordinates, calc, …
 		return null;
 	}
 
@@ -730,13 +765,18 @@ function parsePathExpression(
 			}
 		}
 	}
-	if (!sawCoord) {
+	const hasPlot = elements.some(element => element.kind === 'plot');
+	if (!sawCoord && !hasPlot) {
 		return null;
 	}
 
 	const first = elements[0];
-	if (first.kind !== 'coord' || first.coord.prefix !== '') {
-		// A path must start at an absolute point for edits to be predictable.
+	if (first.kind === 'coord') {
+		if (first.coord.prefix !== '') {
+			// A path must start at an absolute point for edits to be predictable.
+			return null;
+		}
+	} else if (first.kind !== 'plot') {
 		return null;
 	}
 
@@ -766,6 +806,10 @@ function readStatementOptions(
 	};
 }
 
+const DOMAIN_OPTION_RE = /(?:^|[,\s])domain\s*=\s*(-?\d*\.?\d+)\s*:\s*(-?\d*\.?\d+)/;
+const SAMPLES_OPTION_RE = /(?:^|[,\s])samples\s*=\s*(\d+)/;
+const SHIFT_OPTION_RE = /(?:^|[,\s])shift\s*=\s*\{\(\s*(-?\d*\.?\d+)\s*,\s*(-?\d*\.?\d+)\s*\)\}/;
+
 function parsePathStatement(
 	source: string,
 	raw: RawStatement,
@@ -777,6 +821,17 @@ function parsePathStatement(
 	if (!parsed) {
 		return null;
 	}
+	// A plot is editable only when its expression is one this editor can
+	// evaluate for the canvas — otherwise the statement locks like any other
+	// unsupported syntax.
+	for (const element of parsed.elements) {
+		if (element.kind === 'plot' && !compileFunction(element.expr, { tikz: true })) {
+			return null;
+		}
+	}
+	const domainMatch = DOMAIN_OPTION_RE.exec(options);
+	const samplesMatch = SAMPLES_OPTION_RE.exec(options);
+	const shiftMatch = SHIFT_OPTION_RE.exec(options);
 	return {
 		id: '',
 		pictureIndex: 0,
@@ -785,6 +840,13 @@ function parsePathStatement(
 		command: raw.command ?? 'draw',
 		optionsSpan,
 		options,
+		plotDomain: domainMatch
+			? { from: Number.parseFloat(domainMatch[1]), to: Number.parseFloat(domainMatch[2]) }
+			: null,
+		plotSamples: samplesMatch ? Number.parseInt(samplesMatch[1], 10) : null,
+		optionShift: shiftMatch
+			? { x: Number.parseFloat(shiftMatch[1]), y: Number.parseFloat(shiftMatch[2]) }
+			: null,
 		elements: parsed.elements,
 	};
 }
@@ -891,17 +953,20 @@ function scanPictures(source: string): ScenePicture[] {
 		const bodyTo = endMatch ? bodyFrom + endMatch.index : source.length;
 
 		// Rebuild a single-line begin so multi-line options still parse.
+		const flatOptions = optionsText.replace(/\n/g, ' ');
 		const scale = parsePictureScale(
-			`\\begin{tikzpicture}[${optionsText.replace(/\n/g, ' ')}]`,
+			`\\begin{tikzpicture}[${flatOptions}]`,
 		);
-		const editable = !LOCKING_PICTURE_OPTION_RE.test(optionsText);
+		const transformResult = parsePictureTransform(flatOptions);
 		pictures.push({
 			index: pictures.length,
 			bodyFrom,
 			bodyTo,
 			optionsText,
 			scale,
-			editable,
+			transform: transformResult.transform ?? IDENTITY_TRANSFORM,
+			editable: transformResult.transform !== null,
+			lockedOption: transformResult.offending,
 			implicit: false,
 		});
 		BEGIN_PICTURE_RE.lastIndex = bodyTo;
@@ -914,7 +979,9 @@ function scanPictures(source: string): ScenePicture[] {
 			bodyTo: source.length,
 			optionsText: '',
 			scale: { x: 1, y: 1 },
+			transform: IDENTITY_TRANSFORM,
 			editable: true,
+			lockedOption: null,
 			implicit: true,
 		});
 	}
@@ -948,7 +1015,9 @@ export function parseTikzScene(source: string): TikzScene {
 			});
 
 			if (!picture.editable) {
-				objects.push(lock('picture uses transforms this editor cannot map'));
+				const raw = picture.lockedOption ?? 'transform';
+				const option = raw.length > 32 ? `${raw.slice(0, 32)}…` : raw;
+				objects.push(lock(`the picture's "${option}" option isn't supported by the visual editor`));
 				continue;
 			}
 			if (raw.inScope) {

@@ -107,11 +107,17 @@ export function parseSettings(data: unknown): Partial<LuaTikzSettings> {
 	return parsed;
 }
 
+/** Text-bearing settings persisted with a trailing debounce: unthrottled,
+ * every keystroke wrote data.json, wiped the render cache, and (for the
+ * lualatex path) spawned the half-typed path as a process. */
+const DEBOUNCED_CONTROL_KEYS = new Set<string>([...STRING_SETTING_KEYS, 'timeoutMs']);
+
 export class LuaTikzSettingTab extends PluginSettingTab {
 	plugin: LuaTikzPlugin;
 	private rendererChoicesContainer: HTMLElement | null = null;
 	private environmentStatusEl: HTMLElement | null = null;
 	private customPreambleInput: TextAreaComponent | null = null;
+	private debouncedPersists = new Map<string, (value: unknown) => void>();
 
 	constructor(app: App, plugin: LuaTikzPlugin) {
 		super(app, plugin);
@@ -119,9 +125,11 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 	}
 
 	/**
-	 * Search metadata for Obsidian 1.13+'s settings search. The tab keeps its
-	 * custom `display()` rendering; these informational definitions make every
-	 * setting findable by name/description and route the user to this tab.
+	 * Declarative settings for Obsidian 1.13+. When this returns a non-empty
+	 * array the app renders the tab from it (and indexes it for settings
+	 * search) and `display()` is NOT called — so every definition here must
+	 * carry its real control, not just search metadata. `display()` below
+	 * stays as the imperative fallback for Obsidian < 1.13.
 	 */
 	getSettingDefinitions(): SettingDefinitionItem[] {
 		return [
@@ -129,63 +137,260 @@ export class LuaTikzSettingTab extends PluginSettingTab {
 				type: 'group',
 				heading: 'Renderer',
 				items: [
-					{ name: 'Renderer', desc: 'Choose between local LuaLaTeX and the bundled TikZJax.', aliases: ['engine', 'lualatex', 'tikzjax'] },
-					{ name: 'Test render', desc: 'Compile a small sample diagram with the current renderer settings.' },
+					{
+						name: 'Renderer',
+						desc: 'Choose between local LuaLaTeX and the bundled TikZJax.',
+						aliases: ['engine', 'lualatex', 'tikzjax'],
+						render: (setting: Setting) => {
+							setting.settingEl.empty();
+							this.rendererChoicesContainer = setting.settingEl;
+							this.renderRendererChoices(setting.settingEl);
+							return () => {
+								this.rendererChoicesContainer = null;
+							};
+						},
+					},
+					{
+						name: 'Environment',
+						desc: 'Detected LuaLaTeX and pdftocairo installations.',
+						searchable: false,
+						render: (setting: Setting) => {
+							setting.settingEl.empty();
+							this.environmentStatusEl = setting.settingEl.createDiv({
+								cls: 'luatikz-environment-status luatikz-muted',
+							});
+							void this.renderEnvironmentStatus();
+							return () => {
+								this.environmentStatusEl = null;
+							};
+						},
+					},
+					{
+						name: 'Test render',
+						desc: 'Compile a small sample diagram with the current renderer settings.',
+						action: () => {
+							void this.runTestRender();
+						},
+					},
 				],
 			},
 			{
 				type: 'group',
 				heading: 'Local LuaLaTeX',
 				items: [
-					{ name: 'Allow local LuaLaTeX execution', desc: 'Explicitly allow the plugin to run lualatex on your machine.' },
-					{ name: 'LuaLaTeX path', desc: 'Direct path to the lualatex executable.' },
-					{ name: 'Timeout (ms)', desc: 'Per-render compile timeout.' },
-					{ name: 'Output format', desc: 'SVG conversion pipeline for compiled PDFs.' },
+					{
+						name: 'Allow local LuaLaTeX execution',
+						desc: 'Explicitly allow the plugin to run lualatex on your machine.',
+						control: { type: 'toggle', key: 'enableLocalShellRenderer', defaultValue: DEFAULT_SETTINGS.enableLocalShellRenderer },
+					},
+					{
+						name: 'LuaLaTeX path',
+						desc: 'Direct path to the lualatex executable.',
+						control: { type: 'text', key: 'lualatexPath', placeholder: '/Library/TeX/texbin/lualatex' },
+					},
+					{
+						name: 'Timeout (ms)',
+						desc: `Per-render compile timeout, ${MIN_TIMEOUT_MS}–${MAX_TIMEOUT_MS} ms.`,
+						control: {
+							type: 'number',
+							key: 'timeoutMs',
+							defaultValue: DEFAULT_SETTINGS.timeoutMs,
+							min: MIN_TIMEOUT_MS,
+							max: MAX_TIMEOUT_MS,
+						},
+					},
+					{
+						name: 'Output format',
+						desc: 'SVG conversion pipeline for compiled PDFs.',
+						control: {
+							type: 'dropdown',
+							key: 'outputFormat',
+							options: { svg: 'SVG', png: 'PNG' },
+							defaultValue: DEFAULT_SETTINGS.outputFormat,
+						},
+					},
 				],
 			},
 			{
 				type: 'group',
 				heading: 'Fonts (LuaLaTeX)',
 				items: [
-					{ name: 'Main font', desc: 'Override the main text font.', aliases: ['fonts'] },
-					{ name: 'Hebrew font', desc: 'Override the Hebrew fallback chain.', aliases: ['rtl'] },
-					{ name: 'Arabic font', desc: 'Override the Arabic fallback chain.', aliases: ['rtl'] },
+					{
+						name: 'Main font',
+						desc: 'Override the main text font. Leave blank for the built-in fallback chain; names that are not installed are skipped automatically.',
+						aliases: ['fonts'],
+						control: { type: 'text', key: 'mainFont', placeholder: 'TeX Gyre Termes' },
+					},
+					{
+						name: 'Hebrew font',
+						desc: 'Override the Hebrew fallback chain (loads only when a diagram uses \\he{}).',
+						aliases: ['rtl'],
+						control: { type: 'text', key: 'hebrewFont', placeholder: 'Noto Serif Hebrew → David CLM → Frank Ruehl CLM' },
+					},
+					{
+						name: 'Arabic font',
+						desc: 'Override the Arabic fallback chain (loads only when a diagram uses \\ar{}).',
+						aliases: ['rtl'],
+						control: { type: 'text', key: 'arabicFont', placeholder: 'Noto Sans Arabic → Geeza Pro → Amiri' },
+					},
 				],
 			},
 			{
 				type: 'group',
 				heading: 'Preamble',
 				items: [
-					{ name: 'Extra preamble', desc: 'Additional trusted LaTeX appended to the preamble.' },
-					{ name: 'Custom preamble', desc: 'Replaces the generated preamble entirely (LuaLaTeX only).' },
+					{
+						name: 'Extra preamble',
+						desc: 'Additional trusted LaTeX appended to the preamble. LuaLaTeX uses the full preamble. TikZJax keeps TikZ/macros and removes font/localization-only lines.',
+						control: {
+							type: 'textarea',
+							key: 'extraPreamble',
+							rows: 8,
+							placeholder: String.raw`\usepackage{physics}`,
+						},
+					},
+					{
+						name: 'Custom preamble',
+						desc: 'Replaces the generated preamble entirely (LuaLaTeX only). Fonts, polyglossia and \\he/\\ar become yours to define. Leave empty to use the managed preamble.',
+						control: {
+							type: 'textarea',
+							key: 'customPreamble',
+							rows: 16,
+							placeholder: 'Empty — using the managed preamble',
+						},
+					},
+					{
+						name: 'Load current preamble',
+						desc: 'Copy the generated preamble into Custom preamble for editing.',
+						action: () => {
+							const preamble = buildManagedPreamblePreview(
+								latexWrapperOptionsFromSettings(this.plugin.settings),
+							);
+							void this.persistSetting('customPreamble', preamble).then(() => {
+								this.update();
+								new Notice('Loaded the generated preamble — it is yours to edit now.');
+							});
+						},
+					},
+					{
+						name: 'Reset custom preamble',
+						desc: 'Clear Custom preamble and return to the managed preamble.',
+						action: () => {
+							void this.persistSetting('customPreamble', '').then(() => {
+								this.update();
+								new Notice('Using the managed preamble.');
+							});
+						},
+					},
 				],
 			},
 			{
 				type: 'group',
 				heading: 'Appearance',
 				items: [
-					{ name: 'Dark mode handling', desc: 'Auto-invert near-black strokes or lightly brighten the whole diagram.', aliases: ['theme', 'invert'] },
+					{
+						name: 'Dark mode handling',
+						desc: 'Auto-invert changes only near-black strokes (colors stay intact). Brightness boost lightly lifts the whole diagram.',
+						aliases: ['theme', 'invert'],
+						control: {
+							type: 'dropdown',
+							key: 'darkModeStyle',
+							options: {
+								'auto-invert': 'Selective SVG inversion (recommended)',
+								'brightness-boost': 'Brightness boost',
+								none: 'No adjustment',
+							},
+							defaultValue: DEFAULT_SETTINGS.darkModeStyle,
+						},
+					},
 				],
 			},
 			{
 				type: 'group',
 				heading: 'Editor',
 				items: [
-					{ name: 'Starter block on new fence', desc: 'Insert a blank tikzpicture when you open a new tikz block.' },
-					{ name: 'Structural lint', desc: 'Warn about unmatched environments, braces, and missing libraries.' },
-					{ name: 'Semicolon reminder', desc: 'Hint or auto-append ; on unfinished \\draw/\\path lines.' },
-					{ name: 'Auto-close brackets', desc: 'Automatically close {, [, (, and $ inside TikZ blocks.' },
+					{
+						name: 'Starter block on new fence',
+						desc: 'Insert a blank tikzpicture when you open a new ```tikz block.',
+						control: { type: 'toggle', key: 'starterBlockOnNewFence', defaultValue: DEFAULT_SETTINGS.starterBlockOnNewFence },
+					},
+					{
+						name: 'Structural lint',
+						desc: 'Show warnings for unmatched environments, braces, and missing libraries inside TikZ blocks.',
+						control: { type: 'toggle', key: 'enableStructuralLint', defaultValue: DEFAULT_SETTINGS.enableStructuralLint },
+					},
+					{
+						name: 'Semicolon reminder',
+						desc: 'Hint or auto-append ; when pressing Enter on unfinished \\draw/\\path lines.',
+						control: {
+							type: 'dropdown',
+							key: 'semicolonReminderMode',
+							options: { off: 'Off', hint: 'Hint (recommended)', 'auto-append': 'Auto-append' },
+							defaultValue: DEFAULT_SETTINGS.semicolonReminderMode,
+						},
+					},
+					{
+						name: 'Auto-close brackets',
+						desc: 'Automatically close {, [, (, and $ while typing inside TikZ blocks.',
+						control: { type: 'toggle', key: 'autoCloseBrackets', defaultValue: DEFAULT_SETTINGS.autoCloseBrackets },
+					},
 				],
 			},
 			{
 				type: 'group',
 				heading: 'Cache',
 				items: [
-					{ name: 'Enable cache', desc: 'Reuse recent render results in memory and on disk.' },
-					{ name: 'Clear cache', desc: 'Remove cached render results and temporary build files.' },
+					{
+						name: 'Enable cache',
+						desc: 'Reuse recent render results in memory and on disk between sessions.',
+						control: { type: 'toggle', key: 'cacheEnabled', defaultValue: DEFAULT_SETTINGS.cacheEnabled },
+					},
+					{
+						name: 'Clear cache',
+						desc: 'Remove cached render results and temporary build files.',
+						action: () => {
+							void this.plugin.renderer?.invalidateCache().then(() => {
+								new Notice('LuaTikz cache cleared.');
+							});
+						},
+					},
 				],
 			},
 		];
+	}
+
+	/** Value source for declarative `control` definitions (Obsidian 1.13+). */
+	getControlValue(key: string): unknown {
+		if (key in DEFAULT_SETTINGS) {
+			return this.plugin.settings[key as keyof LuaTikzSettings];
+		}
+		return undefined;
+	}
+
+	/** Persistence for declarative `control` definitions (Obsidian 1.13+). */
+	setControlValue(key: string, value: unknown): void {
+		if (DEBOUNCED_CONTROL_KEYS.has(key)) {
+			let persist = this.debouncedPersists.get(key);
+			if (!persist) {
+				persist = debounce((debouncedValue: unknown) => {
+					void this.applyControlChange(key, debouncedValue);
+				}, 500, true);
+				this.debouncedPersists.set(key, persist);
+			}
+			persist(value);
+			return;
+		}
+		void this.applyControlChange(key, value);
+	}
+
+	private async applyControlChange(key: string, value: unknown): Promise<void> {
+		if (key === 'lualatexPath') {
+			clearCommandResolutionCache();
+		}
+		await this.persistSetting(key, value);
+		if (key === 'lualatexPath' || key === 'enableLocalShellRenderer') {
+			void this.renderEnvironmentStatus();
+		}
 	}
 
 	display(): void {
