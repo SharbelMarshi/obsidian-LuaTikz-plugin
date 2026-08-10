@@ -249,6 +249,51 @@ export function rgbToTikzExpression(rgb: [number, number, number]): string {
 }
 
 /**
+ * Append a light/dark shade to a color expression: positive `shade` mixes
+ * toward white (`red!60`), negative toward black (`red!60!black`), 0 returns
+ * the base unchanged. Works on mix expressions too — a base ending in a bare
+ * percentage (`red!75`, xcolor's toward-white shorthand) is completed to
+ * `red!75!white` first so the appended pair keeps the color!pct!color
+ * alternation every renderer parses.
+ */
+export function applyColorShade(base: string, shade: number): string {
+	const clamped = Math.round(Math.max(-95, Math.min(95, shade)));
+	const trimmed = base.trim();
+	if (!clamped || !trimmed) {
+		return trimmed;
+	}
+	const parts = trimmed.split('!');
+	const normalized = parts.length % 2 === 0 ? `${trimmed}!white` : trimmed;
+	return clamped > 0
+		? `${normalized}!${100 - clamped}`
+		: `${normalized}!${100 + clamped}!black`;
+}
+
+/**
+ * Inverse of {@link applyColorShade} for the simple forms the shade slider
+ * writes: `base!p` → shade `100-p`, `base!p!black` → shade `-(100-p)`.
+ * Anything else is its own base with shade 0.
+ */
+export function splitColorShade(expression: string): { base: string; shade: number } {
+	const trimmed = expression.trim();
+	const dark = /^(.+)!(\d{1,3})!black$/.exec(trimmed);
+	if (dark) {
+		const pct = Number.parseInt(dark[2], 10);
+		if (pct > 0 && pct < 100) {
+			return { base: dark[1], shade: -(100 - pct) };
+		}
+	}
+	const light = /^(.+)!(\d{1,3})$/.exec(trimmed);
+	if (light) {
+		const pct = Number.parseInt(light[2], 10);
+		if (pct > 0 && pct < 100) {
+			return { base: light[1], shade: 100 - pct };
+		}
+	}
+	return { base: trimmed, shade: 0 };
+}
+
+/**
  * TikZ color expression for a picker hex value: the named color when one
  * matches exactly, otherwise the closest readable `!` mix expression.
  */

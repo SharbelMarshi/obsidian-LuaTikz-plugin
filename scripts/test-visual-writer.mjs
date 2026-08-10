@@ -10,11 +10,12 @@
 import assert from 'node:assert/strict';
 import { loadSrcModules } from './loadSrc.mjs';
 
-const { writer, parser, patcher, options } = await loadSrcModules({
+const { writer, parser, patcher, options, colors } = await loadSrcModules({
 	writer: 'src/visual/tikzWriter.ts',
 	parser: 'src/visual/tikzSceneParser.ts',
 	patcher: 'src/visual/sourcePatches.ts',
 	options: 'src/visual/tikzOptions.ts',
+	colors: 'src/visual/tikzColors.ts',
 });
 
 const { parseTikzScene, insertionPicture } = parser;
@@ -117,6 +118,210 @@ assert.equal(
 	options.applyStyleEdit('red, dashed', { dash: null }),
 	'red',
 );
+
+// --- arrow tip shapes (arrows.meta) -----------------------------------------
+
+assert.equal(
+	options.applyStyleEdit('', { arrows: '->', arrowTip: 'Stealth' }),
+	'-{Stealth}',
+);
+// Changing the direction keeps the tip that is already written.
+assert.equal(
+	options.applyStyleEdit('-{Stealth}, thick', { arrows: '<->' }),
+	'{Stealth}-{Stealth}, thick',
+);
+// Changing the tip keeps the direction.
+assert.equal(
+	options.applyStyleEdit('<-', { arrowTip: 'Latex' }),
+	'{Latex}-',
+);
+// Legacy pgf tips upgrade to their arrows.meta names on edit.
+assert.equal(
+	options.applyStyleEdit('-latex', { arrowTip: 'Triangle' }),
+	'-{Triangle}',
+);
+// Clearing the tip returns to the plain arrow.
+assert.equal(
+	options.applyStyleEdit('-{Stealth}', { arrowTip: null }),
+	'->',
+);
+// A tip on an arrow-less path implies an end arrow.
+assert.equal(
+	options.applyStyleEdit('thick', { arrowTip: 'Diamond' }),
+	'thick, -{Diamond}',
+);
+// Removing the arrows removes the tip spec with them.
+assert.equal(
+	options.applyStyleEdit('{Stealth}-{Stealth}', { arrows: '' }),
+	'',
+);
+const stealthStyle = options.parseOptionStyle('-{Stealth}, thick');
+assert.equal(stealthStyle.arrows, '->');
+assert.equal(stealthStyle.arrowTip, 'Stealth');
+const legacyStyle = options.parseOptionStyle('-stealth');
+assert.equal(legacyStyle.arrows, '->');
+assert.equal(legacyStyle.arrowTip, 'Stealth');
+// Specs outside the model stay raw and untouched by unrelated edits.
+const rawStyle = options.parseOptionStyle('o-o');
+assert.equal(rawStyle.rawArrowToken, 'o-o');
+assert.equal(rawStyle.arrows, undefined);
+
+// --- shadings (gradients) ---------------------------------------------------
+
+assert.equal(
+	options.applyStyleEdit('', { shading: { kind: 'vertical', from: 'red', to: 'blue' } }),
+	'top color=red, bottom color=blue',
+);
+assert.equal(
+	options.applyStyleEdit('', { shading: { kind: 'horizontal', from: 'red', to: 'blue', angle: 30 } }),
+	'left color=red, right color=blue, shading angle=30',
+);
+assert.equal(
+	options.applyStyleEdit('', { shading: { kind: 'radial', from: 'yellow', to: 'black' } }),
+	'inner color=yellow, outer color=black',
+);
+assert.equal(
+	options.applyStyleEdit('', { shading: { kind: 'ball', from: 'green', to: '' } }),
+	'ball color=green',
+);
+// A gradient replaces the solid fill; unrelated tokens survive.
+assert.equal(
+	options.applyStyleEdit('thick, fill=green', {
+		shading: { kind: 'vertical', from: 'red', to: 'white' },
+	}),
+	'thick, top color=red, bottom color=white',
+);
+// Switching gradient kinds replaces the old axis tokens completely.
+assert.equal(
+	options.applyStyleEdit('top color=red, bottom color=blue', {
+		shading: { kind: 'radial', from: 'red', to: 'blue' },
+	}),
+	'inner color=red, outer color=blue',
+);
+// A solid fill clears the gradient…
+assert.equal(
+	options.applyStyleEdit('top color=red, bottom color=blue, thick', { fillColor: 'green' }),
+	'thick, fill=green',
+);
+// …and clearing the fill entirely also drops patterns.
+assert.equal(
+	options.applyStyleEdit('fill=green, pattern=dots, thick', { fillColor: null }),
+	'thick',
+);
+const shadingStyle = options.parseOptionStyle('top color=red!60, bottom color=blue, shading angle=45');
+assert.equal(shadingStyle.shading.kind, 'vertical');
+assert.equal(shadingStyle.shading.from, 'red!60');
+assert.equal(shadingStyle.shading.to, 'blue');
+assert.equal(shadingStyle.shading.angle, 45);
+assert.equal(options.parseOptionStyle('ball color=cyan').shading.kind, 'ball');
+
+// --- patterns ---------------------------------------------------------------
+
+assert.equal(
+	options.applyStyleEdit('', { pattern: { name: 'north east lines', color: 'red' } }),
+	'pattern=north east lines, pattern color=red',
+);
+// A pattern keeps a solid fill as its background, but replaces a gradient.
+assert.equal(
+	options.applyStyleEdit('fill=yellow', { pattern: { name: 'dots' } }),
+	'fill=yellow, pattern=dots',
+);
+assert.equal(
+	options.applyStyleEdit('top color=red, bottom color=blue', { pattern: { name: 'bricks' } }),
+	'pattern=bricks',
+);
+assert.equal(
+	options.applyStyleEdit('pattern=dots, pattern color=red', { pattern: null }),
+	'',
+);
+const patternStyle = options.parseOptionStyle('fill=yellow, pattern=crosshatch, pattern color=blue');
+assert.equal(patternStyle.pattern.name, 'crosshatch');
+assert.equal(patternStyle.pattern.color, 'blue');
+assert.equal(patternStyle.fillColor, 'yellow');
+
+// --- stroke "none" (no outline) ---------------------------------------------
+
+assert.equal(
+	options.applyStyleEdit('', { strokeColor: 'none' }),
+	'draw=none',
+);
+assert.equal(options.parseOptionStyle('draw=none, pattern=dots').strokeColor, 'none');
+// Picking a color afterwards replaces draw=none in place.
+assert.equal(
+	options.applyStyleEdit('draw=none, thick', { strokeColor: 'red' }),
+	'red, thick',
+);
+// Clearing back to default removes the token entirely.
+assert.equal(
+	options.applyStyleEdit('draw=none', { strokeColor: null }),
+	'',
+);
+
+// --- color shades -----------------------------------------------------------
+
+assert.equal(colors.applyColorShade('red', 40), 'red!60');
+assert.equal(colors.applyColorShade('red', -40), 'red!60!black');
+assert.equal(colors.applyColorShade('red', 0), 'red');
+// A base ending in a bare percentage is completed before appending.
+assert.equal(colors.applyColorShade('red!75', -20), 'red!75!white!80!black');
+assert.deepEqual(colors.splitColorShade('red!60'), { base: 'red', shade: 40 });
+assert.deepEqual(colors.splitColorShade('red!60!black'), { base: 'red', shade: -40 });
+assert.deepEqual(colors.splitColorShade('red!50!blue'), { base: 'red!50!blue', shade: 0 });
+// Every slider output resolves to a real RGB value.
+for (const shade of [-90, -45, 0, 45, 90]) {
+	const rgb = colors.tikzColorToRgb(colors.applyColorShade('teal!80', shade));
+	assert.ok(rgb, `applyColorShade must stay parseable at ${shade}`);
+}
+
+// --- generation with the new style fields -----------------------------------
+
+assert.equal(
+	writer.generateLine({ x: 0, y: 0 }, { x: 2, y: 0 }, { arrows: '->', arrowTip: 'Stealth' }),
+	'\\draw[-{Stealth}] (0.00, 0.00) -- (2.00, 0.00);',
+);
+assert.equal(
+	writer.generateRectangle({ x: 0, y: 0 }, { x: 1, y: 1 }, {
+		shading: { kind: 'vertical', from: 'red', to: 'white' },
+	}),
+	'\\draw[top color=red, bottom color=white] (0.00, 0.00) rectangle (1.00, 1.00);',
+);
+assert.equal(
+	writer.generateCircle({ x: 0, y: 0 }, 1, {
+		fillColor: 'yellow',
+		pattern: { name: 'dots', color: 'red' },
+	}),
+	'\\draw[fill=yellow, pattern=dots, pattern color=red] (0.00, 0.00) circle[radius=1cm];',
+);
+// Circuit components: circuitikz bipoles and the ground node.
+assert.equal(
+	writer.generateCircuitComponent({ x: 0, y: 0 }, { x: 2, y: 0 }, 'R', {}),
+	'\\draw (0.00, 0.00) to[R] (2.00, 0.00);',
+);
+assert.equal(
+	writer.generateCircuitComponent({ x: 0, y: 0 }, { x: 2, y: 0 }, 'battery1', { strokeColor: 'blue' }),
+	'\\draw[blue] (0.00, 0.00) to[battery1] (2.00, 0.00);',
+);
+assert.equal(
+	writer.generateGroundNode({ x: 1, y: -2 }, {}),
+	'\\node[ground] at (1.00, -2.00) {};',
+);
+
+// The generated statements parse back as editable objects.
+{
+	const generated = [
+		'\\draw[-{Stealth}] (0.00, 0.00) -- (2.00, 0.00);',
+		'\\draw[top color=red, bottom color=white] (0.00, 0.00) rectangle (1.00, 1.00);',
+		'\\fill[red!60] (0.00, 0.00) -- (2.00, 0.00) -- (1.00, 1.00) -- cycle;',
+		'\\draw (0.00, 0.00) to[R] (2.00, 0.00);',
+		'\\node[ground] at (1.00, -2.00) {};',
+	].join('\n');
+	const reparsed = parseTikzScene(generated);
+	for (const object of reparsed.objects) {
+		assert.notEqual(object.type, 'locked', `must stay editable: ${object.reason ?? ''}`);
+	}
+	const arrowStyle = options.parseOptionStyle(reparsed.objects[0].options);
+	assert.equal(arrowStyle.arrowTip, 'Stealth');
+}
 
 // --- minimal patches --------------------------------------------------------
 

@@ -217,6 +217,7 @@ export class LuaLatexRenderer {
 		settings: LuaTikzSettings,
 		errorContext: RenderRequest['errorContext'],
 		key: string,
+		attempt = 0,
 	): Promise<RenderResult> {
 		const tempDirResult = await ensurePluginTempFsDir(this.app, this.pluginId);
 		if (!tempDirResult.ok) {
@@ -278,6 +279,18 @@ export class LuaLatexRenderer {
 		try {
 			await this.app.vault.adapter.write(texAdapterPath, doc.tex);
 
+			// The input we just wrote disappearing mid-compile is never a LaTeX
+			// error — something external (a temp-dir sweep racing this compile,
+			// a sync tool, OS cleanup) removed the job dir. One automatic retry
+			// in a fresh directory self-heals instead of sticking the block in
+			// a "….tex not found" error until the user forces a re-render.
+			const retryIfInputVanished = async (): Promise<RenderResult | null> => {
+				if (attempt === 0 && !(await adapterOrDesktopExists(this.app, texAdapterPath))) {
+					return this.compile(source, settings, errorContext, key, attempt + 1);
+				}
+				return null;
+			};
+
 			try {
 				await spawnWithTimeout(lualatex, [
 					'-interaction=nonstopmode',
@@ -285,6 +298,12 @@ export class LuaLatexRenderer {
 					texFileName,
 				], { cwd: workDir, maxBuffer: 10 * 1024 * 1024 }, settings.timeoutMs);
 			} catch (err) {
+				if (!(err instanceof RenderTimeoutError)) {
+					const retried = await retryIfInputVanished();
+					if (retried) {
+						return retried;
+					}
+				}
 				const logTail = await readAdapterLogTail(this.app, logAdapterPath);
 				const raw = [formatExecError(err), logTail && `\n--- log ---\n${logTail}`]
 					.filter(Boolean)
@@ -293,6 +312,10 @@ export class LuaLatexRenderer {
 			}
 
 			if (!(await adapterOrDesktopExists(this.app, pdfAdapterPath))) {
+				const retried = await retryIfInputVanished();
+				if (retried) {
+					return retried;
+				}
 				const logTail = await readAdapterLogTail(this.app, logAdapterPath);
 				const raw = logTail
 					? `No PDF produced.\n--- log ---\n${logTail}`

@@ -9,7 +9,9 @@ import {
 import type { TikzBlock, RenderImageResult } from '../core/types';
 import { parseTikzScene, insertionPicture } from './tikzSceneParser';
 import {
+	circuitBipoleName,
 	containmentHit,
+	circuitNodeGlyphPrimitives,
 	hitTestCandidates,
 	hitTestHandles,
 	hitTestScene,
@@ -19,6 +21,7 @@ import {
 	resolveSceneGeometry,
 	sceneBounds,
 	snapCandidates,
+	toSegmentPrimitives,
 	withGhostPrimitives,
 	type ObjectGeometry,
 	type ObjectHandle,
@@ -69,14 +72,17 @@ import {
 	numberTokenPatch,
 	generateArc,
 	generateCircle,
+	generateCircuitComponent,
 	generateCurvePath,
 	generateEllipse,
 	generateGridPath,
+	generateCircuitNode,
 	generateLine,
 	generateNode,
 	generatePolyline,
 	generateRectangle,
 	diamondPoints,
+	insertStatementBeforePatches,
 	insertStatementPatches,
 	lengthTokenPatch,
 	penPositionsBefore,
@@ -87,14 +93,24 @@ import {
 	translatedStatementText,
 } from './tikzWriter';
 import { catmullRomToBezier } from './freehand';
-import { parseOptionStyle, type StyleEdit } from './tikzOptions';
 import {
+	applyStyleEdit,
+	ARROW_TIP_KINDS,
+	EDITOR_PATTERN_DECLARATIONS,
+	parseOptionStyle,
+	PATTERN_NAMES,
+	type StyleEdit,
+} from './tikzOptions';
+import {
+	applyColorShade,
 	hexToTikzColor,
 	rgbToHex,
+	splitColorShade,
 	tikzColorToRgb,
 	TIKZ_COLOR_NAMES,
 	XCOLOR_RGB,
 } from './tikzColors';
+import { floodFillRegion, type FloodFillRegion } from './floodFill';
 import {
 	applyLinear,
 	applyToPoint,
@@ -105,14 +121,16 @@ import {
 	uniformScale,
 } from './pictureTransform';
 import { recognizeStroke, type RecognizedShape } from './shapeRecognition';
-import { compileFunction, sampleFunctionRuns } from './functionPlot';
+import { compileFunction, describeFunctionProblem, sampleFunctionRuns } from './functionPlot';
 import type {
+	ArrowTipKind,
 	EditorToolId,
 	ObjectStyle,
 	PictureTransform,
 	SceneNodeObject,
 	SceneObject,
 	ScenePathObject,
+	ShadingKind,
 	SourcePatch,
 	TikzScene,
 } from './sceneTypes';
@@ -160,6 +178,7 @@ const TOOL_BUTTONS: ToolButtonSpec[] = [
 	{ tool: 'path', label: 'Path', icon: 'path', key: 'P' },
 	{ tool: 'bezier', label: 'Bézier', icon: 'bezier', key: 'B' },
 	{ tool: 'freehand', label: 'Freehand', icon: 'freehand', key: 'F' },
+	{ tool: 'paint', label: 'Paint fill', icon: 'paint', key: 'K' },
 	{ tool: 'text', label: 'Text node', icon: 'text', key: 'T' },
 	{ tool: 'math', label: 'Math node', icon: 'math' },
 	{ tool: 'plot', label: 'Function plot', icon: 'plot' },
@@ -180,14 +199,52 @@ const SHAPE_TOOL_BUTTONS: ToolButtonSpec[] = [
 ];
 
 
+/** One entry of the Circuit components menu. */
+interface CircuitComponentSpec {
+	id: string;
+	label: string;
+	/** circuitikz bipole key for `to[...]`; null places a point node. */
+	bipole: string | null;
+	/** pgf node shape for point components (`ground`, `circ`). */
+	nodeShape?: string;
+	icon: EditorIconName;
+}
+
+/** Circuit components behind the single Circuit menu button (circuitikz). */
+const CIRCUIT_COMPONENTS: CircuitComponentSpec[] = [
+	{ id: 'resistor', label: 'Resistor', bipole: 'R', icon: 'c-resistor' },
+	// `generic` is the version-safe name of the rectangular (european) body.
+	{ id: 'resistor-box', label: 'Resistor (box)', bipole: 'generic', icon: 'c-resistor-box' },
+	{ id: 'capacitor', label: 'Capacitor', bipole: 'C', icon: 'c-capacitor' },
+	{ id: 'inductor', label: 'Inductor', bipole: 'L', icon: 'c-inductor' },
+	// The american forms: a voltage source drawn with +/− (not the european
+	// line-through-circle that `V` gives by default), current with an arrow.
+	{ id: 'voltage-source', label: 'Voltage source', bipole: 'american voltage source', icon: 'c-voltage' },
+	// The single-cell form: long/short plates.
+	{ id: 'voltage-cell', label: 'Voltage source (cell)', bipole: 'battery1', icon: 'c-cell' },
+	{ id: 'current-source', label: 'Current source', bipole: 'american current source', icon: 'c-current' },
+	{ id: 'battery', label: 'Battery', bipole: 'battery', icon: 'c-battery' },
+	{ id: 'diode', label: 'Diode', bipole: 'D*', icon: 'c-diode' },
+	{ id: 'led', label: 'LED', bipole: 'empty led', icon: 'c-led' },
+	{ id: 'switch', label: 'Switch', bipole: 'switch', icon: 'c-switch' },
+	{ id: 'lamp', label: 'Lamp', bipole: 'lamp', icon: 'c-lamp' },
+	{ id: 'ammeter', label: 'Ammeter', bipole: 'ammeter', icon: 'c-ammeter' },
+	{ id: 'voltmeter', label: 'Voltmeter', bipole: 'voltmeter', icon: 'c-voltmeter' },
+	{ id: 'dot', label: 'Dot (junction)', bipole: null, nodeShape: 'circ', icon: 'c-dot' },
+	{ id: 'ground', label: 'Ground', bipole: null, nodeShape: 'ground', icon: 'c-ground' },
+];
+
 const KEY_TO_TOOL: Record<string, EditorToolId> = {
 	v: 'select', h: 'pan', l: 'line', a: 'arrow', p: 'path', b: 'bezier',
-	f: 'freehand', r: 'rect', c: 'circle', e: 'ellipse', t: 'text',
+	f: 'freehand', r: 'rect', c: 'circle', e: 'ellipse', t: 'text', k: 'paint',
 };
 
 type DragShapeTool =
 	| 'line' | 'arrow' | 'rect' | 'rounded-rect' | 'triangle' | 'circle'
 	| 'ellipse' | 'arc' | 'grid-path' | 'diamond' | 'polygon' | 'star';
+
+/** Default terminal-to-terminal span of a freshly placed circuit bipole. */
+const CIRCUIT_SPAN_CM = 2;
 
 type ActiveGesture =
 	| { kind: 'shape'; tool: DragShapeTool; start: TikzCoordinate; current: TikzCoordinate; shift: boolean }
@@ -311,6 +368,14 @@ interface ColorControl {
 	setDisabled(disabled: boolean): void;
 }
 
+/** Compact single-input color control for gradient/pattern colors. */
+interface MiniColorControl {
+	row: HTMLElement;
+	get(): string | null;
+	set(value: string | null): void;
+	setDisabled(disabled: boolean): void;
+}
+
 export class VisualTikzEditor {
 	readonly root: HTMLElement;
 
@@ -362,6 +427,13 @@ export class VisualTikzEditor {
 	private shapesButtonIconName: EditorIconName = 'shapes';
 	private shapeMenu!: HTMLElement;
 	private shapeMenuItems = new Map<EditorToolId, HTMLButtonElement>();
+	private circuitButton!: HTMLButtonElement;
+	private circuitButtonIconName: EditorIconName = 'circuit';
+	private circuitMenu!: HTMLElement;
+	private circuitMenuItems = new Map<string, HTMLButtonElement>();
+	private circuitComponent: CircuitComponentSpec = CIRCUIT_COMPONENTS[0];
+	/** Snapped cursor position while the circuit tool hovers the canvas. */
+	private circuitHover: TikzCoordinate | null = null;
 	private propsPanel!: HTMLElement;
 	private objectsPanel!: HTMLElement;
 	private objectsList!: HTMLElement;
@@ -390,6 +462,8 @@ export class VisualTikzEditor {
 	private destroyed = false;
 	private underlayText: string | null = null;
 	private underlayBoundsCm: { minX: number; minY: number; maxX: number; maxY: number } | null = null;
+	/** Fence body at the time the current underlay was applied. */
+	private underlaySourceSnapshot: string | null = null;
 
 	constructor(
 		private readonly host: VisualEditorHost,
@@ -476,10 +550,11 @@ export class VisualTikzEditor {
 		toolbar.setAttribute('aria-label', 'Drawing tools');
 		const toolGroup = this.el('div', 'luatikz-ve-toolgroup', toolbar);
 		for (const spec of TOOL_BUTTONS) {
-			// The Shapes menu button sits between the drawing tools and the
-			// text tools.
+			// The Shapes and Circuit menu buttons sit between the drawing
+			// tools and the text tools.
 			if (spec.tool === 'text') {
 				this.buildShapeMenu(toolbar, toolGroup);
+				this.buildCircuitMenu(toolbar, toolGroup);
 			}
 			const btn = this.button(
 				toolGroup,
@@ -670,6 +745,65 @@ export class VisualTikzEditor {
 		}, { signal: this.ac.signal, capture: true });
 	}
 
+	/** One toolbar button for the circuit components, expanding into a menu. */
+	private buildCircuitMenu(toolbar: HTMLElement, toolGroup: HTMLElement): void {
+		this.circuitButton = this.button(
+			toolGroup,
+			'Circuit components',
+			'luatikz-ve-tool-btn luatikz-ve-circuit-btn',
+			() => this.toggleCircuitMenu(),
+			{ toggle: true, icon: 'circuit', title: 'Circuit components' },
+		);
+		this.circuitButton.setAttribute('aria-haspopup', 'menu');
+		this.circuitButton.setAttribute('aria-expanded', 'false');
+
+		this.circuitMenu = this.el('div', 'luatikz-ve-shape-menu luatikz-ve-circuit-menu luatikz-ve-hidden', toolbar);
+		this.circuitMenu.setAttribute('role', 'menu');
+		this.circuitMenu.setAttribute('aria-label', 'Circuit components');
+		for (const spec of CIRCUIT_COMPONENTS) {
+			const item = this.el('button', 'luatikz-ve-shape-item', this.circuitMenu);
+			item.type = 'button';
+			item.setAttribute('role', 'menuitemradio');
+			item.setAttribute('aria-checked', 'false');
+			const icon = iconEl(this.doc, spec.icon);
+			if (icon) {
+				item.appendChild(icon);
+			}
+			this.el('span', 'luatikz-ve-shape-item-label', item).textContent = spec.label;
+			item.title = spec.label;
+			item.dataset.component = spec.id;
+			item.addEventListener('click', () => {
+				this.circuitComponent = spec;
+				this.setTool('circuit');
+			}, { signal: this.ac.signal });
+			this.circuitMenuItems.set(spec.id, item);
+		}
+
+		// Any pointer press outside the menu and its button dismisses it.
+		this.doc.addEventListener('pointerdown', event => {
+			if (this.circuitMenuOpen
+				&& event.target instanceof this.doc.defaultView!.Node
+				&& !this.circuitMenu.contains(event.target)
+				&& !this.circuitButton.contains(event.target)) {
+				this.toggleCircuitMenu(false);
+			}
+		}, { signal: this.ac.signal, capture: true });
+	}
+
+	get circuitMenuOpen(): boolean {
+		return !this.circuitMenu.classList.contains('luatikz-ve-hidden');
+	}
+
+	toggleCircuitMenu(force?: boolean): void {
+		const open = force ?? !this.circuitMenuOpen;
+		this.circuitMenu.classList.toggle('luatikz-ve-hidden', !open);
+		this.circuitButton.setAttribute('aria-expanded', String(open));
+		if (open) {
+			this.toggleShapeMenu(false);
+			this.circuitMenu.style.left = `${this.circuitButton.offsetLeft}px`;
+		}
+	}
+
 	get shapeMenuOpen(): boolean {
 		return !this.shapeMenu.classList.contains('luatikz-ve-hidden');
 	}
@@ -686,9 +820,16 @@ export class VisualTikzEditor {
 	private propsControls: {
 		stroke?: ColorControl;
 		fill?: ColorControl;
+		fillStyle?: HTMLSelectElement;
+		shadeFrom?: MiniColorControl;
+		shadeTo?: MiniColorControl;
+		shadeAngle?: HTMLInputElement;
+		patternName?: HTMLSelectElement;
+		patternColor?: MiniColorControl;
 		width?: HTMLSelectElement;
 		dash?: HTMLSelectElement;
 		arrows?: HTMLSelectElement;
+		arrowTip?: HTMLSelectElement;
 		opacity?: HTMLInputElement;
 		rounded?: HTMLInputElement;
 		nodeText?: HTMLInputElement;
@@ -697,6 +838,11 @@ export class VisualTikzEditor {
 	} = {};
 
 	private propsScopeEl: HTMLElement | null = null;
+	/** Contextual fill rows, shown per fill-style selection. */
+	private shadeRows: HTMLElement[] = [];
+	private shadeToRow: HTMLElement | null = null;
+	private shadeAngleRow: HTMLElement | null = null;
+	private patternRows: HTMLElement[] = [];
 
 	private propsSelect(
 		parent: HTMLElement,
@@ -718,14 +864,16 @@ export class VisualTikzEditor {
 
 	/**
 	 * A color row: a clear swatch (default/none), every base TikZ color as a
-	 * clickable swatch, and a free `<input type=color>` that writes an inline
-	 * xcolor RGB expression for colors outside the named set.
+	 * clickable swatch, a free `<input type=color>` for colors outside the
+	 * named set, and a shade slider mixing the picked color toward black or
+	 * white (`red!60`, `red!60!black`).
 	 */
 	private propsColorRow(
 		parent: HTMLElement,
 		label: string,
 		clearLabel: string,
 		onChange: (value: string | null) => void,
+		options: { noneLabel?: string } = {},
 	): ColorControl {
 		const row = this.el('div', 'luatikz-ve-props-row luatikz-ve-props-colorrow', parent);
 		this.el('span', 'luatikz-ve-props-label', row).textContent = label;
@@ -737,22 +885,66 @@ export class VisualTikzEditor {
 		clearBtn.title = clearLabel;
 		clearBtn.setAttribute('aria-label', `${label}: ${clearLabel}`);
 
+		// Optional "none" well (stroke only): writes `draw=none`, an outline
+		// that really is transparent — unlike the clear well, which restores
+		// the TikZ default (black).
+		let noneBtn: HTMLButtonElement | null = null;
+		if (options.noneLabel) {
+			noneBtn = this.el('button', 'luatikz-ve-swatch luatikz-ve-swatch-none', grid);
+			noneBtn.type = 'button';
+			noneBtn.title = options.noneLabel;
+			noneBtn.setAttribute('aria-label', `${label}: ${options.noneLabel}`);
+		}
+
 		const custom = this.el('input', 'luatikz-ve-swatch-custom', grid);
 		custom.type = 'color';
 		custom.title = 'Custom color';
 		custom.setAttribute('aria-label', `${label}: custom color`);
 
+		// The picked base color and the shade applied on top of it. Slider
+		// moves re-derive the expression from the stored base, so repeated
+		// adjustments never stack mixes onto mixes.
+		let base: string | null = null;
+		let shade = 0;
+
+		const shadeRow = this.el('div', 'luatikz-ve-props-row luatikz-ve-props-shaderow', parent);
+		this.el('span', 'luatikz-ve-props-label', shadeRow).textContent = 'Shade';
+		const slider = this.el('input', 'luatikz-ve-props-shade', shadeRow);
+		slider.type = 'range';
+		slider.min = '-90';
+		slider.max = '90';
+		slider.step = '5';
+		slider.value = '0';
+		slider.title = 'Shade: darker ← 0 → lighter';
+		slider.setAttribute('aria-label', `${label}: shade (darker to lighter)`);
+
 		const setActive = (active: string | null) => {
 			clearBtn.classList.toggle('is-active', active === null);
+			noneBtn?.classList.toggle('is-active', active === '__none__');
 			for (const [name, btn] of swatches) {
 				btn.classList.toggle('is-active', active === name);
 			}
 			custom.classList.toggle('is-active', active === '__custom__');
 		};
 
+		const emit = () => {
+			onChange(base === null ? null : applyColorShade(base, shade));
+		};
+
 		clearBtn.addEventListener('click', () => {
+			base = null;
+			shade = 0;
+			slider.value = '0';
 			setActive(null);
 			onChange(null);
+		}, { signal: this.ac.signal });
+
+		noneBtn?.addEventListener('click', () => {
+			base = null;
+			shade = 0;
+			slider.value = '0';
+			setActive('__none__');
+			onChange('none');
 		}, { signal: this.ac.signal });
 
 		for (const name of TIKZ_COLOR_NAMES) {
@@ -764,8 +956,9 @@ export class VisualTikzEditor {
 			const rgb = XCOLOR_RGB[name];
 			btn.style.setProperty('--luatikz-swatch', rgbToHex(rgb));
 			btn.addEventListener('click', () => {
+				base = name;
 				setActive(name);
-				onChange(name);
+				emit();
 			}, { signal: this.ac.signal });
 			swatches.set(name, btn);
 			grid.appendChild(btn);
@@ -775,19 +968,35 @@ export class VisualTikzEditor {
 		custom.addEventListener('change', () => {
 			const color = hexToTikzColor(custom.value);
 			if (color) {
+				base = color;
 				setActive(swatches.has(color) ? color : '__custom__');
-				onChange(color);
+				emit();
+			}
+		}, { signal: this.ac.signal });
+
+		slider.addEventListener('change', () => {
+			const value = Number.parseFloat(slider.value);
+			shade = Number.isFinite(value) ? value : 0;
+			if (base !== null) {
+				emit();
 			}
 		}, { signal: this.ac.signal });
 
 		return {
 			set: value => {
-				if (!value) {
-					setActive(null);
+				if (!value || (value === 'none' && noneBtn)) {
+					base = null;
+					shade = 0;
+					slider.value = '0';
+					setActive(value === 'none' && noneBtn ? '__none__' : null);
 					return;
 				}
-				if (swatches.has(value)) {
-					setActive(value);
+				const split = splitColorShade(value);
+				base = split.base;
+				shade = split.shade;
+				slider.value = String(split.shade);
+				if (swatches.has(split.base)) {
+					setActive(split.base);
 					return;
 				}
 				const rgb = tikzColorToRgb(value);
@@ -801,8 +1010,75 @@ export class VisualTikzEditor {
 			setDisabled: disabled => {
 				clearBtn.disabled = disabled;
 				custom.disabled = disabled;
+				slider.disabled = disabled;
+				if (noneBtn) {
+					noneBtn.disabled = disabled;
+				}
 				for (const btn of swatches.values()) {
 					btn.disabled = disabled;
+				}
+			},
+		};
+	}
+
+	/**
+	 * A compact color row (one `<input type=color>` plus an optional clear
+	 * button) for secondary colors: gradient endpoints and pattern color.
+	 */
+	private propsMiniColor(
+		parent: HTMLElement,
+		label: string,
+		clearLabel: string | null,
+		initial: string | null,
+		onChange: () => void,
+	): MiniColorControl {
+		const row = this.el('label', 'luatikz-ve-props-row luatikz-ve-props-minicolor', parent);
+		this.el('span', 'luatikz-ve-props-label', row).textContent = label;
+		const input = this.el('input', 'luatikz-ve-swatch-custom', row);
+		input.type = 'color';
+		input.setAttribute('aria-label', label);
+		let value: string | null = initial;
+		const reflect = () => {
+			const rgb = value !== null ? tikzColorToRgb(value) : null;
+			if (rgb) {
+				input.value = rgbToHex(rgb);
+			}
+			row.classList.toggle('is-clear', value === null);
+		};
+		reflect();
+		input.addEventListener('change', () => {
+			const color = hexToTikzColor(input.value);
+			if (color) {
+				value = color;
+				reflect();
+				onChange();
+			}
+		}, { signal: this.ac.signal });
+		let clearBtn: HTMLButtonElement | null = null;
+		if (clearLabel) {
+			clearBtn = this.el('button', 'luatikz-ve-minicolor-clear', row);
+			clearBtn.type = 'button';
+			clearBtn.textContent = '×';
+			clearBtn.title = clearLabel;
+			clearBtn.setAttribute('aria-label', `${label}: ${clearLabel}`);
+			clearBtn.addEventListener('click', event => {
+				event.preventDefault();
+				value = null;
+				reflect();
+				onChange();
+			}, { signal: this.ac.signal });
+		}
+		return {
+			row,
+			get: () => value,
+			set: next => {
+				value = next;
+				reflect();
+			},
+			setDisabled: disabled => {
+				input.disabled = disabled;
+				if (clearBtn) {
+					clearBtn.disabled = disabled;
 				}
 			},
 		};
@@ -813,10 +1089,56 @@ export class VisualTikzEditor {
 		this.el('div', 'luatikz-ve-props-title', panel).textContent = 'Style';
 		this.propsScopeEl = this.el('div', 'luatikz-ve-props-scope', panel);
 
-		this.propsControls.stroke = this.propsColorRow(panel, 'Stroke', 'Default',
-			value => this.applyStyle({ strokeColor: value }));
+		this.propsControls.stroke = this.propsColorRow(panel, 'Stroke', 'Default (black)',
+			value => this.applyStyle({ strokeColor: value }),
+			{ noneLabel: 'None — no outline' });
 		this.propsControls.fill = this.propsColorRow(panel, 'Fill', 'None',
 			value => this.applyStyle({ fillColor: value }));
+
+		this.propsControls.fillStyle = this.propsSelect(panel, 'Fill style', [
+			['solid', 'Solid'],
+			['vertical', 'Gradient: vertical'],
+			['horizontal', 'Gradient: horizontal'],
+			['radial', 'Gradient: radial'],
+			['ball', 'Ball shade'],
+			['pattern', 'Pattern'],
+		], () => this.applyFillStyle());
+
+		this.propsControls.shadeFrom = this.propsMiniColor(panel, 'From color', null,
+			'blue!60', () => this.applyFillStyle());
+		this.propsControls.shadeTo = this.propsMiniColor(panel, 'To color', null,
+			'white', () => this.applyFillStyle());
+		const angleRow = this.el('label', 'luatikz-ve-props-row', panel);
+		this.el('span', 'luatikz-ve-props-label', angleRow).textContent = 'Shading angle';
+		const angle = this.el('input', 'luatikz-ve-props-sides', angleRow);
+		angle.type = 'number';
+		angle.min = '-180';
+		angle.max = '180';
+		angle.step = '15';
+		angle.value = '0';
+		angle.addEventListener('change', () => this.applyFillStyle(), { signal: this.ac.signal });
+		this.propsControls.shadeAngle = angle;
+		this.shadeRows = [this.propsControls.shadeFrom.row];
+		this.shadeToRow = this.propsControls.shadeTo.row;
+		this.shadeAngleRow = angleRow;
+
+		this.propsControls.patternName = this.propsSelect(
+			panel,
+			'Pattern',
+			PATTERN_NAMES.map(name => [name, name] as [string, string]),
+			() => this.applyFillStyle(),
+		);
+		this.propsControls.patternColor = this.propsMiniColor(panel, 'Pattern color', 'Default (black)',
+			null, () => this.applyFillStyle());
+		// `closest` instead of instanceof checks: elements from a popout
+		// window's document are not instances of this realm's HTMLElement.
+		const patternNameRow = this.propsControls.patternName.closest('.luatikz-ve-props-row');
+		this.patternRows = [
+			...(patternNameRow ? [patternNameRow as HTMLElement] : []),
+			this.propsControls.patternColor.row,
+		];
+		this.updateFillStyleRows('solid');
+
 		this.propsControls.width = this.propsSelect(panel, 'Width', [
 			['default', 'Default'], ['thin', 'Thin'], ['thick', 'Thick'], ['very thick', 'Very thick'],
 		], value => this.applyStyle({ lineWidth: value as ObjectStyle['lineWidth'] }));
@@ -826,6 +1148,15 @@ export class VisualTikzEditor {
 		this.propsControls.arrows = this.propsSelect(panel, 'Arrows', [
 			['', 'None'], ['->', 'End →'], ['<-', 'Start ←'], ['<->', 'Both ↔'],
 		], value => this.applyStyle({ arrows: value as StyleEdit['arrows'] }));
+		this.propsControls.arrowTip = this.propsSelect(
+			panel,
+			'Arrow tip',
+			ARROW_TIP_KINDS.map(kind =>
+				[kind, kind === 'default' ? 'Arrow (default)' : kind] as [string, string]),
+			value => this.applyStyle({
+				arrowTip: value === 'default' ? null : value as ArrowTipKind,
+			}),
+		);
 
 		const opacityRow = this.el('label', 'luatikz-ve-props-row', panel);
 		this.el('span', 'luatikz-ve-props-label', opacityRow).textContent = 'Opacity';
@@ -1023,12 +1354,18 @@ export class VisualTikzEditor {
 			// object beside the wireframe. Skip the underlay entirely; the
 			// compiled card still shows the real render.
 			this.underlayText = built ? svgText : null;
+			this.underlaySourceSnapshot = null;
 			this.underlayBoundsCm = null;
 			this.svg.classList.remove('has-underlay');
 			return;
 		}
 		this.layerCompiled.appendChild(built.wrapper);
 		this.underlayText = svgText;
+		// Statements present in the source this underlay was compiled from can
+		// drop their approximate circuit wireframes: the real symbol is on the
+		// canvas now. Freshly placed components stay wireframe-visible until
+		// their own compile lands.
+		this.underlaySourceSnapshot = this.scene.source;
 		this.underlayBoundsCm = built.bbox
 			? {
 				minX: built.bbox.minX / PT_PER_CM,
@@ -1039,6 +1376,7 @@ export class VisualTikzEditor {
 			: null;
 		this.svg.classList.add('has-underlay');
 		this.alignUnderlay(built);
+		this.dirtyScene = true;
 		// The first compiled output can reveal the diagram's true extent;
 		// refit unless the user is mid-gesture.
 		if (firstUnderlay && !this.gesture && this.router.mode === 'idle' && !this.clickDraft) {
@@ -1205,7 +1543,18 @@ export class VisualTikzEditor {
 					}
 					continue;
 				}
-				this.layerObjects.appendChild(renderObjectGroup(context, geometry));
+				const group = renderObjectGroup(context, geometry);
+				// A circuit glyph is an approximation; once the compiled
+				// underlay includes its statement, the real symbol replaces
+				// it and the wireframe would only double-draw ("grey ghost
+				// behind the component"). Hide it entirely in that case.
+				if (this.isApproxCircuitObject(geometry.object)
+					&& this.underlaySourceSnapshot !== null
+					&& this.underlaySourceSnapshot.includes(
+						this.scene.source.slice(geometry.object.span.from, geometry.object.span.to))) {
+					group.classList.add('luatikz-ve-object-approx');
+				}
+				this.layerObjects.appendChild(group);
 			}
 			this.dirtyScene = false;
 		}
@@ -1213,6 +1562,23 @@ export class VisualTikzEditor {
 			this.renderOverlay(context);
 			this.dirtyOverlay = false;
 		}
+	}
+
+	/**
+	 * Objects whose wireframe is an approximation of a circuitikz symbol —
+	 * `to[...]` bipoles and empty point nodes (ground, junction dot). Their
+	 * wireframes hide once the compiled underlay shows the real symbol.
+	 */
+	private isApproxCircuitObject(object: SceneObject): boolean {
+		if (object.type === 'path') {
+			return object.elements.some(element =>
+				element.kind === 'toOp' && circuitBipoleName(element.options) !== null);
+		}
+		if (object.type === 'node') {
+			return object.text.trim() === ''
+				&& /(?:^|[,\s])(?:ground|circ|ocirc)\s*(?:,|$)/.test(object.options);
+		}
+		return false;
 	}
 
 	private selectedGeometries(): ObjectGeometry[] {
@@ -1263,9 +1629,31 @@ export class VisualTikzEditor {
 		};
 	}
 
+	/** The circuit tool's follow-the-cursor glyph, when one should show. */
+	private circuitPreviewPrimitives(): ScenePrimitive[] | null {
+		if (this.tool !== 'circuit' || !this.circuitHover || this.gesture || this.clickDraft) {
+			return null;
+		}
+		const at = this.circuitHover;
+		const spec = this.circuitComponent;
+		if (!spec.bipole) {
+			return circuitNodeGlyphPrimitives(spec.nodeShape ?? 'ground', at);
+		}
+		const half = CIRCUIT_SPAN_CM / 2;
+		return toSegmentPrimitives(
+			{ x: at.x - half, y: at.y },
+			{ x: at.x + half, y: at.y },
+			spec.bipole,
+		);
+	}
+
 	private draftPrimitives(): ScenePrimitive[] {
 		const gesture = this.gesture;
 		const primitives: ScenePrimitive[] = [];
+		const circuitPreview = this.circuitPreviewPrimitives();
+		if (circuitPreview) {
+			return circuitPreview;
+		}
 		if (this.clickDraft) {
 			const { points, hover } = this.clickDraft;
 			const all = hover ? [...points, hover] : points;
@@ -1390,6 +1778,9 @@ export class VisualTikzEditor {
 			return;
 		}
 		const group = svgEl(this.doc, 'g', { class: 'luatikz-ve-draft' });
+		if (this.circuitPreviewPrimitives()) {
+			group.classList.add('luatikz-ve-circuit-preview');
+		}
 		const strokePt = Math.max(0.4, 1 / Math.max(context.pxPerPt, 1e-6));
 		group.setAttribute('stroke-width', String(strokePt));
 		group.setAttribute('fill', 'none');
@@ -1413,6 +1804,15 @@ export class VisualTikzEditor {
 		const group = renderGhostGroup(context, '__draft__', geometry.primitives);
 		group.classList.remove('luatikz-ve-ghost');
 		group.classList.add('luatikz-ve-draft-shape');
+		if (primitive.kind === 'nodeMark') {
+			// Ghost groups render with fill:none; the ± / meter letters of a
+			// circuit preview need their text filled to be visible.
+			const text = group.querySelector('text');
+			if (text) {
+				text.style.fill = 'var(--interactive-accent)';
+				text.setAttribute('stroke', 'none');
+			}
+		}
 		return group;
 	}
 
@@ -1425,6 +1825,7 @@ export class VisualTikzEditor {
 			this.cancelClickDraft();
 		}
 		this.tool = tool;
+		this.circuitHover = null;
 		for (const [id, btn] of this.toolButtons) {
 			const active = id === tool;
 			btn.classList.toggle('is-active', active);
@@ -1449,10 +1850,31 @@ export class VisualTikzEditor {
 			item.setAttribute('aria-checked', String(active));
 		}
 		this.toggleShapeMenu(false);
+
+		// The Circuit button adopts the active component's icon.
+		const isCircuit = tool === 'circuit';
+		this.circuitButton.classList.toggle('is-active', isCircuit);
+		this.circuitButton.setAttribute('aria-pressed', String(isCircuit));
+		const circuitIcon: EditorIconName = isCircuit ? this.circuitComponent.icon : 'circuit';
+		if (circuitIcon !== this.circuitButtonIconName) {
+			this.circuitButtonIconName = circuitIcon;
+			this.circuitButton.querySelector('svg')?.remove();
+			const icon = iconEl(this.doc, circuitIcon);
+			if (icon) {
+				this.circuitButton.insertBefore(icon, this.circuitButton.firstChild);
+			}
+		}
+		for (const [id, item] of this.circuitMenuItems) {
+			const active = isCircuit && id === this.circuitComponent.id;
+			item.classList.toggle('is-active', active);
+			item.setAttribute('aria-checked', String(active));
+		}
+		this.toggleCircuitMenu(false);
+
 		this.svg.classList.toggle('is-pan-tool', tool === 'pan');
 		this.dirtyOverlay = true;
 		this.requestRender();
-		this.announce(`${tool} tool`);
+		this.announce(isCircuit ? `${this.circuitComponent.label} circuit tool` : `${tool} tool`);
 	}
 
 	get selectionIds(): string[] {
@@ -1483,8 +1905,12 @@ export class VisualTikzEditor {
 		}
 		controls.stroke?.setDisabled(lockedOnly);
 		controls.fill?.setDisabled(lockedOnly);
+		controls.shadeFrom?.setDisabled(lockedOnly);
+		controls.shadeTo?.setDisabled(lockedOnly);
+		controls.patternColor?.setDisabled(lockedOnly);
 		for (const control of [
-			controls.width, controls.dash, controls.arrows,
+			controls.width, controls.dash, controls.arrows, controls.arrowTip,
+			controls.fillStyle, controls.shadeAngle, controls.patternName,
 			controls.opacity, controls.rounded, controls.nodeText,
 		]) {
 			if (control) {
@@ -1500,6 +1926,27 @@ export class VisualTikzEditor {
 			: selected.length ? {} : { ...this.styleDefaults };
 		controls.stroke?.set(style.strokeColor ?? null);
 		controls.fill?.set(style.fillColor ?? null);
+		const fillMode = style.shading ? style.shading.kind : style.pattern ? 'pattern' : 'solid';
+		if (controls.fillStyle) {
+			controls.fillStyle.value = fillMode;
+		}
+		this.updateFillStyleRows(fillMode);
+		if (style.shading) {
+			controls.shadeFrom?.set(style.shading.from);
+			if (style.shading.kind !== 'ball') {
+				controls.shadeTo?.set(style.shading.to);
+			}
+			if (controls.shadeAngle) {
+				controls.shadeAngle.value = String(style.shading.angle ?? 0);
+			}
+		}
+		if (style.pattern && controls.patternName) {
+			const known = (PATTERN_NAMES as readonly string[]).includes(style.pattern.name);
+			if (known) {
+				controls.patternName.value = style.pattern.name;
+			}
+			controls.patternColor?.set(style.pattern.color ?? null);
+		}
 		if (controls.width) {
 			controls.width.value = style.lineWidth ?? 'default';
 		}
@@ -1508,6 +1955,9 @@ export class VisualTikzEditor {
 		}
 		if (controls.arrows) {
 			controls.arrows.value = style.arrows ?? '';
+		}
+		if (controls.arrowTip) {
+			controls.arrowTip.value = style.arrowTip ?? 'default';
 		}
 		if (controls.opacity) {
 			controls.opacity.value = String(style.opacity ?? 1);
@@ -1520,15 +1970,255 @@ export class VisualTikzEditor {
 		}
 	}
 
+	/** Visibility of the contextual gradient/pattern rows for a fill mode. */
+	private updateFillStyleRows(mode: string): void {
+		const gradient = mode === 'vertical' || mode === 'horizontal'
+			|| mode === 'radial' || mode === 'ball';
+		for (const row of this.shadeRows) {
+			row.classList.toggle('luatikz-ve-hidden', !gradient);
+		}
+		this.shadeToRow?.classList.toggle('luatikz-ve-hidden', !gradient || mode === 'ball');
+		this.shadeAngleRow?.classList.toggle(
+			'luatikz-ve-hidden',
+			mode !== 'vertical' && mode !== 'horizontal',
+		);
+		for (const row of this.patternRows) {
+			row.classList.toggle('luatikz-ve-hidden', mode !== 'pattern');
+		}
+	}
+
+	/** Apply the Fill-style select and its contextual inputs as one edit. */
+	private applyFillStyle(): void {
+		const controls = this.propsControls;
+		const mode = controls.fillStyle?.value ?? 'solid';
+		this.updateFillStyleRows(mode);
+		if (mode === 'solid') {
+			this.applyStyle({ shading: null, pattern: null });
+			return;
+		}
+		if (mode === 'pattern') {
+			const name = controls.patternName?.value || PATTERN_NAMES[0];
+			const color = controls.patternColor?.get() ?? null;
+			this.applyStyle({
+				pattern: { name, ...(color ? { color } : {}) },
+				shading: null,
+			});
+			return;
+		}
+		const angleValue = Number.parseFloat(controls.shadeAngle?.value ?? '0');
+		const angle = Number.isFinite(angleValue) && angleValue !== 0 ? angleValue : undefined;
+		this.applyStyle({
+			shading: {
+				kind: mode as ShadingKind,
+				from: controls.shadeFrom?.get() ?? 'blue!60',
+				to: controls.shadeTo?.get() ?? 'white',
+				...(angle !== undefined ? { angle } : {}),
+			},
+			pattern: null,
+		});
+	}
+
+	/* ---------------------------------------------------------------------- */
+	/* painter tool                                                            */
+	/* ---------------------------------------------------------------------- */
+
+	/** Fill style the painter applies: the panel's current fill defaults. */
+	private paintStyleEdit(): StyleEdit {
+		const defaults = this.styleDefaults;
+		if (defaults.pattern) {
+			return {
+				pattern: { ...defaults.pattern },
+				...(defaults.fillColor ? { fillColor: defaults.fillColor } : {}),
+			};
+		}
+		if (defaults.shading) {
+			return { shading: { ...defaults.shading } };
+		}
+		const strokeFallback = defaults.strokeColor !== 'none' ? defaults.strokeColor : undefined;
+		return { fillColor: defaults.fillColor ?? strokeFallback ?? 'black' };
+	}
+
+	/**
+	 * True when the flooded region is (nearly) exactly the object's own closed
+	 * interior, measured as intersection-over-union on the flood grid. The
+	 * paint then becomes a style edit on that object instead of a traced path.
+	 */
+	private regionMatchesObject(region: FloodFillRegion, geometry: ObjectGeometry): boolean {
+		const bounds = geometry.bounds;
+		if (!bounds) {
+			return false;
+		}
+		const { grid } = region;
+		const cell = grid.cellCm;
+		const minI = Math.max(0,
+			Math.floor((Math.min(bounds.minX, region.bounds.minX) - grid.originX) / cell) - 1);
+		const maxI = Math.min(grid.cols - 1,
+			Math.ceil((Math.max(bounds.maxX, region.bounds.maxX) - grid.originX) / cell) + 1);
+		const minJ = Math.max(0,
+			Math.floor((Math.min(bounds.minY, region.bounds.minY) - grid.originY) / cell) - 1);
+		const maxJ = Math.min(grid.rows - 1,
+			Math.ceil((Math.max(bounds.maxY, region.bounds.maxY) - grid.originY) / cell) + 1);
+		let intersection = 0;
+		let union = 0;
+		for (let j = minJ; j <= maxJ; j++) {
+			for (let i = minI; i <= maxI; i++) {
+				const inRegion = grid.filled[j * grid.cols + i] === 1;
+				const inObject = pointInsideGeometry({
+					x: grid.originX + (i + 0.5) * cell,
+					y: grid.originY + (j + 0.5) * cell,
+				}, geometry);
+				if (inRegion && inObject) {
+					intersection++;
+				}
+				if (inRegion || inObject) {
+					union++;
+				}
+			}
+		}
+		return union > 0 && intersection / union >= 0.82;
+	}
+
+	/**
+	 * Painter click: flood-fill the enclosed region under the pointer, then
+	 * either restyle the shape whose interior it matches, or trace the region
+	 * into an explicit fill path inserted below the strokes that bound it.
+	 */
+	private paintAt(point: TikzCoordinate): void {
+		const cell = Math.max(0.015, Math.min(0.08, this.pxToCm(2)));
+		const outcome = floodFillRegion(this.geometries, point, { cellCm: cell });
+		if (outcome.kind === 'blocked') {
+			this.announce('Paint: click inside a region, not on a stroke.');
+			return;
+		}
+		if (outcome.kind === 'open') {
+			this.announce('Paint: this area is not enclosed — close the shape first.');
+			return;
+		}
+		const region = outcome.region;
+		const edit = this.paintStyleEdit();
+
+		const candidate = containmentHit(this.geometries, point);
+		if (candidate && candidate.object.type !== 'locked'
+			&& this.regionMatchesObject(region, candidate)) {
+			const patches = styleEditPatches(this.scene.source, candidate.object, edit);
+			if (this.commitPatches(patches)) {
+				this.setSelection([candidate.object.id]);
+				this.announce('Filled the shape.');
+			}
+			return;
+		}
+		this.commitPaintedRegion(region, edit);
+	}
+
+	/** Write the traced region as a `\fill`/`\path` statement. */
+	private commitPaintedRegion(region: FloodFillRegion, edit: StyleEdit): void {
+		// Insert before the earliest statement whose geometry touches the
+		// region, so the bounding strokes keep painting over the new fill.
+		let anchor: SceneObject | null = null;
+		const pad = region.grid.cellCm * 2;
+		for (const geometry of this.geometries) {
+			const bounds = geometry.bounds;
+			if (!bounds
+				|| bounds.maxX < region.bounds.minX - pad || bounds.minX > region.bounds.maxX + pad
+				|| bounds.maxY < region.bounds.minY - pad || bounds.minY > region.bounds.maxY + pad) {
+				continue;
+			}
+			if (!this.scene.pictures[geometry.object.pictureIndex]?.editable) {
+				continue;
+			}
+			if (!anchor || geometry.object.span.from < anchor.span.from) {
+				anchor = geometry.object;
+			}
+		}
+		const picture = anchor
+			? this.scene.pictures[anchor.pictureIndex]
+			: insertionPicture(this.scene);
+
+		const loopTexts = region.loops.map(loop => {
+			const parts = loop.map(vertex =>
+				formatPoint(this.toPictureSpace(picture.transform, vertex)));
+			const lines: string[] = [];
+			for (let index = 0; index < parts.length; index += 6) {
+				lines.push(parts.slice(index, index + 6).join(' -- '));
+			}
+			return `${lines.join('\n  -- ')} -- cycle`;
+		});
+		const body = loopTexts.join('\n  ');
+
+		const holeTokens = region.loops.length > 1 ? ['even odd rule'] : [];
+		const solidOnly = edit.shading === undefined && edit.pattern === undefined;
+		let statement: string;
+		if (solidOnly) {
+			const color = edit.fillColor ?? 'black';
+			const tokens = [...holeTokens, ...(color !== 'black' ? [color] : [])];
+			statement = `\\fill${tokens.length ? `[${tokens.join(', ')}]` : ''} ${body};`;
+		} else {
+			// Gradients and patterns are fill actions of their own; `\path`
+			// carries them without adding a stroke.
+			statement = `\\path[${applyStyleEdit(holeTokens.join(', '), edit)}] ${body};`;
+		}
+
+		const insertionOffset = anchor
+			? this.scene.source.lastIndexOf('\n', anchor.span.from - 1) + 1
+			: null;
+		const patches = anchor
+			? insertStatementBeforePatches(this.scene.source, anchor, statement)
+			: insertStatementPatches(this.scene, picture, statement);
+		if (this.commitPatches(patches)) {
+			const firstLine = statement.split('\n')[0];
+			const added = this.scene.objects.find(object =>
+				(insertionOffset === null || object.span.from >= insertionOffset)
+				&& this.scene.source.startsWith(firstLine, object.span.from));
+			if (added) {
+				this.setSelection([added.id]);
+			}
+			this.announce('Painted the enclosed region.');
+		}
+	}
+
 	/* ---------------------------------------------------------------------- */
 	/* committing changes                                                      */
 	/* ---------------------------------------------------------------------- */
+
+	/**
+	 * Prerequisites inserted at the top of the fence when a committed change
+	 * starts needing them: the `patterns` TikZ library (hoisted into the
+	 * preamble by the compile pipeline), declarations for the editor's own
+	 * patterns (diagonal stripes, the wide line variants), and the circuitikz
+	 * setting that keeps american source +/− signs upright. The `.initial`
+	 * form is deliberate: the mobile engine bundles an older circuitikz where
+	 * the plain key would be an unknown-key error.
+	 */
+	private patternLibraryPatches(patches: readonly SourcePatch[]): SourcePatch[] {
+		const replacements = patches.map(patch => patch.replacement).join('\n');
+		const lines: string[] = [];
+		if (/\bpattern(?: color)?=/.test(replacements)) {
+			if (!/\\usetikzlibrary\s*\{[^}]*\bpatterns\b/.test(this.scene.source)) {
+				lines.push('\\usetikzlibrary{patterns}');
+			}
+			for (const [name, declaration] of Object.entries(EDITOR_PATTERN_DECLARATIONS)) {
+				if (replacements.includes(`pattern=${name}`)
+					&& !this.scene.source.includes(`\\pgfdeclarepatternformonly{${name}}`)) {
+					lines.push(declaration);
+				}
+			}
+		}
+		if (replacements.includes('american voltage source')
+			&& !this.scene.source.includes('sources/symbol/sign rotation')) {
+			lines.push('\\ctikzset{sources/symbol/sign rotation/.initial=auto}');
+		}
+		if (!lines.length) {
+			return [];
+		}
+		return [{ oldSpan: { from: 0, to: 0 }, replacement: `${lines.join('\n')}\n` }];
+	}
 
 	/** Apply patches to the fence, resync, and schedule the compile. */
 	private commitPatches(patches: SourcePatch[]): boolean {
 		if (!patches.length) {
 			return false;
 		}
+		patches = [...this.patternLibraryPatches(patches), ...patches];
 		const ok = this.host.applyPatches(this.scene.source, patches);
 		if (!ok) {
 			this.announce('Edit skipped: the source changed underneath.');
@@ -1642,6 +2332,12 @@ export class VisualTikzEditor {
 		}
 		if (edit.fillColor !== undefined) {
 			defaults.fillColor = edit.fillColor ?? undefined;
+			// Mirror the option-level rules: a solid fill replaces a gradient,
+			// and clearing the fill drops the pattern too.
+			defaults.shading = undefined;
+			if (!edit.fillColor) {
+				defaults.pattern = undefined;
+			}
 		}
 		if (edit.lineWidth !== undefined) {
 			defaults.lineWidth = edit.lineWidth ?? undefined;
@@ -1651,6 +2347,22 @@ export class VisualTikzEditor {
 		}
 		if (edit.arrows !== undefined) {
 			defaults.arrows = edit.arrows ?? undefined;
+		}
+		if (edit.arrowTip !== undefined) {
+			defaults.arrowTip = edit.arrowTip ?? undefined;
+		}
+		if (edit.shading !== undefined) {
+			defaults.shading = edit.shading ?? undefined;
+			if (edit.shading) {
+				defaults.fillColor = undefined;
+				defaults.pattern = undefined;
+			}
+		}
+		if (edit.pattern !== undefined) {
+			defaults.pattern = edit.pattern ?? undefined;
+			if (edit.pattern) {
+				defaults.shading = undefined;
+			}
 		}
 		if (edit.opacity !== undefined) {
 			defaults.opacity = edit.opacity ?? undefined;
@@ -1794,7 +2506,10 @@ export class VisualTikzEditor {
 			this.selectStart(pointer, point);
 			return;
 		}
-		if (this.tool === 'text' || this.tool === 'math' || this.tool === 'plot') {
+		if (this.tool === 'text' || this.tool === 'math' || this.tool === 'plot'
+			|| this.tool === 'paint' || this.tool === 'circuit') {
+			// Circuit components drop with a click at the previewed position;
+			// their endpoints are draggable afterwards.
 			this.gesture = { kind: 'pen-click' };
 			return;
 		}
@@ -2280,6 +2995,10 @@ export class VisualTikzEditor {
 					this.openTextInput(this.snapDrawPoint(point, false), this.tool === 'math');
 				} else if (this.tool === 'plot') {
 					this.openPlotInput(point);
+				} else if (this.tool === 'paint') {
+					this.paintAt(point);
+				} else if (this.tool === 'circuit') {
+					this.placeCircuitComponent(this.snapDrawPoint(point, false));
 				} else if (this.tool === 'path' || this.tool === 'bezier') {
 					this.clickDraftAddPoint(this.snapDrawPoint(point, !!pointer.shiftKey, this.clickDraft?.points.at(-1)));
 				}
@@ -2382,6 +3101,38 @@ export class VisualTikzEditor {
 		if (statement) {
 			this.commitNewStatement(statement);
 		}
+	}
+
+	/**
+	 * Drop the active circuit component at the clicked (snapped) point — the
+	 * same position the hover preview showed. Bipoles get a horizontal
+	 * {@link CIRCUIT_SPAN_CM} span centered on the click; endpoints stay
+	 * draggable afterwards. Ground hangs its symbol from the point itself.
+	 */
+	private placeCircuitComponent(point: TikzCoordinate): void {
+		const spec = this.circuitComponent;
+		// The drop replaces the preview: only the placed component remains
+		// until the pointer moves again.
+		this.circuitHover = null;
+		const transform = insertionPicture(this.scene).transform;
+		const toSource = (p: TikzCoordinate) => this.toPictureSpace(transform, p);
+		if (!spec.bipole) {
+			this.commitNewStatement(generateCircuitNode(
+				toSource(point),
+				spec.nodeShape ?? 'ground',
+				this.styleDefaults,
+			));
+			this.announce(`${spec.label} placed.`);
+			return;
+		}
+		const half = CIRCUIT_SPAN_CM / 2;
+		this.commitNewStatement(generateCircuitComponent(
+			toSource({ x: point.x - half, y: point.y }),
+			toSource({ x: point.x + half, y: point.y }),
+			spec.bipole,
+			this.styleDefaults,
+		));
+		this.announce(`${spec.label} placed — drag its endpoints to reroute.`);
 	}
 
 	/* ---------------------------------------------------------------------- */
@@ -2814,8 +3565,8 @@ export class VisualTikzEditor {
 		const overlay = this.el('div', 'luatikz-ve-text-input luatikz-ve-plot-input', this.canvasWrap);
 		const fnInput = this.el('input', 'luatikz-ve-text-input-field', overlay);
 		fnInput.type = 'text';
-		fnInput.placeholder = 'f(x) — e.g. sin(x)';
-		fnInput.setAttribute('aria-label', 'Function of x');
+		fnInput.placeholder = 'f(x) — e.g. sin(x), 0.02cos(200t)';
+		fnInput.setAttribute('aria-label', 'Function of one variable');
 		const fromInput = this.el('input', 'luatikz-ve-plot-range', overlay);
 		fromInput.type = 'number';
 		fromInput.value = '-2';
@@ -2841,7 +3592,8 @@ export class VisualTikzEditor {
 		const commit = () => {
 			const fn = compileFunction(fnInput.value);
 			if (!fn) {
-				this.announce('Could not read the function — try e.g. sin(x), x^2 - 1, or exp(-x).');
+				this.announce(describeFunctionProblem(fnInput.value)
+					?? 'Could not read the function — try e.g. sin(x), x^2 - 1, or exp(-x).');
 				return;
 			}
 			const from = Number.parseFloat(fromInput.value);
@@ -2913,6 +3665,14 @@ export class VisualTikzEditor {
 					this.requestRender();
 				}
 			}
+			// The circuit tool shows a translucent preview of the component
+			// under the cursor; a click drops it exactly there.
+			if (this.tool === 'circuit' && this.router.mode === 'idle' && !this.gesture) {
+				const point = this.clientToCm(event.clientX, event.clientY);
+				this.circuitHover = point ? this.snapDrawPoint(point, false) : null;
+				this.dirtyOverlay = true;
+				this.requestRender();
+			}
 			if (this.router.mode === 'idle' && !this.gesture && !this.clickDraft) {
 				this.updateHoverObject(event.clientX, event.clientY);
 			}
@@ -2923,6 +3683,11 @@ export class VisualTikzEditor {
 			// carry the pointer over to read the highlighted statement; only
 			// the canvas cursor affordance resets.
 			this.svg.classList.remove('is-hover-object');
+			if (this.circuitHover) {
+				this.circuitHover = null;
+				this.dirtyOverlay = true;
+				this.requestRender();
+			}
 		}, { signal });
 		this.svg.addEventListener('pointerup', event => {
 			this.router.handlePointerUp(event);

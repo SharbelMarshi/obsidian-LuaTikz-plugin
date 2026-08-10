@@ -5,9 +5,10 @@ import {
 	type TikzPtBBox,
 } from '../utils/coordinatePick';
 import { parseOptionStyle } from './tikzOptions';
-import { tikzColorToCss } from './tikzColors';
+import { applyColorShade, tikzColorToCss } from './tikzColors';
 import type { ObjectGeometry, ObjectHandle, ScenePrimitive } from './sceneGeometry';
 import { gridLinePositions, type ViewBox } from './editorViewport';
+import type { ArrowTipKind, PatternStyle, ShadingStyle } from './sceneTypes';
 
 export { tikzColorToCss } from './tikzColors';
 
@@ -208,6 +209,7 @@ function arrowheadAt(
 	fromDirection: TikzCoordinate,
 	color: string,
 	widthPt: number,
+	tipKind: ArrowTipKind = 'default',
 ): SVGElement | null {
 	const length = Math.hypot(fromDirection.x, fromDirection.y);
 	if (length < 1e-6) {
@@ -217,16 +219,68 @@ function arrowheadAt(
 	const uy = fromDirection.y / length;
 	// Head length in cm: 3pt base plus growth with line width.
 	const sizeCm = (3 + widthPt * 2.5) / PT_PER_CM;
-	const back = { x: tip.x - ux * sizeCm, y: tip.y - uy * sizeCm };
-	const perp = { x: -uy * sizeCm * 0.45, y: ux * sizeCm * 0.45 };
-	const p1 = cmToPt(tip);
-	const p2 = cmToPt({ x: back.x + perp.x, y: back.y + perp.y });
-	const p3 = cmToPt({ x: back.x - perp.x, y: back.y - perp.y });
-	return svgEl(context.doc, 'path', {
-		d: `M ${fmt(p1.x)} ${fmt(p1.y)} L ${fmt(p2.x)} ${fmt(p2.y)} L ${fmt(p3.x)} ${fmt(p3.y)} Z`,
-		fill: color,
-		stroke: 'none',
+	// Point `back` along the shaft and `side` across it, both scaled by sizeCm.
+	const at = (back: number, side: number): { x: number; y: number } => cmToPt({
+		x: tip.x - ux * sizeCm * back - uy * sizeCm * side,
+		y: tip.y - uy * sizeCm * back + ux * sizeCm * side,
 	});
+	const point = (back: number, side: number): string => {
+		const p = at(back, side);
+		return `${fmt(p.x)} ${fmt(p.y)}`;
+	};
+	const filled = (d: string): SVGElement => svgEl(context.doc, 'path', {
+		d, fill: color, stroke: 'none',
+	});
+	const stroked = (d: string): SVGElement => svgEl(context.doc, 'path', {
+		d,
+		fill: 'none',
+		stroke: color,
+		'stroke-width': fmt(Math.max(widthPt, 0.6)),
+	});
+
+	switch (tipKind) {
+		case 'Stealth':
+			return filled(
+				`M ${point(0, 0)} L ${point(1, 0.5)} L ${point(0.62, 0)} L ${point(1, -0.5)} Z`,
+			);
+		case 'Latex':
+			return filled(
+				`M ${point(0, 0)} L ${point(1.3, 0.4)} L ${point(1.3, -0.4)} Z`,
+			);
+		case 'Triangle':
+			return filled(
+				`M ${point(0, 0)} L ${point(1.1, 0.62)} L ${point(1.1, -0.62)} Z`,
+			);
+		case 'Circle': {
+			const center = at(0.45, 0);
+			return svgEl(context.doc, 'circle', {
+				cx: fmt(center.x),
+				cy: fmt(center.y),
+				r: fmt(sizeCm * 0.45 * PT_PER_CM),
+				fill: color,
+				stroke: 'none',
+			});
+		}
+		case 'Square':
+			return filled(
+				`M ${point(0, 0.45)} L ${point(0, -0.45)} L ${point(0.9, -0.45)} L ${point(0.9, 0.45)} Z`,
+			);
+		case 'Diamond':
+			return filled(
+				`M ${point(0, 0)} L ${point(0.6, 0.45)} L ${point(1.2, 0)} L ${point(0.6, -0.45)} Z`,
+			);
+		case 'Bar':
+			return stroked(`M ${point(0, 0.55)} L ${point(0, -0.55)}`);
+		case 'Hooks':
+			return stroked(
+				`M ${point(0.6, 0.6)} C ${point(0.1, 0.6)}, ${point(-0.12, 0.35)}, ${point(0, 0)}`
+				+ ` C ${point(-0.12, -0.35)}, ${point(0.1, -0.6)}, ${point(0.6, -0.6)}`,
+			);
+		default:
+			return filled(
+				`M ${point(0, 0)} L ${point(1, 0.45)} L ${point(1, -0.45)} Z`,
+			);
+	}
 }
 
 function endpointDirections(
@@ -263,6 +317,142 @@ function endpointDirections(
 }
 
 /* -------------------------------------------------------------------------- */
+/* fill paint: gradients and patterns                                          */
+/* -------------------------------------------------------------------------- */
+
+/** Sanitize an object id (`p0:s1`) into an SVG id fragment. */
+const defsId = (objectId: string, suffix: string): string =>
+	`luatikz-ve-${objectId.replace(/[^a-zA-Z0-9_-]/g, '-')}-${suffix}`;
+
+/** Approximate SVG gradient for a TikZ shading. */
+function shadingDef(doc: Document, id: string, shading: ShadingStyle): SVGElement {
+	const stop = (offset: string, cssColor: string): SVGElement =>
+		svgEl(doc, 'stop', { offset, 'stop-color': cssColor });
+	if (shading.kind === 'radial' || shading.kind === 'ball') {
+		const gradient = svgEl(doc, 'radialGradient', {
+			id, cx: '0.5', cy: '0.5', r: '0.5',
+		});
+		if (shading.kind === 'ball') {
+			gradient.setAttribute('fx', '0.35');
+			gradient.setAttribute('fy', '0.35');
+			gradient.appendChild(stop('0%', tikzColorToCss(applyColorShade(shading.from, 70))));
+			gradient.appendChild(stop('60%', tikzColorToCss(shading.from)));
+			gradient.appendChild(stop('100%', tikzColorToCss(applyColorShade(shading.from, -40))));
+		} else {
+			gradient.appendChild(stop('0%', tikzColorToCss(shading.from)));
+			gradient.appendChild(stop('100%', tikzColorToCss(shading.to)));
+		}
+		return gradient;
+	}
+	const vertical = shading.kind === 'vertical';
+	const gradient = svgEl(doc, 'linearGradient', {
+		id,
+		x1: '0', y1: '0',
+		x2: vertical ? '0' : '1',
+		y2: vertical ? '1' : '0',
+	});
+	if (shading.angle) {
+		// TikZ rotates shadings counter-clockwise; canvas Y points down.
+		gradient.setAttribute('gradientTransform', `rotate(${fmt(-shading.angle)}, 0.5, 0.5)`);
+	}
+	gradient.appendChild(stop('0%', tikzColorToCss(shading.from)));
+	gradient.appendChild(stop('100%', tikzColorToCss(shading.to)));
+	return gradient;
+}
+
+/** Tile line/dot work for each pattern the editor offers. */
+const PATTERN_TILES: Record<string, { w: number; h: number; d: string; dots?: boolean; lw?: number }> = {
+	'horizontal lines': { w: 4, h: 4, d: 'M0 2H4' },
+	'vertical lines': { w: 4, h: 4, d: 'M2 0V4' },
+	'north east lines': { w: 4, h: 4, d: 'M0 4L4 0M-1 1L1 -1M3 5L5 3' },
+	'north west lines': { w: 4, h: 4, d: 'M0 0L4 4M3 -1L5 1M-1 3L1 5' },
+	'north east lines wide': { w: 4.5, h: 4.5, d: 'M0 4.5L4.5 0M-1 1L1 -1M3.5 5.5L5.5 3.5' },
+	'north west lines wide': { w: 4.5, h: 4.5, d: 'M0 0L4.5 4.5M3.5 -1L5.5 1M-1 3.5L1 5.5' },
+	'diagonal stripes': { w: 6, h: 6, d: 'M0 6L6 0M-2 2L2 -2M4 8L8 4', lw: 2.5 },
+	grid: { w: 4, h: 4, d: 'M0 2H4M2 0V4' },
+	crosshatch: { w: 4, h: 4, d: 'M0 4L4 0M0 0L4 4' },
+	dots: { w: 3.5, h: 3.5, d: 'M1.75 1.75', dots: true },
+	'crosshatch dots': { w: 2.6, h: 2.6, d: 'M1.3 1.3', dots: true },
+	'fivepointed stars': {
+		w: 6, h: 6,
+		d: 'M3 1l0.6 1.3 1.5 0.1-1.1 1 0.35 1.4L3 4.1l-1.35 0.7L2 3.4 0.9 2.4l1.5-0.1z',
+	},
+	'sixpointed stars': {
+		w: 6, h: 6,
+		d: 'M3 1l0.9 1.5H5.6L4.75 4 5.6 5.5H3.9L3 7 2.1 5.5H0.4L1.25 4 0.4 2.5h1.7z',
+	},
+	bricks: { w: 8, h: 4, d: 'M0 1H8M0 3H8M2 1V3M6 3V5M6 -1V1' },
+	checkerboard: { w: 4, h: 4, d: 'M0 0H2V2H0zM2 2H4V4H2z' },
+};
+
+/** Approximate SVG pattern tile for a `patterns`-library fill. */
+function patternDef(doc: Document, id: string, pattern: PatternStyle): SVGElement {
+	const colorCss = tikzColorToCss(pattern.color ?? 'black');
+	const tile = PATTERN_TILES[pattern.name] ?? PATTERN_TILES['north east lines'];
+	const el = svgEl(doc, 'pattern', {
+		id,
+		width: String(tile.w),
+		height: String(tile.h),
+		patternUnits: 'userSpaceOnUse',
+	});
+	const solid = pattern.name === 'fivepointed stars' || pattern.name === 'sixpointed stars'
+		|| pattern.name === 'checkerboard';
+	if (tile.dots) {
+		const center = /^M([\d.]+) ([\d.]+)$/.exec(tile.d);
+		el.appendChild(svgEl(doc, 'circle', {
+			cx: center ? center[1] : '2',
+			cy: center ? center[2] : '2',
+			r: '0.5',
+			fill: colorCss,
+		}));
+	} else {
+		el.appendChild(svgEl(doc, 'path', {
+			d: tile.d,
+			fill: solid ? colorCss : 'none',
+			stroke: solid ? 'none' : colorCss,
+			'stroke-width': String(tile.lw ?? 0.4),
+		}));
+	}
+	return el;
+}
+
+/**
+ * One `path` covering the object's segment/bezier chains as closed subpaths,
+ * used to paint fills for polygons, freehand outlines, and `\fill` paths that
+ * individual stroke primitives cannot express.
+ */
+function closedFillPathD(primitives: readonly ScenePrimitive[]): string | null {
+	let d = '';
+	let cursor: TikzCoordinate | null = null;
+	let count = 0;
+	for (const primitive of primitives) {
+		if (primitive.kind !== 'segment' && primitive.kind !== 'bezier') {
+			continue;
+		}
+		const a = cmToPt(primitive.a);
+		if (!cursor
+			|| Math.abs(cursor.x - primitive.a.x) > 1e-6
+			|| Math.abs(cursor.y - primitive.a.y) > 1e-6) {
+			d += `${d ? ' Z ' : ''}M ${fmt(a.x)} ${fmt(a.y)}`;
+		}
+		const b = cmToPt(primitive.b);
+		if (primitive.kind === 'segment') {
+			d += ` L ${fmt(b.x)} ${fmt(b.y)}`;
+		} else {
+			const c1 = cmToPt(primitive.c1);
+			const c2 = cmToPt(primitive.c2);
+			d += ` C ${fmt(c1.x)} ${fmt(c1.y)}, ${fmt(c2.x)} ${fmt(c2.y)}, ${fmt(b.x)} ${fmt(b.y)}`;
+		}
+		cursor = primitive.b;
+		count++;
+	}
+	if (count < 2) {
+		return null;
+	}
+	return `${d} Z`;
+}
+
+/* -------------------------------------------------------------------------- */
 /* objects                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -279,16 +469,38 @@ export function renderObjectGroup(
 	const locked = geometry.object.type === 'locked';
 	const options = geometry.object.type === 'locked' ? '' : geometry.object.options;
 	const style = parseOptionStyle(options);
-	const strokeCss = tikzColorToCss(style.strokeColor);
+	// `draw=none` suppresses the outline (and its arrow tips); node text keeps
+	// its own color, which `draw=none` does not touch in TikZ either.
+	const strokeNone = style.strokeColor === 'none';
+	const strokeCss = strokeNone ? 'none' : tikzColorToCss(style.strokeColor);
+	const textCss = strokeNone ? tikzColorToCss(undefined) : strokeCss;
 	const widthPt = optionsToStrokeWidthPt(options);
 	const strokePt = Math.max(widthPt, MIN_STROKE_PX / Math.max(context.pxPerPt, 1e-6));
 
 	const pathCommand = geometry.object.type === 'path' ? geometry.object.command : null;
 	const isFillCommand = pathCommand === 'fill' || pathCommand === 'filldraw';
-	const fillCss = style.fillColor !== undefined || isFillCommand
-		? tikzColorToCss(style.fillColor ?? style.strokeColor ?? 'black')
-		: 'none';
-	const strokeVisible = pathCommand !== 'fill' && pathCommand !== 'path';
+	const strokeVisible = pathCommand !== 'fill' && pathCommand !== 'path' && !strokeNone;
+
+	// Fill paint layers: a gradient or solid color first, a pattern tile on
+	// top (TikZ draws `fill=` and `pattern=` as two stacked fill actions).
+	const defs = svgEl(doc, 'defs');
+	const fillPaints: string[] = [];
+	if (style.shading) {
+		const id = defsId(geometry.object.id, 'shading');
+		defs.appendChild(shadingDef(doc, id, style.shading));
+		fillPaints.push(`url(#${id})`);
+	} else if (style.fillColor !== undefined || isFillCommand) {
+		const fallback = style.strokeColor && !strokeNone ? style.strokeColor : 'black';
+		fillPaints.push(tikzColorToCss(style.fillColor ?? fallback));
+	}
+	if (style.pattern) {
+		const id = defsId(geometry.object.id, 'pattern');
+		defs.appendChild(patternDef(doc, id, style.pattern));
+		fillPaints.push(`url(#${id})`);
+	}
+	if (defs.childNodes.length) {
+		group.appendChild(defs);
+	}
 
 	group.setAttribute('stroke', strokeVisible ? strokeCss : 'none');
 	group.setAttribute('stroke-width', fmt(strokePt));
@@ -307,33 +519,59 @@ export function renderObjectGroup(
 		group.classList.add('luatikz-ve-object-locked');
 	}
 
-	const fillTargets = new Set(['rect', 'circle', 'nodeMark']);
+	// Fill layers go first so every stroke stays visible on top of them.
+	if (fillPaints.length) {
+		const fillTargets = new Set(['rect', 'circle']);
+		const pathD = closedFillPathD(geometry.primitives);
+		for (const paint of fillPaints) {
+			if (pathD) {
+				group.appendChild(svgEl(doc, 'path', {
+					d: pathD,
+					fill: paint,
+					'fill-rule': 'evenodd',
+					'fill-opacity': '0.85',
+					stroke: 'none',
+				}));
+			}
+			for (const primitive of geometry.primitives) {
+				if (!fillTargets.has(primitive.kind)) {
+					continue;
+				}
+				const el = primitiveToSvg(context, primitive);
+				if (el) {
+					el.setAttribute('fill', paint);
+					el.setAttribute('fill-opacity', '0.85');
+					el.setAttribute('stroke', 'none');
+					group.appendChild(el);
+				}
+			}
+		}
+	}
+
 	for (const primitive of geometry.primitives) {
 		const el = primitiveToSvg(context, primitive);
 		if (!el) {
 			continue;
 		}
 		if (primitive.kind === 'nodeMark') {
-			el.setAttribute('fill', strokeCss);
+			el.setAttribute('fill', textCss);
 			el.setAttribute('stroke', 'none');
-		} else if (fillCss !== 'none' && fillTargets.has(primitive.kind)) {
-			el.setAttribute('fill', fillCss);
-			el.setAttribute('fill-opacity', '0.85');
 		}
 		group.appendChild(el);
 	}
 
-	const arrows = style.arrows || (style.rawArrowToken ? '->' : undefined);
+	const arrows = !strokeNone && (style.arrows || (style.rawArrowToken ? '->' : undefined));
+	const tipKind = style.arrowTip ?? 'default';
 	if (arrows) {
 		const { start, end } = endpointDirections(geometry.primitives);
 		if ((arrows === '->' || arrows === '<->') && end) {
-			const head = arrowheadAt(context, end.at, end.dir, strokeCss, widthPt);
+			const head = arrowheadAt(context, end.at, end.dir, strokeCss, widthPt, tipKind);
 			if (head) {
 				group.appendChild(head);
 			}
 		}
 		if ((arrows === '<-' || arrows === '<->') && start) {
-			const head = arrowheadAt(context, start.at, start.dir, strokeCss, widthPt);
+			const head = arrowheadAt(context, start.at, start.dir, strokeCss, widthPt, tipKind);
 			if (head) {
 				group.appendChild(head);
 			}

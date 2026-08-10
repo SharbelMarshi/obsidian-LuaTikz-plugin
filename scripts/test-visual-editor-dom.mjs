@@ -162,14 +162,17 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	assert.ok(toolbar);
 	assert.equal(toolbar.getAttribute('role'), 'toolbar');
 	const toolButtons = editor.root.querySelectorAll('.luatikz-ve-tool-btn');
-	assert.equal(toolButtons.length, 11, 'primary tools + the Shapes menu button');
+	assert.equal(toolButtons.length, 13,
+		'primary tools (incl. paint) + the Shapes and Circuit menu buttons');
 	for (const btn of toolButtons) {
 		assert.ok(btn.getAttribute('aria-label'), 'icon buttons need aria-label');
 		assert.ok(btn.hasAttribute('aria-pressed'));
 		assert.ok(btn.querySelector('svg.luatikz-ve-icon'), `tool button without icon: ${btn.getAttribute('aria-label')}`);
 	}
 	// All shape tools live in the Shapes menu, triangle included.
-	const shapeItems = editor.root.querySelectorAll('.luatikz-ve-shape-item');
+	const shapeItems = editor.root.querySelectorAll(
+		'.luatikz-ve-shape-menu:not(.luatikz-ve-circuit-menu) .luatikz-ve-shape-item',
+	);
 	assert.equal(shapeItems.length, 10, 'all shape tools in the menu');
 	const shapeTools = [...shapeItems].map(item => item.dataset.tool);
 	assert.ok(shapeTools.includes('triangle'), 'triangle tool present');
@@ -365,9 +368,13 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 /* --- locked ghosts must not block box selection ----------------------------------- */
 
 {
+	// A scope keeps its statements source-only (with a ghost); `to[bend left]`
+	// itself is editable since the circuit tools landed.
 	const body = [
 		'\\begin{tikzpicture}',
-		'\\draw (0,0) to[bend left] (6,0);',
+		'\\begin{scope}',
+		'\\draw (0,0) -- (6,0);',
+		'\\end{scope}',
 		'\\draw (1,1) -- (2,2);',
 		'\\end{tikzpicture}',
 	].join('\n');
@@ -393,7 +400,7 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 
 	// …and Delete removes it like any other selected object.
 	editor.root.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
-	assert.ok(!state.body.includes('bend left'), 'delete must remove source-only statements too');
+	assert.ok(!state.body.includes('(0,0) -- (6,0)'), 'delete must remove source-only statements too');
 	assert.ok(state.body.includes('(1,1) -- (2,2)'), 'other statements stay untouched');
 	editor.destroy();
 }
@@ -713,7 +720,7 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	assert.ok(colorError < 45, `mix approximates #123456 (${colorMatch[1]}, off by ${colorError.toFixed(1)})`);
 
 	// A locked-only selection disables the style controls.
-	const lockedBody = '\\begin{tikzpicture}\n\\draw (0,0) to[bend left] (6,0);\n\\end{tikzpicture}';
+	const lockedBody = '\\begin{tikzpicture}\n\\begin{scope}\n\\draw (0,0) -- (6,0);\n\\end{scope}\n\\end{tikzpicture}';
 	const second = makeEditor(lockedBody);
 	second.editor.setTool('select');
 	second.editor.gestureRouter.handlePointerDown(mouse(1, { x: 3, y: 0.02 }, second.svg));
@@ -727,7 +734,265 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	editor.destroy();
 }
 
-/* --- path and bézier click tools ------------------------------------------------ */
+/* --- gradients, patterns, shades, and arrow tips through the panel --------------- */
+
+function propsControlByLabel(editor, label) {
+	for (const row of editor.root.querySelectorAll('.luatikz-ve-props-row')) {
+		const labelEl = row.querySelector('.luatikz-ve-props-label');
+		if (labelEl && labelEl.textContent === label) {
+			return row.querySelector('select, input');
+		}
+	}
+	return null;
+}
+
+{
+	const body = '\\begin{tikzpicture}\n\\draw (0,0) rectangle (2,2);\n\\end{tikzpicture}';
+	const { editor, state, svg } = makeEditor(body);
+	const router = editor.gestureRouter;
+	router.handlePointerDown(mouse(1, { x: 1, y: 2 }, svg));
+	router.handlePointerUp(mouse(1, { x: 1, y: 2 }, svg));
+	assert.equal(editor.selectionIds.length, 1, 'rectangle selected');
+
+	// Vertical gradient from the Fill style select.
+	const fillStyle = propsControlByLabel(editor, 'Fill style');
+	assert.ok(fillStyle, 'Fill style select present');
+	fillStyle.value = 'vertical';
+	fillStyle.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.match(state.body, /\\draw\[top color=[^,\]]+, bottom color=[^\]]+\] \(0,0\) rectangle \(2,2\);/,
+		`gradient written: ${state.body}`);
+
+	// The contextual gradient rows only show for gradient modes.
+	const fromRow = propsControlByLabel(editor, 'From color').closest('.luatikz-ve-props-row');
+	assert.ok(!fromRow.classList.contains('luatikz-ve-hidden'), 'gradient rows visible');
+
+	// Switching to a pattern replaces the gradient, loads the library, and —
+	// for the editor's wide default — declares the pattern in the fence.
+	fillStyle.value = 'pattern';
+	fillStyle.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.ok(state.body.includes('pattern=north east lines wide'), `pattern written: ${state.body}`);
+	assert.ok(!state.body.includes('top color='), 'gradient replaced by pattern');
+	assert.ok(state.body.startsWith('\\usetikzlibrary{patterns}'),
+		`patterns library auto-loaded: ${state.body}`);
+	assert.ok(state.body.includes('\\pgfdeclarepatternformonly{north east lines wide}'),
+		`wide-lines declaration auto-inserted: ${state.body}`);
+	assert.ok(fromRow.classList.contains('luatikz-ve-hidden'), 'gradient rows hide for patterns');
+
+	// The editor's own "diagonal stripes" pattern brings its declaration along.
+	const patternSelect = propsControlByLabel(editor, 'Pattern');
+	patternSelect.value = 'diagonal stripes';
+	patternSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.ok(state.body.includes('pattern=diagonal stripes'),
+		`diagonal stripes written: ${state.body}`);
+	assert.ok(state.body.includes('\\pgfdeclarepatternformonly{diagonal stripes}'),
+		`stripes declaration auto-inserted: ${state.body}`);
+	assert.equal(state.body.match(/pgfdeclarepatternformonly\{diagonal stripes\}/g).length, 1,
+		'stripes declaration inserted once');
+	// Re-applying does not duplicate the declaration or the library line.
+	patternSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.equal(state.body.match(/pgfdeclarepatternformonly\{diagonal stripes\}/g).length, 1,
+		'stripes declaration stays single after re-apply');
+	assert.equal(state.body.match(/pgfdeclarepatternformonly\{north east lines wide\}/g).length, 1,
+		'wide-lines declaration stays single');
+	assert.equal(state.body.match(/\\usetikzlibrary\{patterns\}/g).length, 1,
+		'library line stays single');
+
+	// Back to solid: pattern tokens go away again.
+	fillStyle.value = 'solid';
+	fillStyle.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.ok(!state.body.includes('pattern='), `solid clears the pattern: ${state.body}`);
+	editor.destroy();
+}
+
+{
+	const body = '\\begin{tikzpicture}\n\\draw (1,1) -- (3,2);\n\\end{tikzpicture}';
+	const { editor, state, svg } = makeEditor(body);
+	const router = editor.gestureRouter;
+	router.handlePointerDown(mouse(1, { x: 2, y: 1.5 }, svg));
+	router.handlePointerUp(mouse(1, { x: 2, y: 1.5 }, svg));
+
+	// Stroke "None" writes draw=none; picking a color afterwards replaces it.
+	const noneSwatch = editor.root.querySelector(
+		'.luatikz-ve-props-colorrow .luatikz-ve-swatch-none',
+	);
+	assert.ok(noneSwatch, 'stroke row offers a None swatch');
+	noneSwatch.dispatchEvent(new window.Event('click', { bubbles: true }));
+	assert.ok(state.body.includes('\\draw[draw=none]'), `no-outline written: ${state.body}`);
+	assert.ok(noneSwatch.classList.contains('is-active'), 'None swatch reflects selection');
+
+	// Shade slider: red + lighten writes an xcolor shade of the base color.
+	const redSwatch = editor.root.querySelector(
+		'.luatikz-ve-props-colorrow .luatikz-ve-swatch[data-color="red"]',
+	);
+	redSwatch.dispatchEvent(new window.Event('click', { bubbles: true }));
+	assert.ok(state.body.includes('\\draw[red]'), state.body);
+	assert.ok(!state.body.includes('draw=none'), `picking a color clears draw=none: ${state.body}`);
+	const shadeSlider = editor.root.querySelector('.luatikz-ve-props-shade');
+	shadeSlider.value = '40';
+	shadeSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.ok(state.body.includes('\\draw[red!60]'), `lighter shade written: ${state.body}`);
+	shadeSlider.value = '-40';
+	shadeSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.ok(state.body.includes('\\draw[red!60!black]'), `darker shade written: ${state.body}`);
+
+	// Arrow tip select writes an arrows.meta spec and keeps it on direction edits.
+	const tipSelect = propsControlByLabel(editor, 'Arrow tip');
+	tipSelect.value = 'Stealth';
+	tipSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.ok(state.body.includes('-{Stealth}'), `tip spec written: ${state.body}`);
+	const arrowsSelect = propsControlByLabel(editor, 'Arrows');
+	arrowsSelect.value = '<->';
+	arrowsSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+	assert.ok(state.body.includes('{Stealth}-{Stealth}'), `direction keeps tip: ${state.body}`);
+	editor.destroy();
+}
+
+/* --- circuit components menu ------------------------------------------------------ */
+
+{
+	const { editor, state, svg } = makeEditor(EMPTY);
+	const router = editor.gestureRouter;
+
+	// The Circuit button opens its menu; picking Resistor activates the tool.
+	const circuitBtn = editor.root.querySelector('.luatikz-ve-circuit-btn');
+	assert.ok(circuitBtn, 'Circuit menu button present');
+	circuitBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+	assert.equal(editor.circuitMenuOpen, true, 'circuit menu opens');
+	const items = editor.root.querySelectorAll('[data-component]');
+	assert.ok(items.length >= 13, `all components listed, got ${items.length}`);
+	editor.root.querySelector('[data-component="resistor"]')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	assert.equal(editor.tool, 'circuit', 'component item activates the circuit tool');
+	assert.equal(editor.circuitMenuOpen, false, 'menu closes after picking');
+
+	// A translucent preview follows the cursor before the drop.
+	svg.dispatchEvent(new window.MouseEvent('pointermove', {
+		clientX: cmToClient(svg, { x: 1, y: 0 }).x,
+		clientY: cmToClient(svg, { x: 1, y: 0 }).y,
+		bubbles: true,
+	}));
+	editor.renderNow();
+	assert.ok(editor.root.querySelector('.luatikz-ve-circuit-preview'),
+		'hover shows the component preview');
+
+	// A single click drops the bipole (2cm span centered on the click) as a
+	// native circuitikz statement — no drag needed.
+	router.handlePointerDown(mouse(1, { x: 1, y: 0 }, svg));
+	router.handlePointerUp(mouse(1, { x: 1, y: 0 }, svg));
+	assert.ok(state.body.includes('\\draw (0.00, 0.00) to[R] (2.00, 0.00);'),
+		`resistor written: ${state.body}`);
+	assert.equal(editor.currentScene.objects.filter(object => object.type === 'locked').length, 0,
+		'placed component stays editable');
+
+	// The endpoints are draggable like any line (tap the lead wire).
+	editor.setTool('select');
+	router.handlePointerDown(mouse(2, { x: 0.3, y: 0 }, svg));
+	router.handlePointerUp(mouse(2, { x: 0.3, y: 0 }, svg));
+	assert.equal(editor.selectionIds.length, 1, 'component selectable');
+	router.handlePointerDown(mouse(3, { x: 2, y: 0 }, svg));
+	router.handlePointerMove(mouse(3, { x: 3.02, y: 0.98 }, svg));
+	router.handlePointerUp(mouse(3, { x: 3.02, y: 0.98 }, svg));
+	assert.ok(state.body.includes('to[R] (3.00, 1.00);'),
+		`endpoint drag rewrites only the coordinate: ${state.body}`);
+
+	// A voltage source drops as the american (+/−) form and brings the
+	// version-safe sign-rotation setting with it, once.
+	editor.root.querySelector('.luatikz-ve-circuit-btn')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	editor.root.querySelector('[data-component="voltage-source"]')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	router.handlePointerDown(mouse(4, { x: 1, y: -1 }, svg));
+	router.handlePointerUp(mouse(4, { x: 1, y: -1 }, svg));
+	assert.ok(state.body.includes('to[american voltage source] (2.00, -1.00);'),
+		`voltage source: ${state.body}`);
+	assert.ok(state.body.includes('\\ctikzset{sources/symbol/sign rotation/.initial=auto}'),
+		`sign-rotation setting inserted: ${state.body}`);
+	router.handlePointerDown(mouse(6, { x: 1, y: -3 }, svg));
+	router.handlePointerUp(mouse(6, { x: 1, y: -3 }, svg));
+	assert.equal(state.body.match(/sign rotation/g).length, 1,
+		'sign-rotation setting inserted once');
+
+	editor.root.querySelector('.luatikz-ve-circuit-btn')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	editor.root.querySelector('[data-component="ground"]')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	router.handlePointerDown(mouse(5, { x: 1, y: -2 }, svg));
+	router.handlePointerUp(mouse(5, { x: 1, y: -2 }, svg));
+	assert.ok(state.body.includes('\\node[ground] at (1.00, -2.00) {};'),
+		`ground node placed: ${state.body}`);
+
+	// The junction dot and the rectangular resistor variant.
+	editor.root.querySelector('.luatikz-ve-circuit-btn')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	editor.root.querySelector('[data-component="dot"]')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	router.handlePointerDown(mouse(7, { x: 2, y: -2 }, svg));
+	router.handlePointerUp(mouse(7, { x: 2, y: -2 }, svg));
+	assert.ok(state.body.includes('\\node[circ] at (2.00, -2.00) {};'),
+		`junction dot placed: ${state.body}`);
+
+	editor.root.querySelector('.luatikz-ve-circuit-btn')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	editor.root.querySelector('[data-component="resistor-box"]')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	router.handlePointerDown(mouse(8, { x: 1, y: -4 }, svg));
+	router.handlePointerUp(mouse(8, { x: 1, y: -4 }, svg));
+	assert.ok(state.body.includes('to[generic] (2.00, -4.00);'),
+		`box resistor placed: ${state.body}`);
+	editor.destroy();
+}
+
+/* --- painter tool ---------------------------------------------------------------- */
+
+{
+	// Clicking inside a closed shape fills the shape itself.
+	const body = '\\begin{tikzpicture}\n\\draw (0,0) rectangle (2,2);\n\\end{tikzpicture}';
+	const { editor, state, svg } = makeEditor(body);
+	const router = editor.gestureRouter;
+	// Pick a red fill with nothing selected: the painter uses the defaults.
+	const fillRed = editor.root.querySelectorAll(
+		'.luatikz-ve-props-colorrow',
+	)[1].querySelector('.luatikz-ve-swatch[data-color="red"]');
+	fillRed.dispatchEvent(new window.Event('click', { bubbles: true }));
+
+	editor.setTool('paint');
+	router.handlePointerDown(mouse(1, { x: 1, y: 1 }, svg));
+	router.handlePointerUp(mouse(1, { x: 1, y: 1 }, svg));
+	assert.ok(state.body.includes('\\draw[fill=red] (0,0) rectangle (2,2);'),
+		`painter fills the matching shape: ${state.body}`);
+
+	// Clicking outside every shape changes nothing.
+	const before = state.body;
+	router.handlePointerDown(mouse(1, { x: 6, y: 6 }, svg));
+	router.handlePointerUp(mouse(1, { x: 6, y: 6 }, svg));
+	assert.equal(state.body, before, 'open region leaves the source alone');
+	editor.destroy();
+}
+
+{
+	// A region bounded by several strokes becomes a traced \fill path,
+	// inserted before the strokes so they stay painted on top.
+	const body = [
+		'\\begin{tikzpicture}',
+		'\\draw (0,0) circle[radius=2cm];',
+		'\\draw (-2,0) -- (2,0);',
+		'\\end{tikzpicture}',
+	].join('\n');
+	const { editor, state, svg } = makeEditor(body);
+	editor.setTool('paint');
+	const router = editor.gestureRouter;
+	router.handlePointerDown(mouse(1, { x: 0, y: 1 }, svg));
+	router.handlePointerUp(mouse(1, { x: 0, y: 1 }, svg));
+	assert.match(state.body, /\\fill[^;]* -- cycle;/s, `traced fill written: ${state.body}`);
+	assert.ok(state.body.indexOf('\\fill') < state.body.indexOf('circle['),
+		'fill inserted before the strokes that bound it');
+	const reparsed = editor.currentScene;
+	assert.equal(reparsed.objects.filter(object => object.type === 'locked').length, 0,
+		'traced fill parses back editable');
+	// The painted statement is selected for immediate restyling.
+	assert.equal(editor.selectionIds.length, 1, 'painted region selected');
+	editor.destroy();
+}
 
 {
 	const { editor, state, svg } = makeEditor(EMPTY);
@@ -841,6 +1106,9 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 		'\\begin{tikzpicture}',
 		'  % keep me',
 		'  \\foreach \\x in {1,...,3} \\draw (\\x,0) circle[radius=2pt];',
+		'  \\begin{scope}',
+		'  \\draw (0,1) -- (1,2);',
+		'  \\end{scope}',
 		'  \\draw (0,0) to[bend left] (2,2);',
 		'\\end{tikzpicture}',
 	].join('\n');
@@ -983,6 +1251,58 @@ const EMPTY = '\\begin{tikzpicture}\n\\end{tikzpicture}';
 	editor.setCompileResult({ ok: false, error: 'boom' }, false);
 	assert.ok(layer.querySelector('svg'), 'underlay must survive a failed compile');
 	assert.ok(svg.classList.contains('has-underlay'));
+	editor.destroy();
+}
+
+// Circuit glyphs are approximations: once the underlay contains their
+// statement the wireframe must hide entirely (the grey ghost behind the
+// compiled symbol) — but a freshly dropped component stays visible until
+// its own compile lands.
+{
+	const body = [
+		'\\begin{tikzpicture}',
+		'\\draw (0,0) to[R] (2,0);',
+		'\\draw (0,1) -- (2,1);',
+		'\\end{tikzpicture}',
+	].join('\n');
+	const { editor, svg } = makeEditor(body);
+	const underlay = version => [
+		'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 90" width="120pt" height="90pt"',
+		' data-luatikz-bbox="-10 -20 30 20">',
+		`<path d="M0 ${version} L50 50" stroke="black"/>`,
+		'</svg>',
+	].join('');
+
+	editor.setCompileResult({ ok: true, dataUrl: 'data:x', svgText: underlay(0) }, false);
+	editor.renderNow();
+	const groupFor = id => editor.root.querySelector(`.luatikz-ve-layer-objects [data-luatikz-object-id="${id}"]`)
+		?? editor.root.querySelector(`[data-luatikz-object-id="${id}"]`);
+	assert.ok(groupFor('p0:s0').classList.contains('luatikz-ve-object-approx'),
+		'compiled circuit wireframe must be marked approximate');
+	assert.ok(!groupFor('p0:s1').classList.contains('luatikz-ve-object-approx'),
+		'plain lines keep the normal dimmed wireframe');
+
+	// Drop a new component: not yet in the underlay → wireframe stays.
+	editor.root.querySelector('.luatikz-ve-circuit-btn')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	editor.root.querySelector('[data-component="capacitor"]')
+		.dispatchEvent(new window.Event('click', { bubbles: true }));
+	const router = editor.gestureRouter;
+	router.handlePointerDown(mouse(1, { x: 1, y: -1 }, svg));
+	router.handlePointerUp(mouse(1, { x: 1, y: -1 }, svg));
+	editor.renderNow();
+	const fresh = editor.currentScene.objects.find(object =>
+		object.type === 'path' && object.options.includes('C') === false
+		&& editor.currentScene.source.slice(object.span.from, object.span.to).includes('to[C]'))
+		?? editor.currentScene.objects[editor.currentScene.objects.length - 1];
+	assert.ok(!groupFor(fresh.id).classList.contains('luatikz-ve-object-approx'),
+		'freshly placed component keeps its wireframe until its compile lands');
+
+	// The next compile includes it → the wireframe hides.
+	editor.setCompileResult({ ok: true, dataUrl: 'data:x', svgText: underlay(1) }, false);
+	editor.renderNow();
+	assert.ok(groupFor(fresh.id).classList.contains('luatikz-ve-object-approx'),
+		'after its compile the approximate wireframe hides');
 	editor.destroy();
 }
 

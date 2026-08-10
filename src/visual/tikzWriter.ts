@@ -61,12 +61,21 @@ export function buildOptionsPrefix(style: ObjectStyle, extraTokens: string[] = [
 	const edit: StyleEdit = {};
 	if (style.arrows) {
 		edit.arrows = style.arrows;
+		if (style.arrowTip && style.arrowTip !== 'default') {
+			edit.arrowTip = style.arrowTip;
+		}
 	}
 	if (style.strokeColor && style.strokeColor !== 'black') {
 		edit.strokeColor = style.strokeColor;
 	}
 	if (style.fillColor) {
 		edit.fillColor = style.fillColor;
+	}
+	if (style.shading) {
+		edit.shading = style.shading;
+	}
+	if (style.pattern) {
+		edit.pattern = style.pattern;
 	}
 	if (style.lineWidth && style.lineWidth !== 'default') {
 		edit.lineWidth = style.lineWidth;
@@ -161,6 +170,30 @@ export function generateNode(
 ): string {
 	const body = math ? `$${text}$` : text;
 	return `\\node${buildOptionsPrefix(style)} at ${formatPoint(at)} {${body}};`;
+}
+
+/** circuitikz bipole between two points: `\draw (a) to[R] (b);`. */
+export function generateCircuitComponent(
+	a: TikzCoordinate,
+	b: TikzCoordinate,
+	bipole: string,
+	style: ObjectStyle,
+): string {
+	return `\\draw${buildOptionsPrefix(style)} ${formatPoint(a)} to[${bipole}] ${formatPoint(b)};`;
+}
+
+/** circuitikz point symbol (`ground`, `circ` junction dot): an empty node. */
+export function generateCircuitNode(
+	at: TikzCoordinate,
+	shape: string,
+	style: ObjectStyle,
+): string {
+	return `\\node${buildOptionsPrefix(style, [shape])} at ${formatPoint(at)} {};`;
+}
+
+/** circuitikz ground symbol: an empty node with the `ground` shape. */
+export function generateGroundNode(at: TikzCoordinate, style: ObjectStyle): string {
+	return generateCircuitNode(at, 'ground', style);
 }
 
 /** Multi-segment cubic path: `(p0) .. controls (c) and (c) .. (p1) …`. */
@@ -449,6 +482,29 @@ export function duplicateObjectPatches(
 	return [{
 		oldSpan: { from: insertAt, to: insertAt },
 		replacement: `\n${indent}${copy}`,
+	}];
+}
+
+/**
+ * Insert a generated statement on its own line right before `anchor`, taking
+ * the anchor's indentation. Used by the painter: a region fill written before
+ * the strokes that bound it keeps those strokes painted on top.
+ */
+export function insertStatementBeforePatches(
+	source: string,
+	anchor: SceneObject,
+	statementText: string,
+): SourcePatch[] {
+	const lineStart = source.lastIndexOf('\n', anchor.span.from - 1) + 1;
+	const indentMatch = /^[ \t]*/.exec(source.slice(lineStart, anchor.span.from));
+	const indent = indentMatch ? indentMatch[0] : '';
+	const indented = statementText
+		.split('\n')
+		.map((line, index) => (index === 0 ? line : `${indent}${line}`))
+		.join('\n');
+	return [{
+		oldSpan: { from: lineStart, to: lineStart },
+		replacement: `${indent}${indented}\n`,
 	}];
 }
 

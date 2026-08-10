@@ -253,7 +253,7 @@ export class TikzJaxRenderer {
 				}),
 			);
 			consoleLogs = logs;
-			const fixedSvg = finalizeTikzJaxSvg(svgText);
+			const fixedSvg = finalizeTikzJaxSvg(svgText, normalizedSource);
 
 			if (!validateSvgOutput(fixedSvg)) {
 				const logBody = [

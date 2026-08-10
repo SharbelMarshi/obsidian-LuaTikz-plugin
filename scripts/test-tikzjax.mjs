@@ -89,7 +89,7 @@ async function renderNormalized(source) {
 		tikzLibraries: normalized.tikzLibraries,
 		addToPreamble: normalized.addToPreamble || undefined,
 	});
-	return finalizeTikzJaxSvg(svg);
+	return finalizeTikzJaxSvg(svg, source);
 }
 
 function assertEnglishTextLabels(svg) {
@@ -241,6 +241,61 @@ shader=interp,
 		throw new Error('Test 5 (RTL fallback macros) did not return SVG.');
 	}
 	console.log('Test 5 (RTL fallback macros): OK');
+
+	// The draw editor's mobile parity: pattern fills reference pgfpatN/pgfsymN
+	// tile definitions that node-tikzjax's converter drops; finalizeTikzJaxSvg
+	// must re-inject them so every reference resolves in-document.
+	const patternSvg = await renderNormalized(String.raw`\usetikzlibrary{patterns}
+\pgfdeclarepatternformonly{diagonal stripes}{\pgfqpoint{-1pt}{-1pt}}{\pgfqpoint{7pt}{7pt}}{\pgfqpoint{6pt}{6pt}}{\pgfsetlinewidth{2.5pt}\pgfpathmoveto{\pgfqpoint{-2pt}{-2pt}}\pgfpathlineto{\pgfqpoint{8pt}{8pt}}\pgfusepath{stroke}}
+\pgfdeclarepatternformonly{north east lines wide}{\pgfqpoint{-1pt}{-1pt}}{\pgfqpoint{5.5pt}{5.5pt}}{\pgfqpoint{4.5pt}{4.5pt}}{\pgfsetlinewidth{0.4pt}\pgfpathmoveto{\pgfqpoint{0pt}{0pt}}\pgfpathlineto{\pgfqpoint{4.6pt}{4.6pt}}\pgfusepath{stroke}}
+\begin{tikzpicture}
+\draw[pattern=north east lines, pattern color=blue] (0,0) rectangle (2,1);
+\draw[fill=yellow, pattern=dots] (2.5,0) rectangle (4.5,1);
+\draw[pattern=bricks, pattern color=red] (5,0) rectangle (7,1);
+\draw[pattern=diagonal stripes] (7.5,0) rectangle (9.5,1);
+\draw[pattern=north east lines wide] (10,0) rectangle (12,1);
+\draw[top color=red!60, bottom color=blue] (0,-1.5) rectangle (2,-0.5);
+\draw[-{Stealth}] (2.5,-1) -- (4.5,-1);
+\end{tikzpicture}`);
+	if (!patternSvg.includes('<svg')) {
+		throw new Error('Test 7 (patterns/shadings/tips) did not return SVG.');
+	}
+	const patternRefs = new Set(
+		[...patternSvg.matchAll(/#(pgf(?:pat|sym)\d+)/g)].map(match => match[1]),
+	);
+	if (!patternRefs.size) {
+		throw new Error('Test 7: expected pattern fills to reference pgfpat tiles.');
+	}
+	const danglingRefs = [...patternRefs].filter(id => !patternSvg.includes(`id="${id}"`));
+	if (danglingRefs.length) {
+		throw new Error(`Test 7: dangling pattern refs after finalize: ${danglingRefs.join(', ')}`);
+	}
+	if (!/Gradient/.test(patternSvg)) {
+		throw new Error('Test 7: expected shading gradients in the SVG output.');
+	}
+	console.log('Test 7 (patterns, shadings, arrow tips): OK');
+
+	// Circuit components from the draw editor's Circuit menu: circuitikz must
+	// auto-load for `to[...]` bipoles and ground nodes on the mobile engine.
+	const circuitSvg = await renderNormalized(String.raw`\ctikzset{sources/symbol/sign rotation/.initial=auto}
+\begin{tikzpicture}
+\draw (0,0) to[R] (2.5,0);
+\draw (3,0) to[C] (5.5,0);
+\draw (0,-1.5) to[american voltage source] (2.5,-1.5);
+\draw (3,-1.5) to[battery1] (5.5,-1.5);
+\draw (0,-3) to[D*] (2.5,-3);
+\draw (3,-3) to[generic] (5.5,-3);
+\node[ground] at (6.5,-3) {};
+\node[circ] at (7,-3) {};
+\end{tikzpicture}`);
+	if (!circuitSvg.includes('<svg')) {
+		throw new Error('Test 8 (circuit components) did not return SVG.');
+	}
+	const circuitShapes = (circuitSvg.match(/<path|<line|<circle|<use/g) ?? []).length;
+	if (circuitShapes < 10) {
+		throw new Error(`Test 8: circuit SVG suspiciously empty (${circuitShapes} shapes).`);
+	}
+	console.log('Test 8 (circuit components via circuitikz): OK');
 
 	console.log('All TikZJax tests completed.');
 })().catch(err => {

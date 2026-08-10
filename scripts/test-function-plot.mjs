@@ -9,7 +9,7 @@ import { loadSrcModules } from './loadSrc.mjs';
 const { plot } = await loadSrcModules({
 	plot: 'src/visual/functionPlot.ts',
 });
-const { compileFunction, sampleFunctionRuns } = plot;
+const { compileFunction, describeFunctionProblem, sampleFunctionRuns } = plot;
 
 const close = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
 const evaluate = (text, x) => compileFunction(text).evaluate(x);
@@ -32,7 +32,8 @@ assert.equal(compileFunction('alert(1)'), null, 'unknown names rejected');
 assert.equal(compileFunction('x;1'), null, 'stray characters rejected');
 assert.equal(compileFunction('sin()'), null, 'empty call rejected');
 assert.equal(compileFunction('x + '), null, 'dangling operator rejected');
-assert.equal(compileFunction('y + 1'), null, 'only x is a variable');
+// A single free letter is the plot variable — y works like x or t.
+assert.ok(close(compileFunction('y + 1').evaluate(2), 3), 'any single letter can be the variable');
 
 // --- TikZ printing (what the plot tool writes) -------------------------------
 
@@ -51,6 +52,45 @@ assert.equal(compileFunction('(x+1)/(x-1)').toTikz(), '(\\x+1)/(\\x-1)', 'preced
 	assert.ok(close(tikz.evaluate(0.75), 0.55), 'degree semantics');
 	const roundTrip = compileFunction(compileFunction('sin(x)').toTikz(), { tikz: true });
 	assert.ok(close(roundTrip.evaluate(Math.PI / 2), 1), 'emitted TikZ evaluates like the radian original');
+}
+
+// --- LaTeX-flavored input and free variables ---------------------------------
+
+{
+	// LaTeX commands: \cos, \pi, \frac, \cdot, brace exponents.
+	const wave = compileFunction('0.02 \\cos(200t)');
+	assert.ok(wave, 'a function of t with \\cos compiles');
+	assert.ok(close(wave.evaluate(0), 0.02), 't is the plot variable');
+	assert.ok(close(wave.evaluate(Math.PI / 200), -0.02));
+	assert.equal(wave.toTikz(), '0.02*cos(deg(200*\\x))', 'variable prints as \\x');
+
+	assert.ok(close(compileFunction('\\frac{x}{2}').evaluate(3), 1.5), '\\frac works');
+	assert.ok(close(compileFunction('\\frac{\\frac{x}{2}}{2}').evaluate(8), 2), 'nested \\frac');
+	assert.ok(close(compileFunction('e^{-x}').evaluate(1), Math.exp(-1)), 'brace exponent');
+	assert.ok(close(compileFunction('2\\pi x').evaluate(1), 2 * Math.PI), '\\pi and implicit multiplication');
+	assert.ok(close(compileFunction('x \\cdot 3').evaluate(2), 6), '\\cdot is multiplication');
+	assert.ok(close(compileFunction('\\sqrt{x}').evaluate(9), 3), '\\sqrt with braces');
+	assert.ok(close(compileFunction('\\sqrt[3]{x}').evaluate(8), 2), '\\sqrt with an index');
+	assert.ok(close(compileFunction('\\left(x+1\\right)^2').evaluate(2), 9), '\\left/\\right stripped');
+
+	// One free letter other than x becomes the variable; TikZ output is \x.
+	const ofT = compileFunction('sin(t) + t');
+	assert.ok(close(ofT.evaluate(0), 0));
+	assert.equal(ofT.toTikz(), 'sin(deg(\\x))+\\x');
+
+	// Two free variables cannot plot, and the failure is explained.
+	assert.equal(compileFunction('0.02\\cos(200t - x)'), null, 'two variables reject');
+	const twoVars = describeFunctionProblem('0.02\\cos(200t - x)');
+	assert.ok(twoVars && twoVars.includes('t') && twoVars.includes('x'),
+		`two-variable message names both: ${twoVars}`);
+
+	// Unknown function names stay errors (never silently a variable).
+	assert.equal(compileFunction('son(x)'), null);
+	assert.match(describeFunctionProblem('son(x)'), /son/);
+	assert.equal(compileFunction('\\alpha + 1'), null, 'unknown LaTeX commands reject');
+
+	// `x` keeps priority: a stray second letter next to x stays an error.
+	assert.equal(compileFunction('t*x'), null);
 }
 
 // --- sampler -----------------------------------------------------------------

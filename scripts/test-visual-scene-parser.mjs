@@ -176,7 +176,9 @@ assert.ok(Math.abs(ra.b * 1 + ra.d * 1 + ra.ty - 1) < 1e-9);
 const p1 = lockedScene.objects.filter(object => object.pictureIndex === 1);
 const reasons = p1.map(object => (object.type === 'locked' ? object.reason : 'editable'));
 assert.match(reasons[0], /foreach/);
-assert.equal(reasons[1], 'path syntax outside the supported subset'); // to[bend left]
+// `to[...]` segments are editable since the circuit tools landed: options are
+// preserved verbatim and the endpoints stay draggable.
+assert.equal(reasons[1], 'editable'); // to[bend left]
 assert.equal(reasons[2], 'path syntax outside the supported subset'); // named coords
 assert.equal(reasons[3], 'path syntax outside the supported subset'); // polar
 assert.match(reasons[4], /scope/);
@@ -192,6 +194,27 @@ assert.ok(foreachText.trimEnd().endsWith('}'));
 
 // A diagnostic reports the locked statements without failing the parse.
 assert.ok(lockedScene.diagnostics.some(diagnostic => /source-only/.test(diagnostic.message)));
+
+// --- `to` segments and circuitikz bipoles ------------------------------------
+
+const circuitScene = parseTikzScene([
+	'\\begin{tikzpicture}',
+	'\\draw (0,0) to[R] (2,0);',
+	'\\draw[blue] (0,-1) to[battery1, l=$U$] (2,-1);',
+	'\\draw (0,-2) to (2,-2);',
+	'\\node[ground] at (1,-3) {};',
+	'\\end{tikzpicture}',
+].join('\n'));
+assert.equal(circuitScene.objects.filter(object => object.type === 'locked').length, 0,
+	'circuit statements parse as editable objects');
+const resistor = circuitScene.objects[0];
+assert.equal(resistor.elements[1].kind, 'toOp');
+assert.equal(resistor.elements[1].options, 'R', 'bipole options captured');
+const battery = circuitScene.objects[1];
+assert.equal(battery.elements[1].options, 'battery1, l=$U$');
+assert.equal(circuitScene.objects[2].elements[1].kind, 'toOp');
+assert.equal(circuitScene.objects[2].elements[1].optionsSpan, null, 'plain `to` supported');
+assert.equal(circuitScene.objects[3].type, 'node', 'ground is an editable node');
 
 // --- implicit picture (no environment) --------------------------------------
 

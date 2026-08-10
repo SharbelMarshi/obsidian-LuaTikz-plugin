@@ -266,6 +266,12 @@ function buildRenderPayload(
 	if (options.usesPgfplots) {
 		texPackages.pgfplots = '';
 	}
+	// circuitikz for `to[...]` bipoles and ground nodes — the LuaLaTeX stack
+	// always loads it, so the mobile engine mirrors that whenever the body
+	// could use it (loading it for a plain `to[bend …]` is harmless).
+	if (/\\begin\{circuitikz\}|\bto\s*\[|node\s*\[[^\]]*\bground\b/.test(body)) {
+		texPackages.circuitikz = '';
+	}
 
 	const addToPreambleParts: string[] = [];
 	if (options.usesRtlMacros) {

@@ -102,6 +102,68 @@ export interface CompileOptions {
 	tikz?: boolean;
 }
 
+/**
+ * Translate LaTeX-flavored math input into the plain notation the tokenizer
+ * reads: `0.02 \cos(200t)` → `0.02 cos(200t)`, `\frac{x}{2}` → `((x)/(2))`,
+ * `e^{-x}` → `e^(-x)`. Unknown commands (`\alpha`) keep their backslash and
+ * fail the parse, so nothing silently evaluates to the wrong thing.
+ */
+function normalizeLatexMathInput(text: string): string {
+	let out = text
+		.replace(/\\left\b|\\right\b/g, '')
+		.replace(/\\cdot\b|\\times\b/g, '*')
+		.replace(/\\[,;:! ]/g, ' ');
+	// \frac{A}{B} → ((A)/(B)), innermost first so nested fractions resolve.
+	const frac = /\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/;
+	for (let guard = 0; guard < 16 && frac.test(out); guard++) {
+		out = out.replace(frac, '(($1)/($2))');
+	}
+	// \sqrt[N]{A} → ((A)^(1/(N))); plain \sqrt keeps its name.
+	out = out.replace(/\\sqrt\s*\[([^\]]*)\]\s*\{([^{}]*)\}/g, '(($2)^(1/($1)))');
+	// Strip the backslash from commands the engine knows (\cos, \pi, …).
+	out = out.replace(/\\([a-zA-Z]+)/g, (full, name: string) => {
+		const lower = name.toLowerCase();
+		return lower in FUNCTIONS || lower === 'pi' || lower === 'e' ? lower : full;
+	});
+	// Remaining brace groups act as parentheses (\sqrt{x}, x^{2}).
+	return out.replace(/\{/g, '(').replace(/\}/g, ')');
+}
+
+/** Distinct name tokens that are not functions or constants. */
+function unknownNames(tokens: Token[], exclude: string): string[] {
+	const names = new Set<string>();
+	for (const token of tokens) {
+		if (token.kind === 'name' && token.name !== exclude
+			&& !(token.name in FUNCTIONS)
+			&& token.name !== 'pi' && token.name !== 'e') {
+			names.add(token.name);
+		}
+	}
+	return [...names];
+}
+
+/**
+ * Human explanation for input {@link compileFunction} rejects, or null when
+ * there is nothing specific to say: several free variables (`cos(200t-x)`),
+ * or a name the engine does not know.
+ */
+export function describeFunctionProblem(text: string): string | null {
+	const tokens = tokenize(normalizeLatexMathInput(text.trim()));
+	if (!tokens) {
+		return null;
+	}
+	const unknowns = unknownNames(tokens, '');
+	const variables = unknowns.filter(name => /^[a-z]$/.test(name));
+	const bogus = unknowns.filter(name => !/^[a-z]$/.test(name));
+	if (bogus.length) {
+		return `"${bogus[0]}" is not a function this plotter knows.`;
+	}
+	if (variables.length > 1) {
+		return `The expression uses ${variables.length} variables (${variables.join(', ')}) — a plot needs exactly one; replace the others with numbers.`;
+	}
+	return null;
+}
+
 export interface CompiledFunction {
 	evaluate: (x: number) => number;
 	/** TikZ math source with `\x` and degree-based trig. Radians-mode ASTs
@@ -314,14 +376,27 @@ function printTikz(node: AstNode, parentPrecedence: number): string {
 /**
  * Compile `text` into an evaluatable (and, in math mode, TikZ-printable)
  * function of one variable, or null when it isn't a valid expression.
+ *
+ * Math mode accepts LaTeX-flavored notation (`0.02\cos(200t)`,
+ * `\frac{x}{2}`), and the variable does not have to be `x`: when the
+ * expression's only free single-letter name is `t` (or any other letter),
+ * that letter is the plot variable and still prints as `\x` in TikZ output.
  */
 export function compileFunction(text: string, options: CompileOptions = {}): CompiledFunction | null {
-	const tokens = tokenize(text.trim());
+	const tikz = !!options.tikz;
+	const tokens = tokenize(tikz ? text.trim() : normalizeLatexMathInput(text.trim()));
 	if (!tokens || !tokens.length) {
 		return null;
 	}
-	const tikz = !!options.tikz;
-	const ast = parseAst(tokens, tikz ? '\\x' : 'x');
+	let variable = tikz ? '\\x' : 'x';
+	if (!tikz) {
+		const unknowns = unknownNames(tokens, 'x');
+		const hasX = tokens.some(token => token.kind === 'name' && token.name === 'x');
+		if (!hasX && unknowns.length === 1 && /^[a-z]$/.test(unknowns[0])) {
+			variable = unknowns[0];
+		}
+	}
+	const ast = parseAst(tokens, variable);
 	if (!ast) {
 		return null;
 	}

@@ -114,6 +114,209 @@ function transformPrimitive(t: PictureTransform, primitive: ScenePrimitive): Sce
 	}
 }
 
+/**
+ * circuitikz bipole names the wireframe recognizes on `to[...]` segments.
+ * Names with a dedicated schematic glyph map to it; the rest fall back to a
+ * generic circle (round family) or box. Anything else (`bend left`, plain
+ * `to`) stays a bare segment.
+ */
+const BIPOLE_GLYPHS: Record<string, string> = {
+	R: 'resistor', vR: 'resistor', pR: 'resistor', 'american resistor': 'resistor',
+	C: 'capacitor', capacitor: 'capacitor', eC: 'capacitor', cC: 'capacitor',
+	L: 'inductor', 'cute inductor': 'inductor', 'american inductor': 'inductor',
+	V: 'vsource', sV: 'vsource', 'american voltage source': 'vsource',
+	I: 'isource', sI: 'isource', 'american current source': 'isource',
+	battery: 'battery2', battery1: 'battery', battery2: 'battery2',
+	'european resistor': 'box',
+	'D*': 'diode', Do: 'diode', 'D-': 'diode', 'full diode': 'diode', 'empty diode': 'diode',
+	'leD*': 'led', leDo: 'led', 'full led': 'led', 'empty led': 'led',
+	switch: 'switch', nos: 'switch', ncs: 'switch', cspst: 'switch', ospst: 'switch',
+	lamp: 'lamp',
+	ammeter: 'meterA', voltmeter: 'meterV',
+	generic: 'box', fuse: 'box', oscilloscope: 'circle',
+};
+
+/** Canonical bipole token of a `to[...]` option list, or null. */
+export function circuitBipoleName(options: string): string | null {
+	const first = options.split(',')[0]?.trim() ?? '';
+	const base = first.split('=')[0].trim();
+	return base in BIPOLE_GLYPHS ? base : null;
+}
+
+/**
+ * Wireframe primitives for a `to` segment: lead-in, the component's schematic
+ * glyph (resistor zigzag, capacitor plates, ±-circle source, …), lead-out —
+ * built from existing primitive kinds so hit testing, bounds, and the flood
+ * filler need no special cases. Shared by the scene geometry and the circuit
+ * tool's placement preview, so the preview shows exactly what lands.
+ */
+export function toSegmentPrimitives(
+	pen: TikzCoordinate,
+	point: TikzCoordinate,
+	bipole: string | null,
+): ScenePrimitive[] {
+	const dx = point.x - pen.x;
+	const dy = point.y - pen.y;
+	const length = Math.hypot(dx, dy);
+	const glyph = bipole ? BIPOLE_GLYPHS[bipole] : undefined;
+	if (!glyph || length < 0.35) {
+		return [{ kind: 'segment', a: pen, b: point }];
+	}
+	const ux = dx / length;
+	const uy = dy / length;
+	const mid = { x: (pen.x + point.x) / 2, y: (pen.y + point.y) / 2 };
+	const half = Math.min(0.35, length * 0.28);
+	const rotation = (Math.atan2(uy, ux) * 180) / Math.PI;
+	// Glyph-local frame: `t` in [-1, 1] runs terminal-to-terminal along the
+	// component zone (scaled by `half`), `s` is the cm offset across it.
+	const at = (t: number, s: number): TikzCoordinate => ({
+		x: mid.x + ux * t * half - uy * s,
+		y: mid.y + uy * t * half + ux * s,
+	});
+	const seg = (t1: number, s1: number, t2: number, s2: number): ScenePrimitive =>
+		({ kind: 'segment', a: at(t1, s1), b: at(t2, s2) });
+	const polyline = (points: Array<[number, number]>): ScenePrimitive[] => {
+		const out: ScenePrimitive[] = [];
+		for (let index = 1; index < points.length; index++) {
+			out.push(seg(...points[index - 1], ...points[index]));
+		}
+		return out;
+	};
+
+	const primitives: ScenePrimitive[] = [
+		{ kind: 'segment', a: pen, b: at(-1, 0) },
+		{ kind: 'segment', a: at(1, 0), b: point },
+	];
+
+	switch (glyph) {
+		case 'resistor':
+			primitives.push(...polyline([
+				[-1, 0], [-0.75, 0.18], [-0.25, -0.18], [0.25, 0.18], [0.75, -0.18], [1, 0],
+			]));
+			break;
+		case 'capacitor':
+			primitives.push(
+				seg(-1, 0, -0.18, 0), seg(0.18, 0, 1, 0),
+				seg(-0.18, -0.26, -0.18, 0.26), seg(0.18, -0.26, 0.18, 0.26),
+			);
+			break;
+		case 'inductor': {
+			primitives.push(seg(-1, 0, -0.9, 0), seg(0.9, 0, 1, 0));
+			const r = half * 0.32;
+			for (const t of [-0.6, 0, 0.6]) {
+				primitives.push({
+					kind: 'arc',
+					center: at(t, 0),
+					radius: r,
+					startDeg: 180 + rotation,
+					endDeg: rotation,
+				});
+			}
+			break;
+		}
+		case 'vsource':
+			primitives.push(
+				{ kind: 'circle', center: mid, rx: half, ry: half },
+				{ kind: 'nodeMark', at: at(-0.42, 0), text: '+' },
+				{ kind: 'nodeMark', at: at(0.42, 0), text: '−' },
+			);
+			break;
+		case 'isource':
+			primitives.push(
+				{ kind: 'circle', center: mid, rx: half, ry: half },
+				seg(-0.45, 0, 0.35, 0),
+				seg(0.35, 0, 0.05, 0.14), seg(0.35, 0, 0.05, -0.14),
+			);
+			break;
+		case 'battery':
+			primitives.push(
+				seg(-1, 0, -0.15, 0), seg(0.15, 0, 1, 0),
+				seg(-0.15, -0.3, -0.15, 0.3), seg(0.15, -0.14, 0.15, 0.14),
+			);
+			break;
+		case 'battery2':
+			// Two cells: long/short, long/short.
+			primitives.push(
+				seg(-1, 0, -0.5, 0), seg(0.5, 0, 1, 0),
+				seg(-0.5, -0.3, -0.5, 0.3), seg(-0.15, -0.14, -0.15, 0.14),
+				seg(0.15, -0.3, 0.15, 0.3), seg(0.5, -0.14, 0.5, 0.14),
+			);
+			break;
+		case 'led':
+		case 'diode':
+			primitives.push(
+				seg(-1, 0, -0.55, 0), seg(0.55, 0, 1, 0),
+				seg(-0.55, 0.24, -0.55, -0.24),
+				seg(-0.55, 0.24, 0.55, 0), seg(-0.55, -0.24, 0.55, 0),
+				seg(0.55, -0.24, 0.55, 0.24),
+			);
+			if (glyph === 'led') {
+				primitives.push(seg(-0.1, 0.3, 0.2, 0.55), seg(0.35, 0.3, 0.65, 0.55));
+			}
+			break;
+		case 'switch':
+			primitives.push(
+				{ kind: 'circle', center: at(-1, 0), rx: 0.045, ry: 0.045 },
+				{ kind: 'circle', center: at(1, 0), rx: 0.045, ry: 0.045 },
+				seg(-1, 0, 0.75, 0.32),
+			);
+			break;
+		case 'lamp':
+			primitives.push(
+				{ kind: 'circle', center: mid, rx: half, ry: half },
+				seg(-0.7, -half * 0.7, 0.7, half * 0.7),
+				seg(-0.7, half * 0.7, 0.7, -half * 0.7),
+			);
+			break;
+		case 'meterA':
+		case 'meterV':
+			primitives.push(
+				{ kind: 'circle', center: mid, rx: half, ry: half },
+				{ kind: 'nodeMark', at: mid, text: glyph === 'meterA' ? 'A' : 'V' },
+			);
+			break;
+		case 'circle':
+			primitives.push({ kind: 'circle', center: mid, rx: half, ry: half });
+			break;
+		default: {
+			const hw = Math.min(0.18, half * 0.6);
+			primitives.push(
+				seg(-1, hw, 1, hw), seg(1, hw, 1, -hw),
+				seg(1, -hw, -1, -hw), seg(-1, -hw, -1, hw),
+			);
+			break;
+		}
+	}
+	return primitives;
+}
+
+/** Wireframe primitives for the circuitikz ground symbol hanging from `at`. */
+export function groundGlyphPrimitives(at: TikzCoordinate): ScenePrimitive[] {
+	const bar = (halfWidth: number, drop: number): ScenePrimitive => ({
+		kind: 'segment',
+		a: { x: at.x - halfWidth, y: at.y - drop },
+		b: { x: at.x + halfWidth, y: at.y - drop },
+	});
+	return [
+		{ kind: 'segment', a: at, b: { x: at.x, y: at.y - 0.25 } },
+		bar(0.28, 0.25),
+		bar(0.18, 0.35),
+		bar(0.08, 0.45),
+	];
+}
+
+/** Wireframe glyph for a circuitikz point node shape (`ground`, `circ`). */
+export function circuitNodeGlyphPrimitives(shape: string, at: TikzCoordinate): ScenePrimitive[] {
+	if (shape === 'circ') {
+		// Junction dot: two tight rings read as filled at wireframe widths.
+		return [
+			{ kind: 'circle', center: at, rx: 0.07, ry: 0.07 },
+			{ kind: 'circle', center: at, rx: 0.035, ry: 0.035 },
+		];
+	}
+	return groundGlyphPrimitives(at);
+}
+
 function isFilledObject(object: SceneObject): boolean {
 	if (object.type === 'locked') {
 		return false;
@@ -146,6 +349,7 @@ function resolvePathGeometry(
 	let subpathStart: TikzCoordinate | null = null;
 	let pendingOp:
 		| { kind: 'lineTo' | 'hvTo' | 'vhTo' | 'rectangleTo' | 'gridTo' }
+		| { kind: 'toOp'; component: string | null }
 		| { kind: 'curveTo'; c1: CoordinateToken; c2: CoordinateToken | null }
 		| null = null;
 
@@ -193,6 +397,9 @@ function resolvePathGeometry(
 						case 'gridTo':
 							primitives.push({ kind: 'grid', a: pen, b: point });
 							break;
+						case 'toOp':
+							primitives.push(...toSegmentPrimitives(pen, point, pendingOp.component));
+							break;
 						case 'curveTo': {
 							const c1 = pendingOp.c1.resolved;
 							const c2 = pendingOp.c2 ? pendingOp.c2.resolved : c1;
@@ -220,6 +427,9 @@ function resolvePathGeometry(
 				break;
 			case 'gridTo':
 				pendingOp = { kind: 'gridTo' };
+				break;
+			case 'toOp':
+				pendingOp = { kind: 'toOp', component: circuitBipoleName(element.options) };
 				break;
 			case 'curveTo': {
 				pendingOp = { kind: 'curveTo', c1: element.c1, c2: element.c2 };

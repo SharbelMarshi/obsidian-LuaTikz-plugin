@@ -128,4 +128,59 @@ const svgAssets = files => [...files.keys()].filter(p => p.endsWith('.svg'));
 	assert.equal(a, buildRenderCacheKey('lualatex', 'src', settings, false, '1.8.2'), 'key must be stable');
 }
 
+// --- startup temp sweep is age-gated ---------------------------------------
+// The regression this pins: the layout-ready cleanup wiped the WHOLE temp dir
+// while restored panes were already compiling (their cache entry had been
+// evicted), deleting in-flight job dirs and sticking blocks in a
+// "….tex not found" error until a manual re-render.
+
+{
+	const { paths } = await loadSrcModules(
+		{ paths: 'src/core/pluginPaths.ts' },
+		{ stubs: { obsidian: OBSIDIAN_STUB } },
+	);
+	const { sweepStalePluginTempFsDirs } = paths;
+
+	const files = new Map();
+	const folders = new Map(); // path -> mtime
+	const child = (parent, path) =>
+		path.startsWith(`${parent}/`) && !path.slice(parent.length + 1).includes('/');
+	const adapter = {
+		async exists(path) { return files.has(path) || folders.has(path); },
+		async mkdir(path) { folders.set(path, Date.now()); },
+		async remove(path) { files.delete(path); },
+		async rmdir(path) { folders.delete(path); },
+		async list(path) {
+			return {
+				files: [...files.keys()].filter(p => child(path, p)),
+				folders: [...folders.keys()].filter(p => child(path, p)),
+			};
+		},
+		async stat(path) {
+			const mtime = folders.get(path) ?? (files.has(path) ? Date.now() : null);
+			return mtime === null ? null : { type: folders.has(path) ? 'folder' : 'file', mtime };
+		},
+	};
+	const app = { vault: { adapter, configDir: '.obsidian' } };
+
+	const TEMP = '.obsidian/plugins/luatikz/.luatikz-temp';
+	const now = Date.now();
+	folders.set(TEMP, now - 100000000);
+	// A crash leftover from a previous session…
+	folders.set(`${TEMP}/luatikz-old-1`, now - 60 * 60 * 1000);
+	files.set(`${TEMP}/luatikz-old-1/luatikz-old-1.tex`, 'x');
+	// …and a job dir a live compile created seconds ago.
+	folders.set(`${TEMP}/luatikz-fresh-2`, now - 3000);
+	files.set(`${TEMP}/luatikz-fresh-2/luatikz-fresh-2.tex`, 'x');
+
+	await sweepStalePluginTempFsDirs(app, 'luatikz');
+
+	assert.ok(!folders.has(`${TEMP}/luatikz-old-1`), 'stale job dir must be swept');
+	assert.ok(!files.has(`${TEMP}/luatikz-old-1/luatikz-old-1.tex`), 'stale job files must be swept');
+	assert.ok(folders.has(`${TEMP}/luatikz-fresh-2`), 'fresh (in-flight) job dir must survive');
+	assert.ok(files.has(`${TEMP}/luatikz-fresh-2/luatikz-fresh-2.tex`),
+		'in-flight compile input must survive the startup sweep');
+	assert.ok(folders.has(TEMP), 'temp root itself stays');
+}
+
 console.log('test-render-cache: ok');

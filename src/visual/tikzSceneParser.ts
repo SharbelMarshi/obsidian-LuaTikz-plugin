@@ -730,7 +730,27 @@ function parsePathExpression(
 			continue;
 		}
 
-		// `to`, `edge`, polar coordinates, named coordinates, calc, …
+		if (reader.eatWord('to')) {
+			// `to` segments, including circuitikz bipoles (`to[R]`) and bends:
+			// the option group is preserved verbatim (inner span), geometry is
+			// approximated as a straight segment between the coordinates.
+			reader.skipTrivia();
+			let optionsSpan: SourceSpan | null = null;
+			if (reader.peek() === '[') {
+				const optFrom = reader.cursor;
+				const optTo = scanBalancedGroup(source, reader.cursor, end);
+				optionsSpan = { from: optFrom + 1, to: optTo - 1 };
+				reader.cursor = optTo;
+			}
+			elements.push({
+				kind: 'toOp',
+				optionsSpan,
+				options: optionsSpan ? source.slice(optionsSpan.from, optionsSpan.to) : '',
+			});
+			continue;
+		}
+
+		// `edge`, polar coordinates, named coordinates, calc, …
 		return null;
 	}
 

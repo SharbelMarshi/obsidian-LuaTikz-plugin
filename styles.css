@@ -1060,6 +1060,18 @@ button.luatikz-ve-swatch-clear {
     );
 }
 
+/* Stroke "None" (draw=none): the classic red slash on an empty well. */
+button.luatikz-ve-swatch-none {
+  background:
+    linear-gradient(
+      to top right,
+      transparent 44%,
+      var(--text-error, #e93147) 45%,
+      var(--text-error, #e93147) 55%,
+      transparent 56%
+    );
+}
+
 .luatikz-ve-swatch-custom {
   width: 28px;
   height: 20px;
@@ -1080,6 +1092,43 @@ button.luatikz-ve-swatch:disabled,
 .luatikz-ve-swatch-custom:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Shade slider under each color palette: darker ← 0 → lighter. */
+.luatikz-ve-props-shaderow {
+  margin-top: -2px;
+}
+
+.luatikz-ve-props-shaderow .luatikz-ve-props-label {
+  flex: 0 0 auto;
+}
+
+.luatikz-ve-props-shade {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--interactive-accent);
+}
+
+/* Compact color rows for gradient endpoints and pattern color. */
+.luatikz-ve-props-minicolor .luatikz-ve-swatch-custom {
+  width: 44px;
+}
+
+.luatikz-ve-props-minicolor.is-clear .luatikz-ve-swatch-custom {
+  opacity: 0.45;
+}
+
+button.luatikz-ve-minicolor-clear {
+  min-height: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 1;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
 }
 
 .luatikz-ve-source {
@@ -1331,6 +1380,13 @@ button.luatikz-ve-swatch:disabled,
   display: none;
 }
 
+/* Circuit glyphs are approximations: once the compiled underlay shows the
+   real symbol, even a dimmed wireframe reads as a grey ghost behind the
+   component — hide it entirely (the drag preview still pops via .is-live). */
+.luatikz-ve-canvas.has-underlay .luatikz-ve-object-approx:not(.is-live) {
+  display: none;
+}
+
 /* Brightness-boost dark style applies its filter to the compiled output in
    the editor exactly as the preview does (invert-style output arrives from
    the renderer already inverted). */
@@ -1342,6 +1398,12 @@ button.luatikz-ve-swatch:disabled,
 .luatikz-ve-draft-shape {
   stroke: var(--interactive-accent);
   opacity: 0.9;
+}
+
+/* Circuit tool: translucent follow-the-cursor glyph before the drop. */
+.luatikz-ve-draft.luatikz-ve-circuit-preview {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .luatikz-ve-selection-box {
@@ -1493,16 +1555,9 @@ button.luatikz-ve-swatch:disabled,
     padding-right: env(safe-area-inset-right, 0px);
   }
 
-  .luatikz-ve-toolbar {
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .luatikz-ve-toolgroup,
-  .luatikz-ve-actiongroup {
-    flex-wrap: nowrap;
-  }
+  /* The toolbar wraps into extra rows on narrow panes (it used to become an
+     invisible horizontal scroll strip, which hid the Shapes/Circuit buttons
+     once the tool row outgrew the floating preview's width). */
 
   /* Panels become overlay drawers so the canvas stays dominant. */
   .luatikz-ve-props {

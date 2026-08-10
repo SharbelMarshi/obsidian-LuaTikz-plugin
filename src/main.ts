@@ -1,7 +1,7 @@
 import { MarkdownRenderChild, MarkdownView, Notice, Plugin } from 'obsidian';
 import type { Extension } from '@codemirror/state';
 import { formatExecError, killAllRunningCompiles } from './desktop/lualatexShell';
-import { clearPluginTempFsDir } from './core/pluginPaths';
+import { sweepStalePluginTempFsDirs } from './core/pluginPaths';
 import { InstallNoticeModal } from './ui/installNoticeModal';
 import { InlinePreviewManager } from './editor/inlinePreview';
 import { latexAutocompleteExtension } from './editor/latexAutocomplete';
@@ -135,10 +135,13 @@ export default class LuaTikzPlugin extends Plugin {
 			);
 
 			// A compile killed mid-flight (crash, force-quit) leaves its job dir
-			// in the vault forever; no compile can be running this early, so
-			// sweep leftovers once the workspace is up.
+			// in the vault forever. Restored panes can already be compiling at
+			// layout-ready (their cache entry may have been evicted), so only
+			// job dirs old enough to be crash leftovers are swept — wiping the
+			// whole temp dir here used to delete in-flight inputs and stick
+			// blocks in a "….tex not found" error until a manual re-render.
 			this.app.workspace.onLayoutReady(() => {
-				void clearPluginTempFsDir(this.app, this.manifest.id);
+				void sweepStalePluginTempFsDirs(this.app, this.manifest.id);
 			});
 			this.inlinePreview = new InlinePreviewManager(
 				() => this.app.workspace.getActiveViewOfType(MarkdownView),

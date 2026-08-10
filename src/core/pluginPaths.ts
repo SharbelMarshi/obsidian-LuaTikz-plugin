@@ -165,3 +165,53 @@ export async function clearPluginTempFsDir(app: App, pluginId: string): Promise<
 		// ignore re-create errors after clear
 	}
 }
+
+/**
+ * Age-gated sweep of leftover compile job dirs for the startup path.
+ *
+ * The old startup cleanup wiped the whole temp dir on layout-ready under the
+ * assumption that "no compile can be running this early" — false: restored
+ * panes whose disk-cache entry was evicted start compiling immediately, and
+ * the sweep deleted their job dirs mid-compile ("….tex not found" until a
+ * manual re-render). Only entries older than `olderThanMs` — genuine
+ * leftovers of a crashed session — are removed now.
+ */
+export async function sweepStalePluginTempFsDirs(
+	app: App,
+	pluginId: string,
+	olderThanMs = 10 * 60 * 1000,
+): Promise<void> {
+	const adapter = app.vault.adapter;
+	const tempAdapterDir = getPluginTempDir(app, pluginId);
+	try {
+		if (!(await adapter.exists(tempAdapterDir))) {
+			return;
+		}
+		const listing = await adapter.list(tempAdapterDir);
+		const now = Date.now();
+		const isStale = async (path: string): Promise<boolean> => {
+			try {
+				const stat = await adapter.stat(path);
+				return !stat || now - (stat.mtime || stat.ctime || 0) > olderThanMs;
+			} catch {
+				return false;
+			}
+		};
+		for (const folder of listing.folders) {
+			if (await isStale(folder)) {
+				await removeAdapterFolder(app, folder);
+			}
+		}
+		for (const file of listing.files) {
+			if (await isStale(file)) {
+				try {
+					await adapter.remove(file);
+				} catch {
+					// ignore cleanup errors
+				}
+			}
+		}
+	} catch {
+		// best-effort housekeeping
+	}
+}

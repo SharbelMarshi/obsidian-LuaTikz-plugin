@@ -56,6 +56,11 @@ export type PathElement =
 	| { kind: 'lineTo' }
 	| { kind: 'hvTo' }
 	| { kind: 'vhTo' }
+	/** `to` segment, including circuitikz bipoles (`to[R]`): the options are
+	 * preserved verbatim and the canvas approximates a straight segment (the
+	 * compiled underlay shows the real component/bend). `options` is the inner
+	 * text of `optionsSpan`, kept for component recognition. */
+	| { kind: 'toOp'; optionsSpan: SourceSpan | null; options: string }
 	| { kind: 'curveTo'; c1: CoordinateToken; c2: CoordinateToken | null }
 	| { kind: 'rectangleTo' }
 	| { kind: 'gridTo'; optionsSpan: SourceSpan | null }
@@ -203,9 +208,39 @@ export type EditorToolId =
 	| 'star'
 	| 'text'
 	| 'math'
-	| 'plot';
+	| 'plot'
+	| 'paint'
+	| 'circuit';
 
 export type DashStyle = 'solid' | 'dashed' | 'dotted';
+
+/**
+ * Arrow tip shape, written as an arrows.meta spec (`-{Stealth}`) for every
+ * value except 'default', which keeps the plain `->` tip.
+ */
+export type ArrowTipKind =
+	| 'default' | 'Stealth' | 'Latex' | 'Triangle' | 'Circle' | 'Square'
+	| 'Diamond' | 'Bar' | 'Hooks';
+
+export type ShadingKind = 'vertical' | 'horizontal' | 'radial' | 'ball';
+
+/** A TikZ shading (`top color=`/`bottom color=`, `inner`/`outer`, `ball`). */
+export interface ShadingStyle {
+	kind: ShadingKind;
+	/** Start color: top, left, inner, or the ball color. */
+	from: string;
+	/** End color: bottom, right, or outer; unused for 'ball'. */
+	to: string;
+	/** `shading angle` in degrees, when written. */
+	angle?: number;
+}
+
+/** A fill pattern from the TikZ `patterns` library. */
+export interface PatternStyle {
+	name: string;
+	/** `pattern color`; TikZ defaults to black when absent. */
+	color?: string;
+}
 
 /** Style attributes the properties panel can read and write. */
 export interface ObjectStyle {
@@ -214,6 +249,9 @@ export interface ObjectStyle {
 	lineWidth?: 'thin' | 'default' | 'thick' | 'very thick';
 	dash?: DashStyle;
 	arrows?: '' | '->' | '<-' | '<->';
+	arrowTip?: ArrowTipKind;
+	shading?: ShadingStyle;
+	pattern?: PatternStyle;
 	opacity?: number;
 	roundedCorners?: boolean;
 	anchor?: string;
