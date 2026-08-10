@@ -1,6 +1,6 @@
 {
 	"name": "luatikz",
-	"version": "1.9.3",
+	"version": "1.9.4",
 	"description": "Fast LuaLaTeX TikZ rendering with full library support, live preview, RTL support, and simple diagram helpers.",
 	"main": "main.js",
 	"scripts": {
