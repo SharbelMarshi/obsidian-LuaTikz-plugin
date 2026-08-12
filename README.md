@@ -55,12 +55,12 @@ If you are interested in learning to code with TikZ, I suggest this website: [Ti
 - **Settings:** Choose renderers, fonts, preambles, caching, dark-mode behavior, editor assistance, and environment checks. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/settings.md)
 - **Renderers:** Use local LuaLaTeX for the full TeX toolchain or bundled TikZJax for shell-free and mobile rendering. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/renderers.md)
 - **Security and permissions:** Local rendering is opt-in and narrowly scoped; the detailed guide explains shell execution, temporary files, clipboard access, and bundled dependencies. [Details](
-- **Hover-to-locate** — moving the pointer over a shape in the floating preview highlights the statement that drew it. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/live-preview.md)
-- **PNG export** — the toolbar button is now **Export** with a format menu for SVG or PNG. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/editor-and-export.md#export)
-- **Explained errors** — opaque LaTeX failures such as `Dimension too large` now come with a plain-language explanation of the cause and the fixes that work. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/errors-and-editing.md)
-- **Font settings** — override the main, Hebrew and Arabic fonts. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/renderers.md#fonts-and-rtl)
-- **Custom preamble** — replace the generated LuaLaTeX preamble entirely, with buttons to load the current one or reset. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/renderers.md#custom-preamble)
-- **Hebrew/Arabic load only when used** — and per script, so a Hebrew diagram no longer pulls in the Arabic gloss that minimal TeX installs lack. [Details](com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/security-and-permissions.md)
+- **Hover-to-locate**: moving the pointer over a shape in the floating preview highlights the statement that drew it. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/live-preview.md)
+- **PNG export**: the toolbar button is now **Export** with a format menu for SVG or PNG. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/editor-and-export.md#export)
+- **Explained errors**: opaque LaTeX failures such as `Dimension too large` now come with a plain-language explanation of the cause and the fixes that work. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/errors-and-editing.md)
+- **Font settings**: override the main, Hebrew and Arabic fonts. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/renderers.md#fonts-and-rtl)
+- **Custom preamble**: replace the generated LuaLaTeX preamble entirely, with buttons to load the current one or reset. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/renderers.md#custom-preamble)
+- **Hebrew/Arabic load only when used**: and per script, so a Hebrew diagram no longer pulls in the Arabic gloss that minimal TeX installs lack. [Details](com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/security-and-permissions.md)
 
 ## Samples
 
