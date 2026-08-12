@@ -2,302 +2,79 @@
 
 Fast LuaLaTeX TikZ rendering with full library support, live preview, a visual touch/stylus TikZ editor, RTL support, and simple diagram helpers.
 
-Render `tikz` and `luatikz` fenced code blocks in Obsidian. Desktop can use local LuaLaTeX or TikZJax; mobile uses TikZJax.
-
-Enable **LuaTikZ** under Settings → Community plugins. The release ships as `main.js`, `manifest.json`, and `styles.css`. 
+Render `tikz` and `luatikz` fenced code blocks in Obsidian. Desktop can use local LuaLaTeX or TikZJax; mobile uses TikZJax. Enable **LuaTikZ** under Settings → Community plugins and choose your prefered Renderer.
 
 ![Floating live preview](<floating preview feature.png>)
 
-## What's new in 1.9.1
+#### What's new
 
-### Added
+- **Visual TikZ editor** the floating preview now has an **Edit** mode which opens a full window with the editor filling the pane: which contains shapes, selection tools, function plotter, circuit components, handwriting, styiling and much more. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/visual-editor.md)
+- **Freehand ink** strokes are smoothed, simplified, and fitted to editable Bézier paths, with an adjustable smoothing setting.
+- **Touch, stylus, and Apple Pencil** one finger pans, two fingers pinch-zoom; an explicit **Finger draw** toggle makes one finger draw; a pen always draws, with practical palm rejection while it's near the glass.
+- **Floating preview on mobile** the inline live preview (and the Edit mode) now works on iPad, Android tablets, and phones, rendering through TikZJax. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/live-preview.md)
 
-- **Visual TikZ editor** — the floating preview now has an **Edit** mode: press **Edit** and the preview animates into a full visual editor filling the pane; press **Done** and it collapses back. Draw with Select, Pan, Line, Arrow, Path, Bézier, Freehand, Paint fill (a bucket tool that fills any visually closed region), Text, Math, and Function plot tools, plus a **Shapes** menu holding Rectangle, Rounded rectangle, Triangle, Circle, Ellipse, Arc, Diamond, Polygon, Star, and Grid, and a **Circuit** menu of circuitikz components (resistors, capacitor, inductor, sources, battery, diode, LED, switch, meters, junction dot, ground) placed with a click behind a live preview — with color shades, gradients, fill patterns, and nine arrow-tip shapes in the Style panel — everything is written into your existing ```` ```tikz ```` fence as plain, native TikZ. No new fence, no separate drawing file. Selections rotate with a grip above the selection box, freehand strokes snap to clean shapes when you hold still at the end, and Hebrew typed into a text node is wrapped in `\he{…}` automatically. [Details](#visual-editor-edit-mode)
-- **Draw on the real diagram** — the compiled output is embedded in the canvas as an aligned background layer (calibrated to the exact TikZ coordinates), so you sketch on top of what LuaLaTeX actually rendered, including constructs the editor can't parse.
-- **Freehand ink** — strokes are smoothed, simplified, and fitted to editable Bézier paths (readable `.. controls ..` output, not a dump of pointer samples), with an adjustable smoothing setting.
-- **Touch, stylus, and Apple Pencil** — one finger pans, two fingers pinch-zoom; an explicit **Finger draw** toggle makes one finger draw; a pen always draws, with practical palm rejection while it's near the glass.
-- **Lossless two-way source sync** — visual edits patch only the coordinate, length, and option tokens that changed; comments, indentation, custom styles, and any unsupported statements (`\foreach`, `to[bend]`, scopes, …) are preserved byte-for-byte and shown as source-only ghosts. The optional source panel has TikZ syntax highlighting, and hovering an object on the canvas highlights its statement in the panel. Every completed operation is one normal undo step.
-- **Floating preview on mobile** — the inline live preview (and the Edit mode) now works on iPad, Android tablets, and phones, rendering through TikZJax; coordinate picking remains desktop-only. [Details](#live-preview-and-coordinate-picking)
-
-### Changed
-
-- The Edit-mode toolbar uses quiet icon buttons with tooltips and 44 px touch targets; the whole editor follows the active theme (light, dark, custom) and stays LTR even in RTL notes.
-
-<details>
-<summary>Previous release — 1.8.2</summary>
-
-### Fixed
-
-- **LuaLaTeX failed to render on Linux and Windows.** The preamble hardcoded macOS-only fonts (`David CLM`, `Geeza Pro`, `Times New Roman`) and loaded them unconditionally, so *every* diagram failed on a machine missing any of them — even one with no RTL content. Fonts now resolve through fallback chains that skip what isn't installed. [Details](#fonts-and-rtl)
-- **A diagram containing Hebrew or Arabic flipped the plugin's own UI.** The Export button, error card and its buttons were laid out right-to-left because the *source* contained RTL characters. Plugin controls now keep their direction; the diagram's own text direction is LaTeX's business.
-- **`\usetikzlibrary{...}` spread over several lines was ignored.** It was left in the document body, where the command is illegal, so the whole diagram failed. Multi-line `\usepackage` and `\usetikzlibrary` are now hoisted correctly.
-- **`\usetikzlibrary{pgfplots}` aborted the compile.** Package names are dropped (the preamble already loads them) and PGFPlots-only libraries move to `\usepgfplotslibrary`. [Details](#renderers)
-- **The *Starter block on new fence* setting never inserted its `tikzpicture` skeleton.**
-
-### Added
-
-- **Hover-to-locate** — moving the pointer over a shape in the floating preview highlights the statement that drew it. [Details](#live-preview-and-coordinate-picking)
-- **PNG export** — the toolbar button is now **Export** with a format menu for SVG or PNG. [Details](#export)
-- **Explained errors** — opaque LaTeX failures such as `Dimension too large` now come with a plain-language explanation of the cause and the fixes that work. [Details](#errors-and-editing)
-- **Font settings** — override the main, Hebrew and Arabic fonts. [Details](#fonts-and-rtl)
-- **Custom preamble** — replace the generated LuaLaTeX preamble entirely, with buttons to load the current one or reset. [Details](#custom-preamble)
-- **Hebrew/Arabic load only when used** — and per script, so a Hebrew diagram no longer pulls in the Arabic gloss that minimal TeX installs lack. [Details](#fonts-and-rtl)
-
-### Security
-
-- Bundled `svgo` bumped to 3.3.4 ([GHSA-2p49-hgcm-8545](https://github.com/advisories/GHSA-2p49-hgcm-8545)).
-
-</details>
-
+![Visual Editor](<visual-editor.png>)
 ## Requirements
 
-### Mobile (iOS / Android)
+**Mobile (iOS / Android)**
 
-LuaTikZ runs on Obsidian mobile. Diagrams render in reading view through the bundled TikZJax runtime — no local TeX install and no shell access required.
+LuaTikZ runs on Obsidian mobile. Diagrams render in reading view through the bundled TikZJax runtime so there is no need for a local TeX install and no shell access required.
 
-On mobile you get the same fenced-block editing helpers (autocomplete, structural lint, templates, error highlighting), plus the floating live preview and the visual Edit mode (both render through TikZJax). **Coordinate picking and hover-to-locate are desktop-only.** The renderer setting is fixed to TikZJax; LuaLaTeX is not available on mobile.
+**Desktop**
 
-### Local LuaLaTeX (desktop)
+For a full support of libraries, a Local LuaLatex (recommended) is required and choose **Local Lualatex renderer** through plugin's settings
 
 - LuaLaTeX (MacTeX or TeX Live)
 - `pdftocairo` for PDF → SVG (`brew install poppler` on macOS)
-- Turn on **Allow local LuaLaTeX execution** in plugin settings
 
-### TikZJax
-
-No local TeX install. The TikZJax runtime and TeX WASM files are bundled into `main.js` (~7 MB). Obsidian Sync Standard may not sync plugin files over 5 MB.
+For regular use keep **TikzJax Renderer** and there is no need for a local TeX install.
 
 ## Usage
 
 ````markdown
-```tikz
+```tikz or ```luatikz
 \begin{tikzpicture}
-\draw (0,0) circle (1cm);
-\node at (0,0) {Hello};
+.
+.  -> tikz code here
+.
 \end{tikzpicture}
 ```
 ````
 
-The `luatikz` fence alias works the same way.
-
-### Diagram alignment
-
-Add a directive line inside the block, or set `align=` on `\begin{tikzpicture}`:
-
-```tikz
-% align=left
-\begin{tikzpicture}
-...
-\end{tikzpicture}
-```
-
-Values: `left`, `center` (default), `right`. These control how the rendered SVG sits in reading view, not text direction.
-
-### Background grid
-
-Add a grid directive at the top of the block (stripped before render):
-
-```tikz
-% grid=1
-\begin{tikzpicture}
-...
-\end{tikzpicture}
-```
-
-The number is the step in cm.
-
-### RTL labels
-
-Use `\he{...}` and `\ar{...}` for RTL text in labels. LuaLaTeX shapes the text properly; TikZJax substitutes a basic fallback.
-
-```tikz
-\begin{tikzpicture}
-\Text(0,0,LTR text)
-\Text(0,-1,\he{טקסט})
-\Text(0,-2,\ar{نص})
-\end{tikzpicture}
-```
-
-### Built-in helpers
-
-Short macros for quick diagrams: `\Circle`, `\Arrow`, `\Rect`, `\TextRTL`, `\ResistorRow`, logic gates (`\ANDgate`, `\NOTgate`, …), wires, and basic circuit symbols. Autocomplete inside `tikz` blocks suggests TikZ commands, snippets, node anchors, and relative coordinates.
-
-### Live preview and coordinate picking
-
-Command palette → **Toggle inline live preview**. A floating preview updates while the cursor is inside a `tikz` block. The preview now works on mobile and tablets too (rendered through TikZJax); coordinate picking and hover-to-locate remain desktop features, and on any platform the preview's **Edit** button opens the visual editor described below.
-
-Click the preview to insert TikZ coordinates at the cursor. **Shift+click** constrains the pick to a horizontal or vertical line from the last numeric coordinate already in your source — useful when tracing rectangle edges.
-
-To close an orthogonal shape (rectangle, L-shape, …) without nudging the last corner by hand, type **`ccycle`** instead of `cycle`. LuaTikZ snaps the last point to the 90° closing corner and rewrites it to `cycle`:
-
-```tikz
-\draw (0.54,-3.09)--(7.00,-3.09)--(7.00,-0.96)--(2.04,-0.96)--ccycle ;
-```
-
-becomes `(0.54,-0.96)--cycle` on the last segment.
-
-Move the pointer over a shape in the preview and the statement that drew it is highlighted in the editor. The mapping is derived from the explicit coordinates in your source (`--` chains, `rectangle`/`grid`, `circle`/`ellipse`, node anchors, `++` relative steps, picture-level `scale`); statements built from anything it cannot read — named nodes, polar coordinates, `foreach` bodies — are simply never highlighted rather than guessed at.
-
-While you edit, the preview keeps the last good diagram visible so a half-finished `\draw` line does not blank the surface.
-
-### Visual editor (Edit mode)
-
-The floating preview has two modes: **Preview** (everything described above) and **Edit**. Press the **Edit** button in the corner of the floating preview and the same component expands to fill the pane as a full visual TikZ editor. Press **Done** and it collapses back to the compact preview. No new fence, no separate drawing file, no import/export step — the TikZ source inside your existing ```` ```tikz ```` / ```` ```luatikz ```` fence remains the only source of truth, and every visual change is written straight into it as a normal, undoable edit.
-
-The intended workflow while writing lecture notes:
-
-1. Write Markdown; put the cursor inside a `tikz` fence — the floating preview appears.
-2. Press **Edit** — the preview expands into the editor with your diagram loaded.
-3. Draw or adjust visually — the fence source updates after each completed operation.
-4. Press **Done** — back to the compact preview, keep typing.
-
-**Tools** — Select, Pan, Line, Arrow, Path (polyline), Bézier, Freehand, Paint fill, Text node, Math node, and Function plot, plus one **Shapes** menu button that expands into Rectangle, Rounded rectangle, Triangle, Circle, Ellipse, Arc, Diamond, Polygon, Star, and Grid, and one **Circuit** menu button with electric components — plus Delete, Duplicate, Undo, Redo. Everything generates plain native TikZ: `\draw (0,0) -- (3,2);`, `\draw[->] …`, `rectangle`, `circle[radius=1cm]`, `ellipse[x radius=…]`, `arc[start angle=…]`, `.. controls … ..` curves, `\node at (x,y) {$\alpha$};`, and closed `-- cycle` paths for triangles/polygons/stars/diamonds.
-
-**Circuit components** — the **Circuit** toolbar button opens a menu of circuitikz elements: Resistor (zigzag and rectangular-box variants), Capacitor, Inductor, Voltage source (± circle and single-cell variants), Current source, Battery, Diode, LED, Switch, Lamp, Ammeter, Voltmeter, a junction Dot, and Ground. Pick one and a translucent preview follows your cursor; a single click drops it there — bipoles as a native circuitikz statement (`\draw (0,0) to[R] (2,0);`, a 2 cm span centered on the click, endpoints draggable afterwards), Ground as `\node[ground] at (…) {};`. Sources use the american symbols — the voltage source shows **+ −** (kept upright via an auto-inserted, version-safe `\ctikzset` line), the current source an arrow. Components stay first-class editable objects: select them, drag their endpoints, restyle them. The canvas marks each component with a schematic placeholder (box or circle) on the wire; the compiled preview shows the real circuitikz symbol on both engines (circuitikz loads automatically on the mobile/TikZJax path). More generally, any `to[...]` segment — including hand-written `to[bend left]` — is now visually editable: the options are preserved verbatim and only the coordinates you drag are rewritten.
-
-**Objects panel** — the **Objects** toolbar button opens a list of every statement in the diagram. Tap a row to select it on the canvas, untick its checkbox to hide it (the statement is commented out with a `%~` marker — it stays in your source and in git, but neither compiles nor renders until you tick it back), or delete it outright. Touch-sized rows on mobile.
-
-**Stacked objects** — when several objects sit on top of each other, tapping the same spot again selects the next object underneath, cycling through everything under the pointer; the status bar tells you which of how many is selected.
-
-**Colors & shades** — Stroke and Fill offer the named xcolor swatches plus a free color picker, and each palette has a **Shade** slider that mixes the picked color toward white or black (`red!60`, `red!60!black`) for quick lighter/darker variants. The Stroke palette also has a **None** well (red slash) that removes the outline entirely (`draw=none`) — distinct from the default well, which restores TikZ's black. Picked colors are written as readable xcolor mixes (`cyan`, `cyan!75`, `black!73!cyan`) — never opaque inline RGB — chosen by a nearest-mix search, so they compile identically under LuaLaTeX and TikZJax and stay editable by hand.
-
-**Gradients & patterns** — the **Fill style** select switches the fill between Solid, vertical/horizontal/radial gradients, a ball shade, and fill patterns: the TikZ `patterns` library (lines, grid, crosshatch, dots, stars, bricks, checkerboard, …) plus the editor's own **diagonal stripes** (bold 45° stripes, black by default) and **wide north east/west lines** (the library's diagonals with more breathing room between lines). Gradients are written as native shading options (`top color=`/`bottom color=`, `left color=`/`right color=`, `inner color=`/`outer color=`, `ball color=`, plus `shading angle=`); patterns as `pattern=` with an optional `pattern color=`. `\usetikzlibrary{patterns}` — and, for the editor's own patterns, a `\pgfdeclarepatternformonly` declaration — is added to the fence automatically the first time it is needed. A pattern can sit on top of a solid fill color as its background. The canvas previews all of it with approximate SVG gradients and tiles; the compiled card shows the real thing.
-
-**Arrow tips** — next to the arrow direction (none / end / start / both) the **Arrow tip** select picks the tip shape: the default TikZ arrow, or Stealth, Latex, Triangle, Circle, Square, Diamond, Bar, and Hooks from `arrows.meta`, written as `-{Stealth}`-style specs. Direction and tip combine freely — changing one keeps the other — and existing legacy specs like `-latex` are recognized and upgraded on edit.
-
-**Paint fill** — the bucket tool. Pick a fill color (or gradient/pattern) with nothing selected, choose **Paint fill**, and click inside any visually closed region. If the click lands inside a single closed shape, that shape simply gets the fill options. But the region does not have to be one shape: a circle split by a line, overlapping shapes, or a closed freehand outline all work — the editor flood-fills the region on a raster of the actual scene, traces the outline (holes included, via `even odd rule`), and writes a `\fill`/`\path` statement with the traced `-- cycle` path, inserted *before* the strokes that bound it so they stay on top. Clicking in an area that leaks to open canvas tells you the region is not enclosed instead of guessing.
-
-**Rotation** — with the Select tool, a round grip floats above the selection box; drag it to rotate the selection about its center (hold Shift for 15° steps). Rotation rewrites the coordinates themselves — nodes move their anchor, paths rotate every point and control point, arcs shift their angles, and a `rectangle` statement is rewritten as the equivalent closed polyline (keeping its options) since an axis-aligned rectangle cannot express its own rotation. Grids and source-only statements are skipped.
-
-**Function plot** — pick the plot tool and click the canvas: type a function of one variable (`sin(x)`, `x^2 - 1`, `e^-x`, `2x sin(x)` — radians) and a from/to range. LaTeX-style input works too — `0.02\cos(200t)`, `\frac{x}{2}`, `\sqrt{x}`, `2\pi x` — and the variable doesn't have to be `x`: with a single free letter (`t`, `y`, …) that letter is plotted. An expression with two free variables (like `\cos(200t - x)`) is a surface, not a curve; the dialog says which variables it found so you can fix one to a number. The committed source is a native TikZ plot — `\draw[domain=-2:2, samples=120, smooth] plot (\x, {sin(deg(\x))});` — evaluated at full resolution by the compiler, with your radian-style input translated to pgfmath's degree world. Such plot statements are first-class editable objects: the canvas evaluates the expression itself for the wireframe, and dragging writes a `shift={(x,y)}` option while the expression and domain stay exactly as written. Poles and undefined regions (`1/x`, `sqrt(x)`) split the plot into separate statements with sub-domains. Hand-written `plot (\x, {…})` statements with `domain=`/`samples=` options get the same treatment. The expression is parsed by the plugin's own tiny math parser — user input never reaches `eval`.
-
-**Hebrew text** — typing Hebrew into the Text tool (or the Style panel's node-text field) wraps each Hebrew run in `\he{…}` automatically, so RTL labels render correctly without knowing the macro; text that already contains `\he{` is left exactly as you wrote it.
-
-**Shape snap** — draw with Freehand and *hold the pen still* at the end of the stroke (~0.6 s): the stroke is matched against line / triangle / rectangle / polygon / circle / ellipse and, on a hit, previews the clean shape — release to keep it, or keep moving to continue the freehand stroke as drawn.
-
-**Freehand** strokes are not raw pointer dumps: samples are thinned, smoothed, simplified (adjustable smoothing in the Style panel), and fitted to a readable multi-segment Bézier path that stays fully editable afterwards — you can select it, move it, or drag its control points like any other curve.
-
-**Mouse and trackpad** — primary drag draws with the active tool; middle-button drag (or the Pan tool) pans; the wheel and trackpad zoom around the pointer; Shift constrains lines to an axis; right-click is untouched. Keyboard: `V/H/L/A/P/B/F/K/R/C/E/T` switch tools (`K` is Paint fill), `Delete` deletes, `Esc` cancels, `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` undo/redo, `Ctrl/Cmd+D` duplicates, `Ctrl/Cmd+C`/`V` copy/paste, arrows nudge the selection.
-
-**Touch** — by default one finger pans and two fingers pan/pinch-zoom; nothing is drawn by accident. Turn on **Finger draw** in the status bar and one finger draws with the active tool while two fingers still pan and zoom (a second finger safely cancels an unfinished stroke). Touch targets and selection handles are sized for fingers.
-
-**Stylus / Apple Pencil** — a pen always draws with the active tool, regardless of the Finger draw setting, and drawing never scrolls the note. Pen input takes priority over touch: while the pen is down (and briefly after it lifts) stray finger/palm contacts are ignored — practical palm rejection, not an OS-level guarantee.
-
-**Two-way source sync** — toggle the **Source** panel to see the fence's TikZ next to the canvas. Visual edits update the source; typing in the panel updates the scene (and the fence). Edits are minimal: only the coordinates, lengths, or option tokens you changed are rewritten — comments, indentation, custom styles, and statement order are preserved byte-for-byte. Each completed operation is one undo step in Obsidian's normal history.
-
-**Supported for visual editing** — `\draw`/`\fill`/`\filldraw`/`\path` statements whose coordinates are explicit numeric pairs (absolute, `+`, or `++`), with `--`, `-|`, `|-`, `to`/`to[...]` (circuitikz bipoles and bends, options preserved verbatim, geometry approximated as a straight segment), `rectangle`, `grid`, `circle`, `ellipse`, `arc`, `.. controls ..`, `cycle`, and inline `node {…}` labels (carried along verbatim); `\node … at (x,y) {…};` and `\coordinate`; multiple `tikzpicture` environments per fence; picture-level `scale`/`xscale`/`yscale`; empty pictures (you get a stable 12 cm × 8 cm workspace to start drawing in — it never appears in your source).
-
-**Preserved but source-only** — anything the editor cannot safely round-trip stays exactly as written and still renders through the normal LuaTikZ pipeline: `\foreach`, `edge`/`plot` (other than the supported forms), named or polar coordinates, calc expressions, `scope` environments, pictures with coordinate-system overrides (`cm=`, `x=`/`y=`/`z=`, `transform …`), nested environments (`axis`, …), and any other command. Picture-level `scale`/`xscale`/`yscale`/`rotate`/`shift`/`xshift`/`yshift`/`xslant`/`yslant` are fully supported: their statements stay editable, and dragging maps through the transform. These appear on the canvas as dashed ghosts where their geometry can be estimated; tapping one tells you why it is source-only. You can select and delete such a statement like any other object; the editor just never rewrites or simplifies code it does not understand.
-
-**Rendering** — the canvas reacts instantly using its own lightweight SVG scene; nothing is compiled while you drag. After each committed change the existing LuaTikZ pipeline recompiles in the background (debounced) and the authoritative compiled output appears in a small card over the canvas — LuaLaTeX on desktop, TikZJax on mobile, exactly as in Preview mode, with the same cache. If a compile fails you keep the editable scene and the last good output, and the error is shown with the usual line highlight in the Markdown editor.
-
-**Style panel** — stroke and fill color with shade sliders, fill style (solid / gradients / ball / pattern), line width, solid/dashed/dotted, arrow direction and tip shape, opacity, rounded corners, node text, polygon sides, and freehand smoothing. With a selection it edits the selected objects (existing custom styles like `[my style]` are left intact); with nothing selected it sets the defaults for new objects. **Grid & snapping** — toggle the grid and snapping in the status bar and pick the interval (0.1–2 cm). Snapping works in TikZ coordinates, so snapped points land on exact values like `(1.5, 0.5)`; endpoints and centers of existing objects snap too. The grid is editor-only chrome — it is never written into your source (use the Grid *tool* if you want a real `\draw … grid …;`).
-
-**Mobile** — Edit mode goes near-full-screen with a scrollable toolbar, drawer panels, and safe-area padding; the canvas is a fully interactive SVG. Preview mode's coordinate picking is desktop-only as before, and it never fires while Edit mode is open.
-
-### Editor
-
-Inside `tikz` / `luatikz` blocks (and standalone `\begin{tikzpicture}` environments):
-
-- Line numbers on every line, including blanks
-- Active-line and matching `\begin`/`\end` pair highlights
-- Structural lint: unmatched environments/braces, missing libraries, rewritten `\usetikzlibrary` names, empty option keys
-- New fences can auto-insert a blank `tikzpicture` skeleton
-- Semicolon reminder on unfinished `\draw` lines (hint or auto-append)
-- Auto-close `{`, `[`, `(`, `$`
-
-**Command palette**
-
-| Command | What it does |
-|---------|----------------|
-| Open helper reference | Searchable cheat sheet; click to insert |
-| Insert TikZ template… | Blank picture, flowchart, axis, logic circuit |
-| Format TikZ block | Tidy indentation inside the fence |
-| Wrap selection in `\node{}` / `$...$` | |
-| Insert plot from function… | PGFPlots wizard |
-| What can I use here? | Pick a snippet category |
-
-### Export
-
-Hover a rendered block and click **Export** to save the diagram as SVG. The arrow next to it opens a menu to choose **SVG** or **PNG**; PNG is rasterized from the vector output at 2× so it stays crisp.
-
-## Errors and editing
-
-When a diagram fails:
-
-- A short error card appears in reading view (e.g. `Missing semicolon (;) (line 3)`).
-- **Go to line** jumps to the block-relative line in the source editor.
-- The error line is highlighted in the editor; a **Fix** popup appears when LuaTikZ can suggest a repair (missing `;`, braces, typos, empty `align=`, etc.).
-- Errors whose LaTeX message says nothing about the cause carry a short explanation instead. `Dimension too large` on a curved `to`, for example, explains that pgf overflows TeX's arithmetic once the endpoints are more than ~1024pt (~36cm) apart, and that `x=0.5cm` or explicit control points fix it while `scale=` does not.
-- **Show log** expands the full compiler output.
-
-Line numbers in error messages are relative to your TikZ block, not the generated LaTeX wrapper.
-
-Pre-render checks catch empty option values (`align=`, `opacity=`, `minimum width=`, …) before calling LaTeX.
-
-## Settings
-
-| Setting | Purpose |
-|---------|---------|
-| Renderer | LuaLaTeX or TikZJax (desktop); mobile always uses TikZJax |
-| Allow local LuaLaTeX execution | Opt-in shell rendering |
-| Main / Hebrew / Arabic font | Override the font fallback chains; blank uses the defaults |
-| Extra preamble | Custom LaTeX/TikZ appended to the preamble (split for LuaLaTeX vs TikZJax) |
-| Custom preamble | Replace the generated LuaLaTeX preamble entirely |
-| Enable cache | Reuse recent render results on disk |
-| Dark mode style | Auto-invert, brightness boost, or none |
-| Starter block on new fence | Insert blank `tikzpicture` when opening a new block |
-| Structural lint | Warnings for env/brace/library issues in the editor |
-| Semicolon reminder | Off, hint, or auto-append on Enter |
-| Auto-close brackets | Close `{`, `[`, `(`, `$` while typing |
-| Show install notice | One-time environment check on first load |
-
-## Renderers
-
-**LuaLaTeX** runs your full TeX toolchain: extra packages, pgfplots, circuitikz, math mode, and RTL via polyglossia. The default preamble loads common TikZ libraries.
-
-### Fonts and RTL
-
-Fonts resolve through fallback chains guarded by `\IfFontExistsTF`, so a name that is not installed is skipped rather than aborting the compile:
-
-| | Chain |
-|---|---|
-| Main | TeX Gyre Termes (metrically Times, ships with TeX Live/MiKTeX) |
-| Hebrew | Noto Serif Hebrew → David CLM → Frank Ruehl CLM |
-| Arabic | Noto Sans Arabic → Geeza Pro → Amiri |
-
-Set your own name in **Settings → Fonts** to put it at the front of a chain. If a whole chain misses, nothing is declared for that script and the diagram still renders.
-
-`polyglossia` and the Hebrew/Arabic font families load **only when the diagram uses them** — `\he{}`, `\ar{}`, `\texthebrew{}`, `\textarabic{}`, or Hebrew/Arabic characters — and per script, so a Hebrew diagram never pulls in the Arabic gloss. `\he` and `\ar` are always defined, falling back to plain text when the script is not loaded.
-
-### Custom preamble
-
-**Settings → Preamble → Custom preamble** replaces the generated preamble outright. **Load current preamble** materializes the managed one for editing; **Reset to default** returns to managed.
-
-In custom mode fonts, polyglossia and `\he`/`\ar` are yours to define. The plugin still appends the coordinate-pick calibration block and `\begin{document}`, injects `\documentclass` and `\usepackage{tikz}` if your text omits them, and neutralizes a stray `\begin{document}`. Note that a custom preamble does not receive preamble improvements from later releases — leave it empty unless you need the control.
-
-`\usepackage` and `\usetikzlibrary` lines you write inside a block are hoisted into that preamble. Since TikZ aborts the whole compile on a name it does not recognise, two cases are rewritten first: package names (`\usetikzlibrary{pgfplots}`, `{circuitikz}`, …) are dropped because the preamble already loads them, and PGFPlots-only libraries (`groupplots`, `polar`, `statistics`, …) are moved to `\usepgfplotslibrary`. The editor flags both so the rewrite is never a surprise.
-
-**TikZJax** renders in-process with no shell. Good for standard TikZ and simple plots. Advanced pgfplots (e.g. interpolated 3D surfaces) and real RTL shaping need LuaLaTeX.
-
-## Security and permissions
-
-This plugin needs elevated capabilities for its core feature (compiling TikZ with a local TeX installation). What it does with them:
-
-- **Shell execution** (`child_process`, desktop only): runs exactly two programs — the LuaLaTeX binary you configure in settings and `pdftocairo` — always via `spawn` with `shell: false`, so arguments are never interpreted by a shell. Local execution is opt-in via the *Allow local LuaLaTeX execution* setting and never happens on mobile.
-- **Direct filesystem access** (`fs`, desktop only): used as a fallback to read compile artifacts (PDF/SVG/log files) that LuaLaTeX writes into the plugin's own temp folder inside your vault (`.obsidian/plugins/<id>/.luatikz-temp`), because the vault adapter may not have indexed them yet. The plugin does not read or write files elsewhere on your system. If you use Obsidian Sync, consider excluding `.luatikz-temp` and `.luatikz-cache` (Settings → Sync → Excluded files) — they are per-machine scratch/cache data and safe to regenerate.
-- **Clipboard access**: write-only, and only when you click a snippet in the helper cheatsheet to copy it. The plugin never reads your clipboard.
-- **Dynamic code execution**: the plugin's own source contains no `eval`/`new Function`. The flagged occurrences live inside the bundled [jsdom](https://github.com/jsdom/jsdom) dependency of [node-tikzjax](https://github.com/prinsss/node-tikzjax), which powers the shell-free TikZJax renderer (required for mobile). They are part of jsdom's standard DOM implementation, not code paths this plugin invokes on your notes.
+If you are interested in learning to code with TikZ, I suggest this website: [Tikz.org](https://tikz.org)
+
+# Features
+
+- **Background grid:** Add an optional centimeter-based grid behind rendered diagrams. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/basic-diagram-features.md#background-grid)
+- **RTL labels:** Use Hebrew and Arabic labels with LuaLaTeX shaping and a TikZJax fallback. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/basic-diagram-features.md#rtl-labels)
+- **Built-in helpers:** Use diagram macros, autocomplete, snippets, node anchors, and relative-coordinate suggestions. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/basic-diagram-features.md#built-in-helpers)
+- **Live preview and coordinate picking:** Preview diagrams while editing, pick coordinates on desktop, and locate source statements from rendered shapes. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/live-preview.md)
+- **Visual editor (Edit mode):** Draw and edit native TikZ visually with shapes, circuits, styling, freehand input, touch and stylus support, and two-way source sync. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/visual-editor.md)
+- **Editor assistance and export:** Get line-aware editing, linting, templates, formatting, auto-close helpers, and SVG or PNG export. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/editor-and-export.md)
+- **Errors and editing:** LuaTikZ maps compile failures back to the diagram, highlights affected lines, and offers plain-language explanations and suggested fixes when possible. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/errors-and-editing.md)
+- **Settings:** Choose renderers, fonts, preambles, caching, dark-mode behavior, editor assistance, and environment checks. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/settings.md)
+- **Renderers:** Use local LuaLaTeX for the full TeX toolchain or bundled TikZJax for shell-free and mobile rendering. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/renderers.md)
+- **Security and permissions:** Local rendering is opt-in and narrowly scoped; the detailed guide explains shell execution, temporary files, clipboard access, and bundled dependencies. [Details](
+- **Hover-to-locate** — moving the pointer over a shape in the floating preview highlights the statement that drew it. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/live-preview.md)
+- **PNG export** — the toolbar button is now **Export** with a format menu for SVG or PNG. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/editor-and-export.md#export)
+- **Explained errors** — opaque LaTeX failures such as `Dimension too large` now come with a plain-language explanation of the cause and the fixes that work. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/errors-and-editing.md)
+- **Font settings** — override the main, Hebrew and Arabic fonts. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/renderers.md#fonts-and-rtl)
+- **Custom preamble** — replace the generated LuaLaTeX preamble entirely, with buttons to load the current one or reset. [Details](https://github.com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/renderers.md#custom-preamble)
+- **Hebrew/Arabic load only when used** — and per script, so a Hebrew diagram no longer pulls in the Arabic gloss that minimal TeX installs lack. [Details](com/SharbelMarshi/obsidian-LuaTikz-plugin/blob/main/docs/features/security-and-permissions.md)
 
 ## Samples
 
 Diagrams rendered with LuaTikZ, exported as SVG. Files in [`samples/`](samples/).
 
-### Anatomy and science
+### Astronomy
 
-| | |
-|---|---|
-| ![Heart anatomy](samples/heartanatomy.svg) | ![Eye anatomy](samples/eyeanatomy.svg) |
+![Astronomy](samples/astronomy1.svg)
+
+### Anatomy
+
+|                                              |                                          |
+| -------------------------------------------- | ---------------------------------------- |
+| ![Heart anatomy](samples/heartanatomy.svg)   | ![Eye anatomy](samples/eyeanatomy.svg)   |
 | ![Neural anatomy](samples/neuralanatomy.svg) | ![Airflow path](samples/airflowpath.svg) |
 
 ### Circuits and logic
