@@ -1804,15 +1804,8 @@ export class VisualTikzEditor {
 		const group = renderGhostGroup(context, '__draft__', geometry.primitives);
 		group.classList.remove('luatikz-ve-ghost');
 		group.classList.add('luatikz-ve-draft-shape');
-		if (primitive.kind === 'nodeMark') {
-			// Ghost groups render with fill:none; the ± / meter letters of a
-			// circuit preview need their text filled to be visible.
-			const text = group.querySelector('text');
-			if (text) {
-				text.style.fill = 'var(--interactive-accent)';
-				text.setAttribute('stroke', 'none');
-			}
-		}
+		// The ± / meter letters of a circuit preview (nodeMark text) are
+		// filled via the .luatikz-ve-draft-shape stylesheet rule.
 		return group;
 	}
 

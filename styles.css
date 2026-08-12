@@ -1400,6 +1400,13 @@ button.luatikz-ve-minicolor-clear {
   opacity: 0.9;
 }
 
+/* Draft groups render stroke-only; the ± / meter letters of a circuit
+   preview (nodeMark text) need their glyphs filled to be visible. */
+.luatikz-ve-draft-shape text {
+  fill: var(--interactive-accent);
+  stroke: none;
+}
+
 /* Circuit tool: translucent follow-the-cursor glyph before the drop. */
 .luatikz-ve-draft.luatikz-ve-circuit-preview {
   opacity: 0.45;
