@@ -11,18 +11,26 @@ export interface TikzHoverRange {
 
 export const setTikzHoverHighlight = StateEffect.define<TikzHoverRange | null>();
 
-/** Live hover range; cleared on every edit so a stale range can never linger. */
-const tikzHoverRangeField = StateField.define<TikzHoverRange | null>({
-	create: () => null,
-	update(range, tr) {
-		for (const effect of tr.effects) {
-			if (effect.is(setTikzHoverHighlight)) {
-				return effect.value;
-			}
-		}
-		return tr.docChanged ? null : range;
-	},
-});
+/**
+ * Hover range plus its decorations, in a *single* field.
+ *
+ * These used to be two fields, with the decorations field reading the range
+ * field through `tr.startState.field(...)`. That is unsafe: when the plugin
+ * is installed into an already-open editor, the transaction that adds the
+ * extensions has a `startState` that predates them, so the lookup threw
+ * "RangeError: Field is not present in this state" — during `onload`, which
+ * Obsidian reports as the whole plugin failing to load. (The same read in
+ * `create` carried the sibling hazard of depending on field ordering.)
+ *
+ * One field cannot race its own installation: `update` only ever touches its
+ * previous value and the transaction, never another field or `startState`.
+ */
+interface TikzHoverState {
+	range: TikzHoverRange | null;
+	decorations: DecorationSet;
+}
+
+const EMPTY_HOVER_STATE: TikzHoverState = { range: null, decorations: Decoration.none };
 
 function buildHoverDecorations(range: TikzHoverRange | null, doc: Text): DecorationSet {
 	if (!range) {
@@ -44,21 +52,34 @@ function buildHoverDecorations(range: TikzHoverRange | null, doc: Text): Decorat
 	return builder.finish();
 }
 
-const tikzHoverDecorationsField = StateField.define<DecorationSet>({
-	create: state => buildHoverDecorations(state.field(tikzHoverRangeField), state.doc),
-	update(decorations, tr) {
-		const range = tr.state.field(tikzHoverRangeField);
-		if (range === tr.startState.field(tikzHoverRangeField) && !tr.docChanged) {
-			return decorations;
+const tikzHoverField = StateField.define<TikzHoverState>({
+	create: () => EMPTY_HOVER_STATE,
+	update(value, tr) {
+		// An explicit effect wins even on an edit; otherwise an edit clears a
+		// stale range so it can never linger over shifted text.
+		let range = value.range;
+		let fromEffect = false;
+		for (const effect of tr.effects) {
+			if (effect.is(setTikzHoverHighlight)) {
+				range = effect.value;
+				fromEffect = true;
+				break;
+			}
 		}
-		return buildHoverDecorations(range, tr.state.doc);
+		if (!fromEffect && tr.docChanged) {
+			range = null;
+		}
+		if (range === value.range && !tr.docChanged) {
+			return value;
+		}
+		return { range, decorations: buildHoverDecorations(range, tr.state.doc) };
 	},
-	provide: field => EditorView.decorations.from(field),
+	provide: field => EditorView.decorations.from(field, value => value.decorations),
 });
 
 function hasHoverExtension(view: EditorView): boolean {
 	try {
-		view.state.field(tikzHoverRangeField);
+		view.state.field(tikzHoverField);
 		return true;
 	} catch {
 		return false;
@@ -79,7 +100,7 @@ function sameRange(a: TikzHoverRange | null, b: TikzHoverRange | null): boolean 
 /** Highlight `range`, or clear the highlight when it is null. Redundant calls are dropped. */
 export function showTikzHoverHighlight(editor: Editor, range: TikzHoverRange | null): void {
 	const view = getEditorView(editor);
-	if (!view || sameRange(view.state.field(tikzHoverRangeField), range)) {
+	if (!view || sameRange(view.state.field(tikzHoverField).range, range)) {
 		return;
 	}
 	view.dispatch({ effects: [setTikzHoverHighlight.of(range)] });
@@ -93,5 +114,5 @@ export function clearTikzHoverHighlight(editor: Editor): void {
 // theme class, which sits on the same element as .cm-editor, so the usual
 // ".cm-editor .cm-line" form never matches.
 export function tikzHoverHighlightExtension(): Extension[] {
-	return [tikzHoverRangeField, tikzHoverDecorationsField];
+	return [tikzHoverField];
 }
