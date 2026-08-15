@@ -4,7 +4,7 @@ import {
 	CompletionContext,
 	snippetCompletion,
 } from '@codemirror/autocomplete';
-import { Extension } from '@codemirror/state';
+import { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
 	allSnippetCompletions,
@@ -237,12 +237,34 @@ function latexCompletionSource(context: CompletionContext) {
 	return null;
 }
 
+/**
+ * TikZ completions, registered as *language data* rather than through
+ * `autocompletion({override})`.
+ *
+ * `override` is doubly wrong here. Semantically it does not add a source, it
+ * replaces every source in the editor — for all files, not just TikZ fences —
+ * so it silently suppressed other plugins' completions. Mechanically it is a
+ * config field with no merge rule in CodeMirror's `combineConfig`, and its
+ * value is a fresh array, so a second plugin that also passes `override`
+ * makes facet resolution throw "Config merge conflict for field override".
+ * That throw happens inside `registerEditorExtension` during `onload`, which
+ * Obsidian reports as the whole plugin failing to load.
+ *
+ * Language-data providers are additive: CodeMirror falls back to
+ * `state.languageDataAt("autocomplete", pos)` when no override is present,
+ * and any number of providers coexist. `latexCompletionSource` already
+ * returns null outside a LaTeX/TikZ fence, so registering it document-wide
+ * costs nothing elsewhere.
+ *
+ * `autocompletion()` is called with no config on purpose: every field
+ * (`maxRenderedOptions`, `activateOnTyping`, …) is a potential merge conflict
+ * with another plugin's call, and the defaults are what this plugin wants.
+ */
 export function latexAutocompleteExtension(): Extension {
-	return autocompletion({
-		override: [latexCompletionSource],
-		activateOnTyping: true,
-		maxRenderedOptions: 40,
-	});
+	return [
+		EditorState.languageData.of(() => [{ autocomplete: latexCompletionSource }]),
+		autocompletion(),
+	];
 }
 
 export function getCategoryCompletions(category: TikzSnippetCategory): Completion[] {
